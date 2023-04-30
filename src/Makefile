@@ -10,7 +10,7 @@ morphoview: $(obj)
  
 .PHONY: clean
 clean:
-	rm -f $(obj) morphoview
+	rm -f $(obj) morphoview6
 
 .PHONY: install
 install: morphoview
