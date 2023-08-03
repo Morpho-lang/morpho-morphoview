@@ -1,7 +1,0 @@
-{
-    "files.associations": {
-        "memory.h": "c",
-        "common.h": "c",
-        "sparse.h": "c"
-    }
-}
