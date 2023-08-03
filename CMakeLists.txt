@@ -55,6 +55,11 @@ target_include_directories(morphoview PRIVATE ${FREETYPE_INCLUDE_DIRS})
 # Locate glfw3
 find_package(glfw3 3.3 REQUIRED)
 
+# Link with math library [needed on linux]
+IF (NOT WIN32)
+  target_link_libraries(morphoview m)
+ENDIF()
+
 target_link_libraries(morphoview ${MORPHO_LIBRARY} ${FREETYPE_LIBRARIES} glfw ${CBLAS_LIBRARY} ${LAPACK_LIBRARY})
 
 # Install the resulting binary
