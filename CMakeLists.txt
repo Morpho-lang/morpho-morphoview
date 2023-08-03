@@ -48,9 +48,11 @@ find_library(LAPACK_LIBRARY
     NAMES lapack lapacke 
 )
 
+# Locate freetype
 find_package(Freetype REQUIRED)
 target_include_directories(morphoview PRIVATE ${FREETYPE_INCLUDE_DIRS})
 
+# Locate glfw3
 find_package(glfw3 3.3 REQUIRED)
 
 target_link_libraries(morphoview ${MORPHO_LIBRARY} ${FREETYPE_LIBRARIES} glfw ${CBLAS_LIBRARY} ${LAPACK_LIBRARY})
