@@ -43,9 +43,9 @@ find_library(CBLAS_LIBRARY
     NAMES cblas libcblas blas libblas
 )
 
-# Locate lapack
+# Locate a lapack version
 find_library(LAPACK_LIBRARY
-    NAMES lapack lapacke 
+    NAMES lapacke liblapacke lapack liblapack 
 )
 
 # Locate freetype
