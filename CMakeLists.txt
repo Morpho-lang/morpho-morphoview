@@ -48,6 +48,11 @@ find_library(LAPACK_LIBRARY
     NAMES lapacke liblapacke lapack liblapack 
 )
 
+# Locate czmq
+find_library(CZMQ_LIBRARY
+    NAMES czmq libczmq
+)
+
 # Locate freetype
 find_package(Freetype REQUIRED)
 target_include_directories(morphoview PRIVATE ${FREETYPE_INCLUDE_DIRS})
@@ -60,7 +65,7 @@ IF (NOT WIN32)
   target_link_libraries(morphoview m)
 ENDIF()
 
-target_link_libraries(morphoview ${MORPHO_LIBRARY} ${FREETYPE_LIBRARIES} glfw ${CBLAS_LIBRARY} ${LAPACK_LIBRARY})
+target_link_libraries(morphoview ${MORPHO_LIBRARY} ${FREETYPE_LIBRARIES} glfw ${CBLAS_LIBRARY} ${LAPACK_LIBRARY} ${CZMQ_LIBRARY})
 
 # Install the resulting binary
 install(TARGETS morphoview)

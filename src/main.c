@@ -3,6 +3,7 @@
  *
  *  @brief Main entry point for morpho viewer application
  */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 #include "command.h"
 #include "display.h"
 #include "text.h"
+#include "listener.h"
 
 int main(int argc, const char * argv[]) {
     scene_initialize();
@@ -24,6 +26,9 @@ int main(int argc, const char * argv[]) {
         const char *option = argv[i];
         if (argv[i] && option[0]=='-') {
             switch (option[1]) {
+                case 'b': /* Bind to target */
+                    listener(option+2);
+                    break;
                 case 't': /* Temporary file; delete after */
                     temp=true;
                     break;

@@ -1,0 +1,17 @@
+
+import zeromq 
+
+var f=File("demo/polyhedra", "r")
+var str =f.readall()
+f.close()
+
+print "Starting req/rep client..."
+
+var req = ZMQRequest("tcp://127.0.0.1:5555") 
+print req 
+
+req.send(str)
+var a = req.receive() 
+print "Client received: ${a}"
+
+print "Ending req/rep client..."
