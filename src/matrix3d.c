@@ -10,12 +10,15 @@
 
 /** Use Apple's Accelerate library for LAPACK and BLAS */
 #ifdef __APPLE__
+#define ACCELERATE_NEW_LAPACK
 #include <Accelerate/Accelerate.h>
 #else
 #include <cblas.h>
 #include <lapacke.h>
 #define USE_LAPACKE
 #endif
+
+
 
 #define EPS 1e-16
 

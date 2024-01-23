@@ -17,7 +17,7 @@ You need to compile the extension, which you can do by navigating to the reposit
 
     mkdir build
     cd build
-    cmake .. 
+    cmake -DCMAKE_BUILD_TYPE=Release ..
     make install
 
 You may need to use `sudo`. The package can be loaded into morpho using the `import` keyword.
