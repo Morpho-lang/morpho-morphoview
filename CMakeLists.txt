@@ -16,7 +16,10 @@ find_file(MORPHO_HEADER
           HINTS 
           /usr/local/include/
           /usr/local/include/morpho
+          /opt/homebrew/include/
           /opt/homebrew/include/morpho
+          /home/linuxbrew/.linuxbrew/include/
+          /home/linuxbrew/.linuxbrew/include/morpho
           )
 
 # Identify folder that morpho.h is located in from MORPHO_HEADER and store in MORPHO_INCLUDE
