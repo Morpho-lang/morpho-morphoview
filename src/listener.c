@@ -77,7 +77,7 @@ void command_initializelexer(lexer *l, char *src) {
  * ------------------------------------------------------- */
 
 /** Parses a scene command */
-bool command_parsescene(parser *p, void *out) {
+bool xcommand_parsescene(parser *p, void *out) {
     int id, dim;
     /*ERRCHK(command_parseinteger(p, &id));
     ERRCHK(command_parseinteger(p, &dim));
@@ -93,7 +93,7 @@ bool command_parsescene(parser *p, void *out) {
 }
 
 /** Parses a window command */
-bool command_parsewindow(parser *p, void *out) {
+bool xcommand_parsewindow(parser *p, void *out) {
     char *name;
     
     /*if (command_parsestring(p, &name)) {
@@ -111,8 +111,8 @@ bool command_parsewindow(parser *p, void *out) {
 }
 
 parserule mv_parserules[] = {
-    PARSERULE_PREFIX(MVTOKEN_SCENE, command_parsescene),
-    PARSERULE_PREFIX(MVTOKEN_WINDOW, command_parsewindow),
+    PARSERULE_PREFIX(MVTOKEN_SCENE, xcommand_parsescene),
+    PARSERULE_PREFIX(MVTOKEN_WINDOW, xcommand_parsewindow),
     PARSERULE_UNUSED(TOKEN_NONE)
 };
 
