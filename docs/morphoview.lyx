@@ -1539,8 +1539,11 @@ providing a list of three vertices and then specifying that a single facet
 
 \begin_layout Standard
 After objects have been specified, the scene can be drawn.
- Objects are positioned in the scene by using transformation matrices: Morphovie
-w maintains a current object transformation matrix at all times.
+ Objects are positioned in the scene by using transformation matrices: 
+\emph on
+Morphoview
+\emph default
+ maintains a current object transformation matrix at all times.
  Initially, this is set to the identity matrix (so that the object is placed
  in the scene using the coordinates at which it is defined), but the matrix
  can be modified by the 

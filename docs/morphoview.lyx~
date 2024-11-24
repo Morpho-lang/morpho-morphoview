@@ -168,9 +168,8 @@ ns (e.g.
 \emph on
 morpho
 \emph default
- language runtime can communicate with morphoview via temporary files, but
- this will be replaced by a client/server model via ZeroMQ or similar.
- 
+ language runtime can communicate with morphoview via temporary files or
+ ZeroMQ.
 \end_layout
 
 \begin_layout Section
