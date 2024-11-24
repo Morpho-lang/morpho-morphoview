@@ -5,13 +5,29 @@
  */
 
 #include <czmq.h>
+#include "parse.h"
+
+#include "listener.h"
+#include "scene.h"
+#include "display.h"
+
+/* **********************************************************************
+ * Command file data structure
+ * ********************************************************************** */
+
+typedef struct {
+    scene *scene;
+    display *display;
+} commandfile;
+
+void commandfile_init(commandfile *f) {
+    f->scene=NULL;
+    f->display=NULL;
+}
 
 /* **********************************************************************
  * Morphoview lexer
  * ********************************************************************** */
-
-#include "parse.h"
-#include "listener.h"
 
 /** Macro to check outcome of bool function */
 #define ERR_CHECK(f) if (!(f)) return false;
@@ -164,10 +180,13 @@ bool xcommand_lexpreprocess(lexer *l, token *tok, error *err) {
 void xcommand_initializelexer(lexer *l, char *src) {
     lex_init(l, src, 0);
     lex_settokendefns(l, mvtokens);
-    lex_setnumbertype(l, MVTOKEN_INTEGER, MVTOKEN_FLOAT, MVTOKEN_FLOAT);
     lex_setprefn(l, xcommand_lexpreprocess);
     lex_seteof(l, MVTOKEN_EOF);
 }
+
+/* **********************************************************************
+ * Morphoview parser
+ * ********************************************************************** */
 
 /* -------------------------------------------------------
  * Command language fundamental types
@@ -248,6 +267,8 @@ bool xcommand_parsescale(parser *p, void *out) {
 
 /** Parses a scene definition */
 bool xcommand_parsescene(parser *p, void *out) {
+    commandfile *cmd=(commandfile *) out;
+    
     int id, dim;
     if (parse_checktokenadvance(p, MVTOKEN_INTEGER)) {
         ERR_CHECK(xcommand_parseinteger(p, &id));
@@ -258,7 +279,11 @@ bool xcommand_parsescene(parser *p, void *out) {
     } else return false;
     
     printf("Scene id: %i dim: %i\n", id, dim);
-    return true;
+    
+    cmd->scene = scene_new(id, dim);
+    if (cmd->scene) cmd->display=display_open(cmd->scene);
+    
+    return cmd->scene;
 }
 
 /** Parses a translate command */
@@ -341,7 +366,7 @@ bool xcommand_parse(char *in, error *err, void *out) {
     xcommand_initializelexer(&l, in);
 
     parser p;
-    xcommand_initializeparser(&p, &l, err, NULL);
+    xcommand_initializeparser(&p, &l, err, out);
     bool success=parse(&p);
     
     parse_clear(&p);
@@ -365,7 +390,7 @@ void listener_init(void) {
 
 zsock_t *sock;
 
-void listener(const char *endpoint) {
+bool listener(const char *endpoint) {
     sock=zsock_new_rep(endpoint);
     
     char *str=zstr_recv(sock);
@@ -378,9 +403,16 @@ void listener(const char *endpoint) {
     error err;
     error_init(&err);
     
+    commandfile cmd;
+    commandfile_init(&cmd);
+    
     listener_init();
-    xcommand_parse(str, &err, NULL);
+    xcommand_parse(str, &err, &cmd);
+    
     if (morpho_checkerror(&err)) {
         printf("Error [%s]: %s\n", err.id, err.msg);
+        return false;
     }
+    
+    return true;
 }

@@ -4,7 +4,7 @@
  *  @brief Interface with external programs using CZMQ
  */
 
-void listener(const char *endpoint);
+bool listener(const char *endpoint);
 
 #define LISTENER_UNRCGNZDCMMD         "UnrcgnzdCmmd"
 #define LISTENER_UNRCGNZDCMMD_MSG     "Unrecognized command"

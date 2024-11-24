@@ -23,6 +23,7 @@ int main(int argc, const char * argv[]) {
     text_initialize();
     bool temp = false;
     bool parsed = false;
+    bool bound = false;
     
     // Process arguments
     const char *file=NULL;
@@ -31,7 +32,7 @@ int main(int argc, const char * argv[]) {
         if (argv[i] && option[0]=='-') {
             switch (option[1]) {
                 case 'b': /* Bind to target */
-                    listener(option+2);
+                    bound=listener(option+2);
                     break;
                 case 't': /* Temporary file; delete after */
                     temp=true;
@@ -45,8 +46,6 @@ int main(int argc, const char * argv[]) {
     // Parse a command file if provided
     if (file) {
         char *buffer = NULL;
-        //printf("Loading %s\n", file);
-        
         if (command_loadinput(file, &buffer)) {
             parsed=command_parse(buffer);
         }
@@ -54,7 +53,7 @@ int main(int argc, const char * argv[]) {
         free(buffer);
     }
     
-    if (parsed) display_loop();
+    //if (parsed || bound) display_loop();
     
     text_finalize();
     display_finalize();
