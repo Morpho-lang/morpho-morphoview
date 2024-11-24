@@ -8,12 +8,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <morpho.h>
+
 #include "command.h"
 #include "display.h"
 #include "text.h"
 #include "listener.h"
 
 int main(int argc, const char * argv[]) {
+    morpho_initialize();
+    
     scene_initialize();
     display_initialize();
     text_initialize();
@@ -57,4 +61,6 @@ int main(int argc, const char * argv[]) {
     scene_finalize();
     
     if (temp && file) command_removefile(file);
+    
+    morpho_finalize();
 }

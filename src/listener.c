@@ -12,11 +12,16 @@
 
 #include "parse.h"
 
+/** Macro to check outcome of bool function */
+#define ERR_CHECK(f) if (!(f)) return false;
+
 enum {
     MVTOKEN_INTEGER,
     MVTOKEN_FLOAT,
     MVTOKEN_STRING,
     
+    MVTOKEN_ID,
+    MVTOKEN_BUFFER,
     MVTOKEN_COLOR,
     MVTOKEN_SELECTCOLOR,
     MVTOKEN_DRAW,
@@ -31,15 +36,26 @@ enum {
     MVTOKEN_SCALE,
     MVTOKEN_SCENE,
     MVTOKEN_TRANSLATE,
+    MVTOKEN_UPDATE,
     MVTOKEN_VIEWDIRECTION,
     MVTOKEN_VIEWVERTICAL,
-    MVTOKEN_WINDOW,
+    MVTOKEN_WINDOWTITLE,
     MVTOKEN_FONT,
     MVTOKEN_TEXT,
+    
+    MVTOKEN_QUOTE,
+    MVTOKEN_NEWLINE,
+    
     MVTOKEN_EOF
 };
 
+bool xcommand_lexstring(lexer *l, token *tok, error *err);
+
 tokendefn mvtokens[] = {
+    { "\n",         MVTOKEN_NEWLINE               , NULL },
+    { "\"",         MVTOKEN_QUOTE                 , xcommand_lexstring },
+    { "#",          MVTOKEN_ID                    , NULL },
+    { "b",          MVTOKEN_BUFFER                , NULL },
     { "c",          MVTOKEN_COLOR                 , NULL },
     { "C",          MVTOKEN_SELECTCOLOR           , NULL },
     { "d",          MVTOKEN_DRAW                  , NULL },
@@ -55,8 +71,9 @@ tokendefn mvtokens[] = {
     { "S",          MVTOKEN_SCENE                 , NULL },
     { "t",          MVTOKEN_TRANSLATE             , NULL },
     { "T",          MVTOKEN_TEXT                  , NULL },
+    { "U",          MVTOKEN_UPDATE                , NULL },
     { "v",          MVTOKEN_VERTICES              , NULL },
-    { "W",          MVTOKEN_WINDOW                , NULL },
+    { "W",          MVTOKEN_WINDOWTITLE           , NULL },
     { "",           TOKEN_NONE                    , NULL }
 };
 
@@ -64,73 +81,139 @@ tokendefn mvtokens[] = {
  * Lexer functions
  * ------------------------------------------------------- */
 
+/** Record command file strings as a token */
+bool xcommand_lexstring(lexer *l, token *tok, error *err) {
+    char c;
+    
+    while (lex_peek(l) != '"' && !lex_isatend(l)) {
+        if (lex_peek(l)=='\\') lex_advance(l); // Detect an escaped character
+
+        lex_advance(l);
+    }
+    
+    if (lex_isatend(l)) {
+        morpho_writeerrorwithid(err, LEXER_UNTERMINATEDSTRING, NULL, tok->line, tok->posn);
+        return false;
+    }
+    
+    lex_advance(l); // Advance over final quote
+    lex_recordtoken(l, MVTOKEN_STRING, tok);
+    
+    return true;
+}
+
 /** Initializes a lexer to lex morphoview command files */
-void command_initializelexer(lexer *l, char *src) {
+void xcommand_initializelexer(lexer *l, char *src) {
     lex_init(l, src, 0);
     lex_settokendefns(l, mvtokens);
-    //lex_setprefn(l, json_lexpreprocess);
+    lex_setnumbertype(l, MVTOKEN_INTEGER, MVTOKEN_FLOAT, MVTOKEN_FLOAT);
     lex_seteof(l, MVTOKEN_EOF);
+}
+
+/* -------------------------------------------------------
+ * Command language fundamental types
+ * ------------------------------------------------------- */
+
+/** Parses an integer */
+bool xcommand_parseinteger(parser *p, int *out) {
+    long f;
+    ERR_CHECK(parse_tokentointeger(p, &f));
+    *out = (int) f;
+    return true;
 }
 
 /* -------------------------------------------------------
  * Parse functions
  * ------------------------------------------------------- */
 
+/** Parses a window title element */
+bool xcommand_parsewindowtitle(parser *p, void *out) {
+    printf("Window title\n");
+    
+    if (parse_checktokenadvance(p, MVTOKEN_STRING)) {
+        // Parse the string
+    } else return false;
+    
+    return true;
+}
+
+/** Parses an object definition */
+bool xcommand_parseobject(parser *p, void *out) {
+    int id;
+    if (parse_checktokenadvance(p, MVTOKEN_INTEGER)) {
+        ERR_CHECK(xcommand_parseinteger(p, &id));
+    } else return false;
+    
+    printf("Object %i\n", id);
+    
+    if (parse_checktokenadvance(p, MVTOKEN_VERTICES)) {
+        
+    } else if (parse_checktokenadvance(p, MVTOKEN_LINES)) {
+        
+    } else if (parse_checktokenadvance(p, MVTOKEN_FACETS)) {
+        
+    }
+    
+    return true;
+}
+
+/** Parses scene elements */
+bool xcommand_parseelements(parser *p, void *out) {
+    while (!parse_checktoken(p, MVTOKEN_EOF) &&
+           !parse_checktoken(p, MVTOKEN_SCENE)) {
+        ERR_CHECK(parse_advance(p));
+        parserule *rule = parse_getrule(p, p->previous.type);
+        if (rule) {
+            ERR_CHECK(rule->prefix(p, out));
+        } else return false; // Should raise error
+    }
+}
+
 /** Parses a scene command */
 bool xcommand_parsescene(parser *p, void *out) {
     int id, dim;
-    /*ERRCHK(command_parseinteger(p, &id));
-    ERRCHK(command_parseinteger(p, &dim));
+    if (parse_checktokenadvance(p, MVTOKEN_INTEGER)) {
+        ERR_CHECK(xcommand_parseinteger(p, &id));
+    } else return false;
     
-#ifdef DEBUG_PARSER
+    if (parse_checktokenadvance(p, MVTOKEN_INTEGER)) {
+        ERR_CHECK(xcommand_parseinteger(p, &dim));
+    } else return false;
+    
     printf("Scene id: %i dim: %i\n", id, dim);
-#endif
+    xcommand_parseelements(p, out);
     
-    p->scene = scene_new(id, dim);
-    if (p->scene) p->display=display_open(p->scene);
-    
-    return (p->scene!=NULL);*/
+    return true;
 }
 
-/** Parses a window command */
-bool xcommand_parsewindow(parser *p, void *out) {
-    char *name;
-    
-    /*if (command_parsestring(p, &name)) {
-#ifdef DEBUG_PARSER
-        printf("Window '%s'\n", name);
-#endif
-        if (name) {
-            display_setwindowtitle(p->display, name);
-            free(name);
-        }
-        return true;
-    }*/
-    
+/** Base parse function to parse a command file */
+bool xcommand_parsecommandfile(parser *p, void *out) {
+    if (parse_checktokenadvance(p, MVTOKEN_SCENE)) {
+        return xcommand_parsescene(p, out);
+    }
     return false;
 }
 
 parserule mv_parserules[] = {
-    PARSERULE_PREFIX(MVTOKEN_SCENE, xcommand_parsescene),
-    PARSERULE_PREFIX(MVTOKEN_WINDOW, xcommand_parsewindow),
+    PARSERULE_PREFIX(MVTOKEN_WINDOWTITLE, xcommand_parsewindowtitle),
+    PARSERULE_PREFIX(MVTOKEN_OBJECT, xcommand_parseobject),
     PARSERULE_UNUSED(TOKEN_NONE)
 };
 
 /** Initializes a parser to parse morphoview command files */
-void command_initializeparser(parser *p, lexer *l, error *err, void *out) {
+void xcommand_initializeparser(parser *p, lexer *l, error *err, void *out) {
     parse_init(p, l, err, out);
-    //parse_setbaseparsefn(p, json_parseelement);
     parse_setparsetable(p, mv_parserules);
-    parse_setskipnewline(p, false, TOKEN_NONE);
+    parse_setskipnewline(p, true, MVTOKEN_NEWLINE);
+    parse_setbaseparsefn(p, xcommand_parsecommandfile);
 }
 
-bool xcommand_parse(char *in, error *err, value *out) {
+bool xcommand_parse(char *in, error *err, void *out) {
     lexer l;
-    command_initializelexer(&l, in);
+    xcommand_initializelexer(&l, in);
 
     parser p;
-    command_initializeparser(&p, &l, err, NULL);
-    
+    xcommand_initializeparser(&p, &l, err, NULL);
     bool success=parse(&p);
     
     parse_clear(&p);
@@ -153,4 +236,9 @@ void listener(const char *endpoint) {
     zstr_send(sock, "ok");
     
     zsock_destroy(&sock);
+    printf("-----\n");
+    
+    error err;
+    error_init(&err);
+    xcommand_parse(str, &err, NULL);
 }
