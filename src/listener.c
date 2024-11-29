@@ -200,9 +200,19 @@ bool xcommand_parseinteger(parser *p, int *out) {
     return true;
 }
 
-/** Parses a string */
-bool xcommand_parsestring(parser *p) {
-    return true;
+/** Parses a string, returning a C string */
+bool xcommand_parsestring(parser *p, char **out) {
+    if (p->previous.type!=TOKEN_STRING) return false;
+    
+    int length = p->previous.length-2;
+    char *str=malloc(sizeof(char)*(length+1));
+    if (str) {
+        strncpy(str, p->previous.start+1, length);
+        str[length]='\0';
+        *out = str;
+    }
+    
+    return str;
 }
 
 /* -------------------------------------------------------
@@ -301,7 +311,7 @@ bool xcommand_parsetranslate(parser *p, void *out) {
 bool xcommand_parsevertices(parser *p, void *out) {
     printf("-Vertices\n");
     if (parse_checktokenadvance(p, MVTOKEN_STRING)) {
-        xcommand_parsestring(p);
+        //xcommand_parsestring(p);
     }
     
     while (parse_checktokenadvance(p, MVTOKEN_FLOAT)) {
@@ -312,10 +322,14 @@ bool xcommand_parsevertices(parser *p, void *out) {
 
 /** Parses a window title element */
 bool xcommand_parsewindowtitle(parser *p, void *out) {
+    commandfile *cmd=(commandfile *) out;
+    char *str=NULL;
     printf("Window title\n");
     
-    if (parse_checktokenadvance(p, MVTOKEN_STRING)) {
-        xcommand_parsestring(p);
+    if (parse_checktokenadvance(p, MVTOKEN_STRING) &&
+        xcommand_parsestring(p, &str)) {
+        display_setwindowtitle(cmd->display, str);
+        free(str);
     } else return false;
     
     return true;

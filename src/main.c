@@ -53,7 +53,7 @@ int main(int argc, const char * argv[]) {
         free(buffer);
     }
     
-    //if (parsed || bound) display_loop();
+    if (parsed || bound) display_loop();
     
     text_finalize();
     display_finalize();
