@@ -36,13 +36,13 @@ int main(int argc, const char * argv[]) {
     // Parse a command file if provided
     if (file) {
         char *buffer = NULL;
-        //printf("Loading %s\n", file);
+        printf("Loading %s\n", file);
         
         if (command_loadinput(file, &buffer)) {
             parsed=command_parse(buffer);
         }
         
-        free(buffer);
+        //free(buffer);
     }
     
     if (parsed) display_loop();

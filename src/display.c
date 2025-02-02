@@ -261,6 +261,7 @@ void display_setwindowtitle(display *d, char *title) {
 
 void display_loop(void) {
     while (opendisplays!=NULL) {
+        glfwWaitEvents();
         for (display *d=opendisplays; d!=NULL; d=d->next) {
             if (glfwWindowShouldClose(d->window)) {
                 glfwDestroyWindow(d->window);
@@ -274,7 +275,7 @@ void display_loop(void) {
             }
         }
         
-        glfwPollEvents();
+        //glfwPollEvents();
     }
 }
 
