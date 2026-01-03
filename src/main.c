@@ -42,7 +42,7 @@ int main(int argc, const char * argv[]) {
             parsed=command_parse(buffer);
         }
         
-        //free(buffer);
+        if (buffer) MORPHO_FREE(buffer);
     }
     
     if (parsed) display_loop();
