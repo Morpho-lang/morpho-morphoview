@@ -3,3 +3,4 @@
 build/*
 CMakeUserPresets.json
 /.vs
+/build-xcode
