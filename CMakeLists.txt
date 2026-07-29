@@ -1,14 +1,17 @@
+#-------------------------------------------------------------------------------
+# Morpho-morphoview/CMakeLists.txt
+#-------------------------------------------------------------------------------
+
 cmake_minimum_required(VERSION 3.13)
 project(morpho-morphoview)
 
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 add_executable(morphoview "") 
-add_subdirectory(src)
 
-# Add glad headers
-add_subdirectory(deps/glad)
-target_include_directories(morphoview PUBLIC deps/glad/include)
+#-------------------------------------------------------------------------------
+# Include the morpho library
+#-------------------------------------------------------------------------------
 
 # Locate the morpho.h header file and store in MORPHO_HEADER
 find_file(MORPHO_HEADER
@@ -20,6 +23,7 @@ find_file(MORPHO_HEADER
           /opt/homebrew/include/morpho
           /home/linuxbrew/.linuxbrew/include/
           /home/linuxbrew/.linuxbrew/include/morpho
+          "C:/Program Files/Morpho/include/morpho"
           )
 
 # Identify folder that morpho.h is located in from MORPHO_HEADER and store in MORPHO_INCLUDE
@@ -41,31 +45,118 @@ endforeach()
 # Locate libmorpho
 find_library(MORPHO_LIBRARY
     NAMES morpho libmorpho
+    PATHS
+    "C:/Program Files/Morpho/lib/" 
 )
 
-# Locate cblas
-find_library(CBLAS_LIBRARY
-    NAMES cblas libcblas blas libblas
-)
+target_link_libraries(morphoview PRIVATE ${MORPHO_LIBRARY})
 
-# Locate a lapack version
-find_library(LAPACK_LIBRARY
-    NAMES lapacke liblapacke lapack liblapack 
-)
+#-------------------------------------------------------------------------------
+# CBlas
+#-------------------------------------------------------------------------------
+
+message(STATUS "Searching for BLAS and LAPACK")
+
+if(WIN32) 
+    #set(OpenBLAS_DIR "C:/openblas-staging/lib/cmake/OpenBLAS")
+    #find_package(OpenBLAS REQUIRED)
+    #target_link_libraries(morphoview PRIVATE OpenBLAS::OpenBLAS)
+
+    # Locate a lapack version
+    # Currently we prefer LAPACKE 
+    # TODO: Fix morpho source to select between lapack and lapacke
+    find_library(LAPACK_LIBRARY
+        NAMES lapacke liblapacke lapack liblapack openblas libopenblas 
+        HINTS 
+            "C:\\Program Files\\Morpho\\lib\\"
+    )
+    if (LAPACK_LIBRARY)
+    message(STATUS "Found LAPACK at ${LAPACK_LIBRARY}")
+    endif()
+
+    # Locate cblas
+    find_library(CBLAS_LIBRARY
+        NAMES cblas libcblas blas libblas openblas libopenblas
+        HINTS
+            "C:\\Program Files\\Morpho\\lib\\"
+    )
+    if (CBLAS_LIBRARY)
+    message(STATUS "Found blas at ${CBLAS_LIBRARY}")
+    endif()
+
+    # Find cblas.h header file 
+    find_path(CBLAS_INCLUDE cblas.h 
+            HINTS 
+            "C:\\Program Files\\Morpho\\include\\openblas")
+
+    # Add cblas headers to include folders
+    target_include_directories(morphoview PUBLIC ${CBLAS_INCLUDE})
+
+    message(STATUS "Found cblas headers at ${CBLAS_INCLUDE}")
+
+    target_link_libraries(morphoview PRIVATE ${CBLAS_LIBRARY})
+    target_link_libraries(morphoview PRIVATE ${LAPACK_LIBRARY})
+else() 
+    # Locate a lapack version
+    # Currently we prefer LAPACKE 
+    # TODO: Fix morpho source to select between lapack and lapacke
+    find_library(LAPACK_LIBRARY
+        NAMES lapacke liblapacke lapack liblapack openblas libopenblas
+    )
+    if (LAPACK_LIBRARY)
+    message(STATUS "Found LAPACK at ${LAPACK_LIBRARY}")
+    endif()
+
+    # Locate cblas
+    find_library(CBLAS_LIBRARY
+        NAMES cblas libcblas blas libblas openblas libopenblas
+    )
+    if (CBLAS_LIBRARY)
+    message(STATUS "Found blas at ${CBLAS_LIBRARY}")
+    endif()
+
+    # Find cblas.h header file 
+    find_path(CBLAS_INCLUDE cblas.h)
+
+    # Add cblas headers to include folders
+    target_include_directories(morphoview PUBLIC ${CBLAS_INCLUDE})
+
+    message(STATUS "Found cblas headers at ${CBLAS_INCLUDE}")
+
+    target_link_libraries(morphoview PRIVATE ${CBLAS_LIBRARY})
+    target_link_libraries(morphoview PRIVATE ${LAPACK_LIBRARY})
+endif()
+
+#-------------------------------------------------------------------------------
+# GLFW and Freetype
+#-------------------------------------------------------------------------------
+
+# Locate glfw3
+find_package(glfw3 3.4 REQUIRED)
+target_link_libraries(morphoview PRIVATE glfw)
 
 # Locate freetype
 find_package(Freetype REQUIRED)
-target_include_directories(morphoview PRIVATE ${FREETYPE_INCLUDE_DIRS})
-
-# Locate glfw3
-find_package(glfw3 3.3 REQUIRED)
+target_link_libraries(morphoview PRIVATE Freetype::Freetype)
 
 # Link with math library [needed on linux]
 IF (NOT WIN32)
-  target_link_libraries(morphoview m)
+  target_link_libraries(morphoview PRIVATE m)
 ENDIF()
 
-target_link_libraries(morphoview ${MORPHO_LIBRARY} ${FREETYPE_LIBRARIES} glfw ${CBLAS_LIBRARY} ${LAPACK_LIBRARY})
+#-------------------------------------------------------------------------------
+# Include source files
+#-------------------------------------------------------------------------------
+
+add_subdirectory(src)
+
+# Add glad headers
+add_subdirectory(deps/glad)
+target_include_directories(morphoview PUBLIC deps/glad/include)
+
+#-------------------------------------------------------------------------------
+# Install
+#-------------------------------------------------------------------------------
 
 # Install the resulting binary
 install(TARGETS morphoview)

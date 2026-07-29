@@ -2,3 +2,5 @@
 .DS_Store
 build/*
 build-xcode/*
+CMakeUserPresets.json
+/.vs

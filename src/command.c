@@ -27,10 +27,16 @@ bool command_getfilesize(FILE *f, size_t *s) {
 /** Removes a command file (for temporary files)
  *  @param[in] in file name */
 void command_removefile(const char *in) {
-    size_t len = strlen(in);
-    char remove[len+4];
-    strcpy(remove, "rm ");
-    strcpy(remove+3, in);
+    size_t len = strlen(in) + 16;
+    char remove[len];
+    
+#ifdef _WIN32
+    sprintf(remove, "del \"%s\"", in);
+    for (char *c = remove; *c != '\0'; c++) if (*c=='/') *c='\\'; // Ensure filepath is normalized
+#else
+    sprintf(remove, "rm %s", in);
+#endif
+    
     int systemRet = system(remove);
     if(systemRet == -1){
         // The system method failed
