@@ -5,11 +5,567 @@
  */
 #include <string.h>
 #include <ctype.h>
+#include <stdlib.h>
 
-#include "command.h"
+#include "morpho.h"
+#include "parse.h"
 #include "memory.h"
 #include "varray.h"
+
+#include "command.h"
+#include "scene.h"
 #include "display.h"
+#include "matrix3d.h"
+
+/* -------------------------------------------------------
+ * Parse context
+ * ------------------------------------------------------- */
+
+typedef struct {
+    scene *scene;
+    display *display;
+    mat4x4 model;
+    bool modelchanged;
+    gobject *cobject;
+} commandcontext;
+
+void commandcontext_init(commandcontext *ctx) {
+    ctx->scene=NULL;
+    ctx->display=NULL;
+    mat3d_identity4x4(ctx->model);
+    ctx->modelchanged=false;
+    ctx->cobject=NULL;
+}
+
+/* **********************************************************************
+ * Morphoview lexer
+ * ********************************************************************** */
+
+enum {
+    MVTOKEN_INTEGER,
+    MVTOKEN_FLOAT,
+    MVTOKEN_STRING,
+
+    MVTOKEN_COLOR,
+    MVTOKEN_SELECTCOLOR,
+    MVTOKEN_DRAW,
+    MVTOKEN_OBJECT,
+    MVTOKEN_VERTICES,
+    MVTOKEN_POINTS,
+    MVTOKEN_LINES,
+    MVTOKEN_FACETS,
+    MVTOKEN_IDENTITY,
+    MVTOKEN_MATRIX,
+    MVTOKEN_ROTATE,
+    MVTOKEN_SCALE,
+    MVTOKEN_SCENE,
+    MVTOKEN_TRANSLATE,
+    MVTOKEN_WINDOW,
+    MVTOKEN_FONT,
+    MVTOKEN_TEXT,
+
+    MVTOKEN_QUOTE,
+    MVTOKEN_MINUS,
+
+    MVTOKEN_EOF
+};
+
+bool command_lexstring(lexer *l, token *tok, error *err);
+bool command_lexnumber(lexer *l, token *tok, error *err);
+
+tokendefn mvtokens[] = {
+    { "c",          MVTOKEN_COLOR                 , NULL },
+    { "C",          MVTOKEN_SELECTCOLOR           , NULL },
+    { "d",          MVTOKEN_DRAW                  , NULL },
+    { "o",          MVTOKEN_OBJECT                , NULL },
+    { "p",          MVTOKEN_POINTS                , NULL },
+    { "l",          MVTOKEN_LINES                 , NULL },
+    { "f",          MVTOKEN_FACETS                , NULL },
+    { "F",          MVTOKEN_FONT                  , NULL },
+    { "i",          MVTOKEN_IDENTITY              , NULL },
+    { "m",          MVTOKEN_MATRIX                , NULL },
+    { "r",          MVTOKEN_ROTATE                , NULL },
+    { "s",          MVTOKEN_SCALE                 , NULL },
+    { "S",          MVTOKEN_SCENE                 , NULL },
+    { "t",          MVTOKEN_TRANSLATE             , NULL },
+    { "T",          MVTOKEN_TEXT                  , NULL },
+    { "v",          MVTOKEN_VERTICES              , NULL },
+    { "W",          MVTOKEN_WINDOW                , NULL },
+
+    { "\"",         MVTOKEN_QUOTE                 , command_lexstring },
+    { "-",          MVTOKEN_MINUS                 , command_lexnumber },
+
+    { "",           TOKEN_NONE                    , NULL }
+};
+
+/** Skip morphoview whitespace (spaces and newlines) */
+bool command_lexwhitespace(lexer *l, token *tok, error *err) {
+    for (;;) {
+        char c = lex_peek(l);
+
+        switch (c) {
+            case '\n':
+                lex_newline(l); /* intentional fallthrough */
+            case ' ':
+            case '\t':
+            case '\r':
+                lex_advance(l);
+                break;
+            default:
+                return true;
+        }
+    }
+    return true;
+}
+
+/** Record command-file strings as a token */
+bool command_lexstring(lexer *l, token *tok, error *err) {
+    unsigned int startline = l->line, startpsn = l->posn;
+
+    while (lex_peek(l) != '"' && !lex_isatend(l)) {
+        if (lex_peek(l)=='\n') lex_newline(l);
+        if (lex_peek(l)=='\\') lex_advance(l);
+        lex_advance(l);
+    }
+
+    if (lex_isatend(l)) {
+        morpho_writeerrorwithid(err, LEXER_UNTERMINATEDSTRING, NULL, startline, startpsn);
+        return false;
+    }
+
+    lex_advance(l); /* closing quote */
+    lex_recordtoken(l, MVTOKEN_STRING, tok);
+    return true;
+}
+
+/** Record numbers as tokens (morpho lex_number style, plus leading '-' via processfn) */
+bool command_lexnumber(lexer *l, token *tok, error *err) {
+    tokentype type = l->inttype;
+
+    if (!lex_isdigit(lex_peek(l))) {
+        morpho_writeerrorwithid(err, COMMAND_INVLDNMBR, NULL, tok->line, tok->posn);
+        return false;
+    }
+
+    while (lex_isdigit(lex_peek(l))) lex_advance(l);
+
+    /* Fractional part — allow trailing '.' as in morpho / existing scene files (e.g. 0.) */
+    char next = '\0';
+    if (lex_peek(l)!='\0') next=lex_peekahead(l, 1);
+    if (lex_peek(l) == '.' && (lex_isdigit(next) || lex_isspace(next) || next=='\0')) {
+        type = l->flttype;
+        lex_advance(l);
+        while (lex_isdigit(lex_peek(l))) lex_advance(l);
+    }
+
+    if (lex_peek(l)=='e' || lex_peek(l)=='E') {
+        type = l->flttype;
+        lex_advance(l);
+        if (lex_peek(l)=='+' || lex_peek(l)=='-') lex_advance(l);
+        if (!lex_isdigit(lex_peek(l))) {
+            morpho_writeerrorwithid(err, COMMAND_INVLDNMBR, NULL, tok->line, tok->posn);
+            return false;
+        }
+        while (lex_isdigit(lex_peek(l))) lex_advance(l);
+    }
+
+    lex_recordtoken(l, type, tok);
+    return true;
+}
+
+/** Lexer preprocess: leading digits start a number */
+bool command_lexpreprocess(lexer *l, token *tok, error *err) {
+    if (lex_isdigit(lex_peek(l))) return command_lexnumber(l, tok, err);
+    return false;
+}
+
+/** Initialize a lexer for morphoview command files */
+void command_initializelexer(lexer *l, char *src) {
+    lex_init(l, src, 1);
+    lex_settokendefns(l, mvtokens);
+    lex_setnumbertype(l, MVTOKEN_INTEGER, MVTOKEN_FLOAT, MVTOKEN_FLOAT);
+    lex_setprefn(l, command_lexpreprocess);
+    lex_setwhitespacefn(l, command_lexwhitespace);
+    lex_setstringinterpolation(l, false);
+    lex_seteof(l, MVTOKEN_EOF);
+    lex_setmatchkeywords(l, false);
+}
+
+/* **********************************************************************
+ * Helpers
+ * ********************************************************************** */
+
+bool command_isnumerical(parser *p) {
+    return parse_checktoken(p, MVTOKEN_INTEGER) ||
+           parse_checktoken(p, MVTOKEN_FLOAT);
+}
+
+bool command_parseinteger(parser *p, int *out) {
+    if (!parse_checktokenadvance(p, MVTOKEN_INTEGER)) {
+        parse_error(p, false, COMMAND_EXPECTINTEGER);
+        return false;
+    }
+
+    long f;
+    PARSE_CHECK(parse_tokentointeger(p, &f));
+    *out = (int) f;
+    return true;
+}
+
+bool command_parsefloat(parser *p, float *out) {
+    if (!command_isnumerical(p)) {
+        parse_error(p, false, COMMAND_EXPECTNUMBER);
+        return false;
+    }
+
+    PARSE_CHECK(parse_advance(p));
+
+    double x;
+    PARSE_CHECK(parse_tokentodouble(p, &x));
+    *out = (float) x;
+    return true;
+}
+
+bool command_parsestring(parser *p, char **out) {
+    if (!parse_checktokenadvance(p, MVTOKEN_STRING)) {
+        parse_error(p, false, COMMAND_EXPECTSTRING);
+        return false;
+    }
+
+    int length = (int) p->previous.length - 2;
+    if (length < 0) length = 0;
+
+    char *str = malloc(sizeof(char)*(length+1));
+    if (!str) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+
+    strncpy(str, p->previous.start+1, length);
+    str[length]='\0';
+    *out = str;
+    return true;
+}
+
+/* **********************************************************************
+ * Command handlers
+ * ********************************************************************** */
+
+bool command_parsecolor(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    int id, indx=-1;
+    int length=0;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+
+    while (command_isnumerical(p)) {
+        float r[3];
+        for (int i=0; i<3; i++) PARSE_CHECK(command_parsefloat(p, &r[i]));
+
+        int ret=scene_adddata(ctx->scene, r, 3);
+        if (indx<0) indx=ret;
+        length++;
+    }
+
+    if (length>0) scene_addcolor(ctx->scene, id, length, indx);
+    return true;
+}
+
+bool command_parseselectcolor(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    int id;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+    scene_adddraw(ctx->scene, COLOR, id, -1);
+    return true;
+}
+
+bool command_parsedraw(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    int id, indx = SCENE_EMPTY;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+
+    if (ctx->modelchanged) {
+        indx=scene_adddata(ctx->scene, ctx->model, 16);
+        ctx->modelchanged=false;
+    }
+
+    scene_adddraw(ctx->scene, OBJECT, id, indx);
+    return true;
+}
+
+bool command_parseobject(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    int id;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+
+    if (!ctx->scene) {
+        parse_error(p, true, COMMAND_NOSCENE);
+        return false;
+    }
+
+    ctx->cobject=scene_addobject(ctx->scene, id);
+    return true;
+}
+
+bool command_parsevertices(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+
+    if (!ctx->scene || !ctx->cobject) {
+        parse_error(p, true, COMMAND_NOOBJECT);
+        return false;
+    }
+
+    if (parse_checktoken(p, MVTOKEN_STRING)) {
+        char *format=NULL;
+        PARSE_CHECK(command_parsestring(p, &format));
+        ctx->cobject->vertexdata.format=format;
+    }
+
+    while (command_isnumerical(p)) {
+        float f;
+        PARSE_CHECK(command_parsefloat(p, &f));
+
+        int ret=scene_adddata(ctx->scene, &f, 1);
+        if (ctx->cobject->vertexdata.indx==SCENE_EMPTY) {
+            ctx->cobject->vertexdata.indx=ret;
+            ctx->cobject->vertexdata.length=0;
+        }
+        ctx->cobject->vertexdata.length++;
+    }
+
+    return true;
+}
+
+bool command_parseindex(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+
+    if (!ctx->scene || !ctx->cobject) {
+        parse_error(p, true, COMMAND_NOOBJECT);
+        return false;
+    }
+
+    gelement el = { .type = POINTS, .indx = SCENE_EMPTY, .length = 0 };
+
+    if (p->previous.type==MVTOKEN_LINES) {
+        el.type=LINES;
+    } else if (p->previous.type==MVTOKEN_FACETS) {
+        el.type=FACETS;
+    }
+
+    while (parse_checktoken(p, MVTOKEN_INTEGER)) {
+        int i;
+        PARSE_CHECK(command_parseinteger(p, &i));
+
+        int ret=scene_addindex(ctx->scene, &i, 1);
+        if (el.indx==SCENE_EMPTY) el.indx=ret;
+        el.length++;
+    }
+
+    scene_addelement(ctx->cobject, &el);
+    return true;
+}
+
+bool command_parseidentity(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    mat3d_identity4x4(ctx->model);
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parsematrix(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    mat4x4 x, m;
+
+    for (int i=0; i<16; i++) {
+        PARSE_CHECK(command_parsefloat(p, &x[i]));
+    }
+
+    mat3d_copy4x4(ctx->model, m);
+    mat3d_mul4x4(m, x, ctx->model);
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parserotate(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    float phi, x[3];
+
+    PARSE_CHECK(command_parsefloat(p, &phi));
+    for (int i=0; i<3; i++) {
+        PARSE_CHECK(command_parsefloat(p, &x[i]));
+    }
+
+    mat3d_rotate(ctx->model, x, phi, ctx->model);
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parsescale(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    float s;
+
+    PARSE_CHECK(command_parsefloat(p, &s));
+    mat3d_scale(ctx->model, s, ctx->model);
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parsetranslate(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    float x[3];
+
+    for (int i=0; i<3; i++) {
+        PARSE_CHECK(command_parsefloat(p, &x[i]));
+    }
+
+    mat3d_translate(ctx->model, x, ctx->model);
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parsescene(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    int id, dim;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+    PARSE_CHECK(command_parseinteger(p, &dim));
+
+    ctx->scene = scene_new(id, dim);
+    if (ctx->scene) ctx->display=display_open(ctx->scene);
+
+    return (ctx->scene!=NULL);
+}
+
+bool command_parsewindow(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    char *name=NULL;
+
+    PARSE_CHECK(command_parsestring(p, &name));
+    if (name) {
+        display_setwindowtitle(ctx->display, name);
+        free(name);
+    }
+    return true;
+}
+
+bool command_parsefont(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    int id;
+    char *file=NULL;
+    float size;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+    PARSE_CHECK(command_parsestring(p, &file));
+    PARSE_CHECK(command_parsefloat(p, &size));
+
+    return scene_addfont(ctx->scene, id, file, size, NULL);
+}
+
+bool command_parsetext(parser *p, void *out) {
+    commandcontext *ctx = (commandcontext *) out;
+    int fontid;
+    char *string=NULL;
+
+    PARSE_CHECK(command_parseinteger(p, &fontid));
+    PARSE_CHECK(command_parsestring(p, &string));
+
+    int matindx=SCENE_EMPTY;
+    int tid=scene_addtext(ctx->scene, fontid, string);
+
+    if (ctx->modelchanged) {
+        matindx=scene_adddata(ctx->scene, ctx->model, 16);
+        ctx->modelchanged=false;
+    }
+
+    scene_adddraw(ctx->scene, TEXT, tid, matindx);
+    return true;
+}
+
+/* **********************************************************************
+ * Parser driver
+ * ********************************************************************** */
+
+bool command_parseelements(parser *p, void *out) {
+    while (!parse_checktoken(p, MVTOKEN_EOF)) {
+        PARSE_CHECK(parse_advance(p));
+
+        parserule *rule = parse_getrule(p, p->previous.type);
+        if (!rule || !rule->prefix) {
+            parse_error(p, true, COMMAND_UNRCGNZDCMND);
+            return false;
+        }
+
+        PARSE_CHECK(rule->prefix(p, out));
+    }
+    return true;
+}
+
+parserule mv_parserules[] = {
+    PARSERULE_PREFIX(MVTOKEN_COLOR, command_parsecolor),
+    PARSERULE_PREFIX(MVTOKEN_SELECTCOLOR, command_parseselectcolor),
+    PARSERULE_PREFIX(MVTOKEN_DRAW, command_parsedraw),
+    PARSERULE_PREFIX(MVTOKEN_OBJECT, command_parseobject),
+    PARSERULE_PREFIX(MVTOKEN_VERTICES, command_parsevertices),
+    PARSERULE_PREFIX(MVTOKEN_POINTS, command_parseindex),
+    PARSERULE_PREFIX(MVTOKEN_LINES, command_parseindex),
+    PARSERULE_PREFIX(MVTOKEN_FACETS, command_parseindex),
+    PARSERULE_PREFIX(MVTOKEN_IDENTITY, command_parseidentity),
+    PARSERULE_PREFIX(MVTOKEN_MATRIX, command_parsematrix),
+    PARSERULE_PREFIX(MVTOKEN_ROTATE, command_parserotate),
+    PARSERULE_PREFIX(MVTOKEN_SCALE, command_parsescale),
+    PARSERULE_PREFIX(MVTOKEN_SCENE, command_parsescene),
+    PARSERULE_PREFIX(MVTOKEN_TRANSLATE, command_parsetranslate),
+    PARSERULE_PREFIX(MVTOKEN_WINDOW, command_parsewindow),
+    PARSERULE_PREFIX(MVTOKEN_FONT, command_parsefont),
+    PARSERULE_PREFIX(MVTOKEN_TEXT, command_parsetext),
+    PARSERULE_UNUSED(TOKEN_NONE)
+};
+
+void command_initializeparser(parser *p, lexer *l, error *err, void *out) {
+    parse_init(p, l, err, out);
+    parse_setbaseparsefn(p, command_parseelements);
+    parse_setparsetable(p, mv_parserules);
+    parse_setskipnewline(p, false, TOKEN_NONE);
+}
+
+/** @brief Parses a command sequence */
+bool command_parse(char *in) {
+    commandcontext ctx;
+    commandcontext_init(&ctx);
+
+    error err;
+    error_init(&err);
+
+    lexer l;
+    command_initializelexer(&l, in);
+
+    parser p;
+    command_initializeparser(&p, &l, &err, &ctx);
+
+    bool success=parse(&p);
+
+    parse_clear(&p);
+    lex_clear(&l);
+
+    if (!success || ERROR_FAILED(err)) {
+        fprintf(stderr, "morphoview: Error [%s] at line %i: %s\n",
+                err.id, err.line, err.msg);
+        return false;
+    }
+
+    if (ctx.scene && ctx.display) {
+        render_preparescene(&ctx.display->render, ctx.scene);
+    }
+
+    return true;
+}
+
+/* **********************************************************************
+ * File I/O
+ * ********************************************************************** */
 
 /** Get the size of an open file
  *  @param[in] f file handle
@@ -29,18 +585,17 @@ bool command_getfilesize(FILE *f, size_t *s) {
 void command_removefile(const char *in) {
     size_t len = strlen(in) + 16;
     char remove[len];
-    
+
 #ifdef _WIN32
     sprintf(remove, "del \"%s\"", in);
-    for (char *c = remove; *c != '\0'; c++) if (*c=='/') *c='\\'; // Ensure filepath is normalized
+    for (char *c = remove; *c != '\0'; c++) if (*c=='/') *c='\\';
 #else
     sprintf(remove, "rm %s", in);
 #endif
-    
+
     int systemRet = system(remove);
     if(systemRet == -1){
-        // The system method failed
-        printf("Warning: the system method to remove a temporary file (command.c:34.5) has failed.");
+        printf("Warning: the system method to remove a temporary file has failed.");
     }
 }
 
@@ -51,27 +606,24 @@ void command_removefile(const char *in) {
 bool command_loadinput(const char *in, char **out) {
     FILE *f=NULL;
     varray_char buffer;
-    
+
     varray_charinit(&buffer);
-    
+
     f=fopen(in, "r");
     if (!f) {
         fprintf(stderr, "morphoview: Couldn't open input file %s.\n", in);
         goto loadinput_cleanup;
     }
-    
-    /* Determine the file size */
+
     size_t size;
     if (!command_getfilesize(f, &size)) goto loadinput_cleanup;
-    
+
     if (size) {
-        /* Size the buffer to match */
         if (!varray_charresize(&buffer, (int) size+1)) {
             fprintf(stderr, "morphoview: Couldn't allocate buffer to load input file.\n");
             goto loadinput_cleanup;
         }
-        
-        /* Read in the file */
+
         for (char *c=buffer.data; !feof(f); c=c+strlen(c)) {
             if (!fgets(c, (int) (buffer.data+buffer.capacity-c), f)) { c[0]='\0'; break; }
         }
@@ -79,629 +631,26 @@ bool command_loadinput(const char *in, char **out) {
     *out = buffer.data;
     fclose(f);
     return true;
-    
+
 loadinput_cleanup:
     if (f) fclose(f);
     varray_charclear(&buffer);
     return false;
 }
 
-/* -------------------------------------------------------
- * Lexer
- * ------------------------------------------------------- */
+/* **********************************************************************
+ * Initialization
+ * ********************************************************************** */
 
-/** @brief Records a token
- *  @param[in]  l     The lexer in use
- *  @param[in]  type  Type of token to record
- *  @param[out] tok   Token structure to fill out */
-void command_lexrecordtoken(lexer *l, tokentype type, token *tok) {
-    tok->type=type;
-    tok->start=l->start;
-    tok->length=(int) (l->current - l->start);
+void command_initialize(void) {
+    morpho_defineerror(COMMAND_UNRCGNZDCMND, ERROR_PARSE, COMMAND_UNRCGNZDCMND_MSG);
+    morpho_defineerror(COMMAND_INVLDNMBR, ERROR_LEX, COMMAND_INVLDNMBR_MSG);
+    morpho_defineerror(COMMAND_NOSCENE, ERROR_PARSE, COMMAND_NOSCENE_MSG);
+    morpho_defineerror(COMMAND_NOOBJECT, ERROR_PARSE, COMMAND_NOOBJECT_MSG);
+    morpho_defineerror(COMMAND_EXPECTINTEGER, ERROR_PARSE, COMMAND_EXPECTINTEGER_MSG);
+    morpho_defineerror(COMMAND_EXPECTNUMBER, ERROR_PARSE, COMMAND_EXPECTNUMBER_MSG);
+    morpho_defineerror(COMMAND_EXPECTSTRING, ERROR_PARSE, COMMAND_EXPECTSTRING_MSG);
 }
 
-/** @brief Checks if we're at the end of the string. Doesn't advance. */
-static bool command_lexisatend(lexer *l) {
-    return (*(l->current) == '\0');
-}
-
-/** @brief Checks if a character is a digit. Doesn't advance. */
-static bool command_lexisdigit(char c) {
-    return (c>='0' && c<= '9');
-}
-
-/** @brief Checks if a character is alphanumeric or underscore.  Doesn't advance. */
-/*static bool command_lexisalpha(char c) {
-    return (c>='a' && c<= 'z') || (c>='A' && c<= 'Z') || (c=='_');
-}*/
-
-/** @brief Advances the lexer by one character, returning the character */
-static char command_lexadvance(lexer *l) {
-    char c = *(l->current);
-    l->current++;
-    return c;
-}
-
-/** @brief Returns the next character */
-static char command_lexpeek(lexer *l) {
-    return *(l->current);
-}
-
-/** @brief Returns n characters ahead. Caller should check that this is meaningfull. */
-/*static char command_lexpeekahead(lexer *l, int n) {
-    return *(l->current + n);
-}*/
-
-/** @brief Initialize the lexer */
-void command_lexinit(lexer *l, const char *start) {
-    l->start=start;
-    l->current=start;
-}
-
-/** @brief Lex numbers
- *  @param[in]  l    the lexer
- *  @param[out] tok  token record to fill out
- *  @returns true on success, false if an error occurs */
-static bool command_lexnumber(lexer *l, token *tok) {
-    tokentype type=TOKEN_INTEGER;
-    
-    /* Handle initial negative sign */
-    if (command_lexpeek(l) == '-') command_lexadvance(l);
-    
-    while (command_lexisdigit(command_lexpeek(l))) command_lexadvance(l);
-    
-    /* Fractional part */
-    if (command_lexpeek(l) == '.') {
-        type=TOKEN_FLOAT;
-        command_lexadvance(l); /* Consume the '.' */
-        while (command_lexisdigit(command_lexpeek(l))) command_lexadvance(l);
-    }
-    
-    /* Exponent */
-    if (command_lexpeek(l) == 'e' || command_lexpeek(l) == 'E') {
-        type=TOKEN_FLOAT;
-        command_lexadvance(l); /* Consume the 'e' */
-        
-        /* Optional sign */
-        if (command_lexpeek(l) == '+' || command_lexpeek(l) == '-') command_lexadvance(l);
-        
-        /* Exponent digits */
-        while (command_lexisdigit(command_lexpeek(l))) command_lexadvance(l);
-    }
-    
-    command_lexrecordtoken(l, type, tok);
-    
-    return true;
-}
-
-/** @brief Lex strings
- *  @param[in]  l    the lexer
- *  @param[out] tok  token record to fill out
- *  @returns true on success, false if an error occurs */
-static bool command_lexstring(lexer *l, token *tok) {
-    while (command_lexpeek(l) != '"' && !command_lexisatend(l)) {
-        command_lexadvance(l);
-    }
-    
-    if (command_lexisatend(l)) {
-        return false;
-    }
-    
-    command_lexadvance(l); /* Closing quote */
-    
-    command_lexrecordtoken(l, TOKEN_STRING, tok);
-    return true;
-}
-
-/** @brief Obtain the next token */
-bool command_lex(lexer *l, token *tok) {
-    /** Skip leading white space */
-    while (isspace(command_lexpeek(l))) command_lexadvance(l);
-    
-    l->start = l->current;
-    
-    if (command_lexisatend(l)) {
-        command_lexrecordtoken(l, TOKEN_EOF, tok);
-        return true;
-    }
-    
-    char c = command_lexadvance(l);
-    
-    if (command_lexisdigit(c) || c == '-') return command_lexnumber(l, tok);
-    
-    switch (c) {
-        case 'c': command_lexrecordtoken(l, TOKEN_COLOR, tok); return true;
-        case 'C': command_lexrecordtoken(l, TOKEN_SELECTCOLOR, tok); return true;
-        case 'd': command_lexrecordtoken(l, TOKEN_DRAW, tok); return true;
-        case 'o': command_lexrecordtoken(l, TOKEN_OBJECT, tok); return true;
-        case 'p': command_lexrecordtoken(l, TOKEN_POINTS, tok); return true;
-        case 'l': command_lexrecordtoken(l, TOKEN_LINES, tok); return true;
-        case 'f': command_lexrecordtoken(l, TOKEN_FACETS, tok); return true;
-        case 'F': command_lexrecordtoken(l, TOKEN_FONT, tok); return true;
-        case 'i': command_lexrecordtoken(l, TOKEN_IDENTITY, tok); return true;
-        case 'm': command_lexrecordtoken(l, TOKEN_MATRIX, tok); return true;
-        case 'r': command_lexrecordtoken(l, TOKEN_ROTATE, tok); return true;
-        case 's': command_lexrecordtoken(l, TOKEN_SCALE, tok); return true;
-        case 'S': command_lexrecordtoken(l, TOKEN_SCENE, tok); return true;
-        case 't': command_lexrecordtoken(l, TOKEN_TRANSLATE, tok); return true;
-        case 'T': command_lexrecordtoken(l, TOKEN_TEXT, tok); return true;
-        case 'v': command_lexrecordtoken(l, TOKEN_VERTICES, tok); return true;
-        case 'W': command_lexrecordtoken(l, TOKEN_WINDOW, tok); return true;
-        case '"': return command_lexstring(l, tok);
-    }
-    
-    return false;
-}
-
-/* -------------------------------------------------------
- * Parser
- * ------------------------------------------------------- */
-
-/** Initialize the parser */
-void command_parseinit(parser *p, char *in) {
-    command_lexinit(&p->l, in);
-    p->current.type=TOKEN_NONE;
-    p->prev.type=TOKEN_NONE;
-    p->modelchanged=false;
-}
-
-/** Advance the parser one token */
-bool command_parseisatend(parser *p) {
-    return command_lexisatend(&p->l);
-}
-
-/** Advance the parser one token */
-bool command_parseadvance(parser *p) {
-    p->prev = p->current;
-    bool success=command_lex(&p->l, &p->current);
-    if (!success) fprintf(stderr, "morphoview: Unrecognized token.\n");
-    return success;
-}
-
-/** Parses the current token as an integer */
-bool command_parseinteger(parser *p, int *out) {
-    if (p->current.type==TOKEN_INTEGER) {
-        long f = strtol(p->current.start, NULL, 10);
-        *out = (int) f;
-        return command_parseadvance(p);
-    }
-    return false;
-}
-
-/** Parses the current token as a float */
-bool command_parsefloat(parser *p, float *out) {
-    if (p->current.type==TOKEN_INTEGER || p->current.type==TOKEN_FLOAT) {
-        float f = strtof(p->current.start, NULL);
-        *out = f;
-        return command_parseadvance(p);
-    }
-    return false;
-}
-
-/** Parses the current token as a string */
-bool command_parsestring(parser *p, char **out) {
-    if (p->current.type==TOKEN_INTEGER || p->current.type==TOKEN_STRING) {
-        int length = p->current.length-2;
-        char *str = malloc(sizeof(char)*(length+1));
-        if (str) {
-            strncpy(str, p->current.start+1, length);
-            str[length]='\0';
-            *out = str;
-            
-            return command_parseadvance(p);
-        }
-    }
-    return false;
-}
-
-/** Checks the current token type */
-tokentype command_parsecurrenttype(parser *p) {
-    return p->current.type;
-}
-
-/** Checks if the current token is an integer */
-bool command_iscurrentnumerical(parser *p) {
-    tokentype t=command_parsecurrenttype(p);
-    return (t==TOKEN_FLOAT || t==TOKEN_INTEGER);
-}
-
-/* ---------------
- * Parse functions
- * --------------- */
-
-#define ERRCHK(f) if (!(f)) return false;
-
-/** Parses a color definition */
-bool command_parsecolor(parser *p) {
-    int id, indx=-1;
-    int length=0;
-    ERRCHK(command_parseinteger(p, &id));
-    
-#ifdef DEBUG_PARSER
-    printf("Color %i ", id);
-#endif
-    
-    while (command_iscurrentnumerical(p)) {
-        float r[3];
-        for (int i=0; i<3; i++) ERRCHK(command_parsefloat(p, &r[i]));
-        
-        /* Add to the scene's data array */
-        int ret=scene_adddata(p->scene, r, 3);
-        if (indx<0) indx=ret;
-        
-        length++;
-        
-#ifdef DEBUG_PARSER
-        printf("%f %f %f ", r[0], r[1], r[2]);
-#endif
-    }
-    
-    if (length>0) {
-        scene_addcolor(p->scene, id, length, indx);
-    }
-    
-#ifdef DEBUG_PARSER
-    printf("\n");
-#endif
-    
-    return true;
-}
-
-/** Parses a color selection */
-bool command_parseselectcolor(parser *p) {
-    int id;
-    
-    ERRCHK(command_parseinteger(p, &id));
-#ifdef DEBUG_PARSER
-    printf("Select color %i\n", id);
-#endif
-    
-    scene_adddraw(p->scene, COLOR, id, -1);
-    
-    return true;
-}
-
-/** Parses a draw command */
-bool command_parsedraw(parser *p) {
-    int id, indx = SCENE_EMPTY;
-    ERRCHK(command_parseinteger(p, &id));
-#ifdef DEBUG_PARSER
-    printf("Draw %i\n", id);
-#endif
-    
-    if (p->modelchanged) {
-        indx=scene_adddata(p->scene, p->model, 16);
-        p->modelchanged=false;
-#ifdef DEBUG_PARSER
-        mat3d_print4x4(p->model);
-#endif
-    }
-    
-    scene_adddraw(p->scene, OBJECT, id, indx);
-    
-    return true;
-}
-
-/** Parses an object */
-bool command_parseobject(parser *p) {
-    int id;
-    ERRCHK(command_parseinteger(p, &id));
-#ifdef DEBUG_PARSER
-    printf("Object %i\n", id);
-#endif
-    
-    if (p->scene) {
-        p->cobject=scene_addobject(p->scene, id);
-    } else {
-        fprintf(stderr, "morphoview: No scene defined.\n");
-        return false;
-    }
-    
-    return true;
-}
-
-/** Parses a vertex list */
-bool command_parsevertices(parser *p) {
-    if (!p->scene || !p->cobject) {
-        fprintf(stderr, "morphoview: No object defined.\n");
-        return false;
-    }
-    
-    char *format=NULL;
-    if (command_parsestring(p, &format)) {
-#ifdef DEBUG_PARSER
-        printf("Vertices '%s'\n", format);
-#endif
-        p->cobject->vertexdata.format=format;
-    }
-    
-    while (command_iscurrentnumerical(p)) {
-        float f;
-        ERRCHK(command_parsefloat(p, &f));
-        
-        /* Add to the scene's vertex data array */
-        int ret=scene_adddata(p->scene, &f, 1);
-        
-        if (p->cobject->vertexdata.indx==SCENE_EMPTY) {
-            p->cobject->vertexdata.indx=ret;
-            p->cobject->vertexdata.length=0;
-        }
-        p->cobject->vertexdata.length++;
-        
-#ifdef DEBUG_PARSER
-        printf("%f ", f);
-#endif
-    }
-    
-#ifdef DEBUG_PARSER
-    printf("\n");
-#endif
-    
-    return true;
-}
-
-/** Parses a graphics object that is a list of vertex array indices */
-bool command_parseindex(parser *p) {
-    if (!p->scene || !p->cobject) {
-        fprintf(stderr, "morphoview: No object defined.\n");
-        return false;
-    }
-    
-    gelement el = { .type = POINTS, .indx = SCENE_EMPTY, .length = 0 };
-    
-    /* Remember the element type */
-    if (p->prev.type==TOKEN_LINES) {
-        el.type=LINES;
-    } else if (p->prev.type==TOKEN_FACETS) {
-        el.type=FACETS;
-    }
-    
-#ifdef DEBUG_PARSER
-    printf("Indexed list type %u\n", el.type);
-#endif
-    
-    while (command_parsecurrenttype(p)==TOKEN_INTEGER) {
-        int i;
-        ERRCHK(command_parseinteger(p, &i));
-        
-#ifdef DEBUG_PARSER
-        printf("%i ", i);
-#endif
-        
-        /* Add to the scene's index data array */
-        int ret=scene_addindex(p->scene, &i, 1);
-        
-        /* And remember the starting point and length */
-        if (el.indx==SCENE_EMPTY) el.indx=ret;
-        el.length++;
-    }
-#ifdef DEBUG_PARSER
-    printf("\n");
-#endif
-    
-    scene_addelement(p->cobject, &el);
-    
-    return true;
-}
-
-/** Parse an identity command */
-bool command_parseidentity(parser *p) {
-#ifdef DEBUG_PARSER
-    printf("Identity\n");
-#endif
-    
-    mat3d_identity4x4(p->model);
-    p->modelchanged=true;
-    return true;
-}
-
-/** Parse a matrix command */
-bool command_parsematrix(parser *p) {
-    mat4x4 x, m;
-    for (int i=0; i<16; i++) {
-        ERRCHK(command_parsefloat(p, &x[i]));
-    }
-    
-#ifdef DEBUG_PARSER
-    printf("Matrix:\n");
-    mat3d_print4x4(x);
-#endif
-    
-    mat3d_copy4x4(p->model, m);
-    mat3d_mul4x4(m, x, p->model);
-    
-    p->modelchanged=true;
-    
-    return true;
-}
-
-/** Parse a rotate command */
-bool command_parserotate(parser *p) {
-    float phi, x[3];
-    ERRCHK(command_parsefloat(p, &phi));
-    for (int i=0; i<3; i++) {
-        ERRCHK(command_parsefloat(p, &x[i]));
-    }
-#ifdef DEBUG_PARSER
-    printf("Rotate %f (%f,%f,%f)\n", phi, x[0], x[1], x[2]);
-#endif
-    
-    mat3d_rotate(p->model, x, phi, p->model);
-    p->modelchanged=true;
-    
-    return true;
-}
-
-/** Parse a scale command */
-bool command_parsescale(parser *p) {
-    float s;
-    ERRCHK(command_parsefloat(p, &s));
-#ifdef DEBUG_PARSER
-    printf("Scale %f\n", s);
-#endif
-    mat3d_scale(p->model, s, p->model);
-    p->modelchanged=true;
-    
-    return true;
-}
-
-/** Parse a translate command */
-bool command_parsetranslate(parser *p) {
-    float x[3];
-    for (int i=0; i<3; i++) {
-        ERRCHK(command_parsefloat(p, &x[i]));
-    }
-#ifdef DEBUG_PARSER
-    printf("Translate (%f,%f,%f)\n", x[0], x[1], x[2]);
-#endif
-    
-    mat3d_translate(p->model, x, p->model);
-    p->modelchanged=true;
-    
-    return true;
-}
-
-/** Parses a scene command */
-bool command_parsescene(parser *p) {
-    int id, dim;
-    ERRCHK(command_parseinteger(p, &id));
-    ERRCHK(command_parseinteger(p, &dim));
-    
-#ifdef DEBUG_PARSER
-    printf("Scene id: %i dim: %i\n", id, dim);
-#endif
-    
-    p->scene = scene_new(id, dim);
-    if (p->scene) p->display=display_open(p->scene);
-    
-    return (p->scene!=NULL);
-}
-
-/** Parses a window command */
-bool command_parsewindow(parser *p) {
-    char *name;
-    
-    if (command_parsestring(p, &name)) {
-#ifdef DEBUG_PARSER
-        printf("Window '%s'\n", name);
-#endif
-        if (name) {
-            display_setwindowtitle(p->display, name);
-            free(name);
-        }
-        return true;
-    }
-    
-    return false;
-}
-
-/** Parses a font definition */
-bool command_parsefont(parser *p) {
-    int id;
-    char *file;
-    float size;
-    
-    ERRCHK(command_parseinteger(p, &id));
-    ERRCHK(command_parsestring(p, &file));
-    ERRCHK(command_parsefloat(p, &size));
-    
-#ifdef DEBUG_PARSER
-    printf("Font %i '%s' %g\n", id, file, size);
-#endif
-    
-    return scene_addfont(p->scene, id, file, size, NULL);
-}
-
-/** Parses a text command */
-bool command_parsetext(parser *p) {
-    int fontid;
-    char *string;
-    
-    ERRCHK(command_parseinteger(p, &fontid));
-    ERRCHK(command_parsestring(p, &string));
-    
-#ifdef DEBUG_PARSER
-    printf("Text %i '%s'\n", fontid, string);
-#endif
-    
-    int matindx=SCENE_EMPTY;
-    int tid=scene_addtext(p->scene, fontid, string);
-    
-    if (p->modelchanged) {
-        matindx=scene_adddata(p->scene, p->model, 16);
-        p->modelchanged=false;
-#ifdef DEBUG_PARSER
-        mat3d_print4x4(p->model);
-#endif
-    }
-    
-    scene_adddraw(p->scene, TEXT, tid, matindx);
-    
-    return true;
-}
-
-#define UNDEFINED NULL
-/** The parse table defines which function handles which token type */
-parsefunction parsetable[] = {
-    UNDEFINED,              // TOKEN_NONE
-    
-    UNDEFINED,              // TOKEN_INTEGER
-    UNDEFINED,              // TOKEN_FLOAT
-    UNDEFINED,              // TOKEN_STRING
-    
-    command_parsecolor,     // TOKEN_COLOR
-    command_parseselectcolor,// TOKEN_SELECTCOLOR
-    command_parsedraw,      // TOKEN_DRAW
-    command_parseobject,    // TOKEN_OBJECT
-    command_parsevertices,  // TOKEN_VERTICES
-    command_parseindex,     // TOKEN_POINTS
-    command_parseindex,     // TOKEN_LINES
-    command_parseindex,     // TOKEN_FACETS
-    command_parseidentity,  // TOKEN_IDENTITY
-    command_parsematrix,    // TOKEN_MATRIX
-    command_parserotate,    // TOKEN_ROTATE
-    command_parsescale,     // TOKEN_SCALE
-    command_parsescene,     // TOKEN_SCENE
-    command_parsetranslate, // TOKEN_TRANSLATE
-    UNDEFINED,              // TOKEN_VIEWDIRECTION
-    UNDEFINED,              // TOKEN_VIEWVERTICAL
-    command_parsewindow,    // TOKEN_WINDOW
-    command_parsefont,      // TOKEN_FONT
-    command_parsetext,      // TOKEN_TEXT
-    
-    UNDEFINED, // TOKEN_EOF
-};
-
-/** @brief Parses a command sequence */
-bool command_parse(char *in) {
-    parser p;
-    
-    command_parseinit(&p, in);
-    ERRCHK(command_parseadvance(&p));
-    
-    do {
-        /* Lookup the current parse function */
-        if (p.current.type>TOKEN_EOF) {
-            fprintf(stderr, "morphoview: Inconsistent token definitions.\n");
-            return false;
-        }
-        
-        parsefunction fn = parsetable[p.current.type];
-        if (fn==UNDEFINED) {
-            fprintf(stderr, "morphoview: Couldn't parse token.\n");
-            return false;
-        }
-        
-        ERRCHK(command_parseadvance(&p));
-        
-        bool result = (*fn) (&p);
-        if (!result) return false;
-    } while (!command_parseisatend(&p));
-    
-    /** Prepare the scene for display */
-    if (p.scene && p.display) {
-        render_preparescene(&p.display->render, p.scene);
-    }
-    
-    return true;
+void command_finalize(void) {
 }

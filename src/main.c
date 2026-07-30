@@ -7,17 +7,20 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "morpho.h"
 #include "command.h"
 #include "display.h"
 #include "text.h"
 
 int main(int argc, const char * argv[]) {
+    morpho_initialize();
+    command_initialize();
     scene_initialize();
     display_initialize();
     text_initialize();
     bool temp = false;
     bool parsed = false;
-    
+
     // Process arguments
     const char *file=NULL;
     for (unsigned int i=1; i<argc; i++) {
@@ -32,24 +35,26 @@ int main(int argc, const char * argv[]) {
             file = option;
         }
     }
-    
+
     // Parse a command file if provided
     if (file) {
         char *buffer = NULL;
         printf("Loading %s\n", file);
-        
+
         if (command_loadinput(file, &buffer)) {
             parsed=command_parse(buffer);
         }
-        
+
         if (buffer) MORPHO_FREE(buffer);
     }
-    
+
     if (parsed) display_loop();
-    
+
     text_finalize();
     display_finalize();
     scene_finalize();
-    
+    command_finalize();
+    morpho_finalize();
+
     if (temp && file) command_removefile(file);
 }

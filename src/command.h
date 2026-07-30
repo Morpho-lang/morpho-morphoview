@@ -9,85 +9,33 @@
 
 #include <stdio.h>
 #include <stdbool.h>
-#include "scene.h"
-#include "display.h"
-#include "matrix3d.h"
 
-//#define DEBUG_PARSER
+#include "parse.h"
 
 /* -------------------------------------------------------
- * Tokens
+ * Error ids
  * ------------------------------------------------------- */
 
-/** @brief The token type */
-typedef enum {
-    TOKEN_NONE,
-    
-    TOKEN_INTEGER,
-    TOKEN_FLOAT,
-    TOKEN_STRING,
-    
-    TOKEN_COLOR,
-    TOKEN_SELECTCOLOR,
-    TOKEN_DRAW,
-    TOKEN_OBJECT,
-    TOKEN_VERTICES,
-    TOKEN_POINTS,
-    TOKEN_LINES,
-    TOKEN_FACETS,
-    TOKEN_IDENTITY,
-    TOKEN_MATRIX,
-    TOKEN_ROTATE,
-    TOKEN_SCALE,
-    TOKEN_SCENE,
-    TOKEN_TRANSLATE,
-    TOKEN_VIEWDIRECTION,
-    TOKEN_VIEWVERTICAL,
-    TOKEN_WINDOW,
-    TOKEN_FONT,
-    TOKEN_TEXT,
-    
-    TOKEN_EOF
-} tokentype;
+#define COMMAND_UNRCGNZDCMND              "UnrcgnzdCmnd"
+#define COMMAND_UNRCGNZDCMND_MSG          "Unrecognized morphoview command."
 
-/** @brief A token */
-typedef struct {
-    tokentype type; /** Type of the token */
-    const char *start; /** Start of the token */
-    unsigned int length; /** Its length */
-} token;
+#define COMMAND_INVLDNMBR                 "InvldNmbr"
+#define COMMAND_INVLDNMBR_MSG             "Improperly formatted number."
 
-/* -------------------------------------------------------
- * Lexer
- * ------------------------------------------------------- */
+#define COMMAND_NOSCENE                   "NoScene"
+#define COMMAND_NOSCENE_MSG               "No scene defined."
 
-/** @brief Store the current configuration of a lexer */
-typedef struct {
-    const char* start; /** Starting point to lex */
-    const char* current; /** Current point */
-} lexer;
+#define COMMAND_NOOBJECT                  "NoObject"
+#define COMMAND_NOOBJECT_MSG              "No object defined."
 
-/* -------------------------------------------------------
- * Parser
- * ------------------------------------------------------- */
+#define COMMAND_EXPECTINTEGER             "ExpctInt"
+#define COMMAND_EXPECTINTEGER_MSG         "Expected an integer."
 
-/** @brief Store the current configuration of a parser */
-typedef struct {
-    lexer l; 
-    token current;
-    token prev;
-    
-    scene *scene;
-    display *display;
-    
-    mat4x4 model; /* The model matrix */
-    bool modelchanged;
-    
-    gobject *cobject;
-} parser;
+#define COMMAND_EXPECTNUMBER              "ExpctNmbr"
+#define COMMAND_EXPECTNUMBER_MSG          "Expected a number."
 
-/** @brief Definition of a parse function. */
-typedef bool (*parsefunction) (parser *p);
+#define COMMAND_EXPECTSTRING              "ExpctStr"
+#define COMMAND_EXPECTSTRING_MSG          "Expected a string."
 
 /* -------------------------------------------------------
  * Prototypes
@@ -97,9 +45,9 @@ bool command_getfilesize(FILE *f, size_t *s);
 bool command_loadinput(const char *in, char **out);
 void command_removefile(const char *in);
 
-void command_lexinit(lexer *l, const char *start);
-bool command_lex(lexer *l, token *tok);
-
 bool command_parse(char *in);
+
+void command_initialize(void);
+void command_finalize(void);
 
 #endif /* command_h */
