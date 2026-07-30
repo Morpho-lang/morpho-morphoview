@@ -44,6 +44,9 @@
 #define COMMAND_INVLDDELETE               "InvldDel"
 #define COMMAND_INVLDDELETE_MSG           "Unrecognized delete target (expected S)."
 
+#define COMMAND_INVLDMATERIAL             "InvldMat"
+#define COMMAND_INVLDMATERIAL_MSG         "Unrecognized material (expected shaded or flat)."
+
 /* -------------------------------------------------------
  * Command IR — header + typed payloads
  * ------------------------------------------------------- */
@@ -60,6 +63,7 @@ typedef enum {
     MVCMD_ELEMENT,        /**< Append points/lines/facets (`p`/`l`/`f`) */
     MVCMD_COLOR,          /**< Define color table entry (`c`) */
     MVCMD_SELECT_COLOR,   /**< Select active color (`C`) */
+    MVCMD_MATERIAL,       /**< Shade mode + Phong coeffs (`M`) */
     MVCMD_DRAW,           /**< Draw object, optional matrix (`d`) */
     MVCMD_FONT,           /**< Load font (`F`) */
     MVCMD_TEXT,           /**< Add/draw text, optional matrix (`T`) */
@@ -165,6 +169,19 @@ typedef struct {
     int id;
 } mv_cmd_select_color;
 
+/** Set shading mode and optional Phong coefficients for subsequent draws.
+ *  Language: `M flat` | `M shaded` | `M shaded <ka> <kd> [<ks> [<n>]]`
+ *  @param mode       SCENE_SHADE_SHADED or SCENE_SHADE_FLAT
+ *  @param ka,kd,ks,n Ambient/diffuse/specular/shininess (defaults if omitted) */
+typedef struct {
+    mv_command cmd;
+    int mode;
+    float ka;
+    float kd;
+    float ks;
+    float shininess;
+} mv_cmd_material;
+
 /** Draw an object, optionally with a model matrix.
  *  Language: `d <id>` (matrix baked from preceding `i`/`m`/`r`/`s`/`t` at parse time)
  *  @param id          Object identifier
@@ -213,6 +230,7 @@ typedef struct {
 #define MVCMD_AS_ELEMENT(c)       ((mv_cmd_element *) (c))
 #define MVCMD_AS_COLOR(c)         ((mv_cmd_color *) (c))
 #define MVCMD_AS_SELECT_COLOR(c)  ((mv_cmd_select_color *) (c))
+#define MVCMD_AS_MATERIAL(c)      ((mv_cmd_material *) (c))
 #define MVCMD_AS_DRAW(c)          ((mv_cmd_draw *) (c))
 #define MVCMD_AS_FONT(c)          ((mv_cmd_font *) (c))
 #define MVCMD_AS_TEXT(c)          ((mv_cmd_text *) (c))

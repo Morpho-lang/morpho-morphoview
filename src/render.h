@@ -65,7 +65,8 @@ typedef struct {
         RLINES, /* Draw lines */
         RPOINTS, /* Draw points */
         RTEXT, /* Draw text */
-        RCOLOR, /* Set the current color */
+        RCOLOR, /* Set the current color (uniform albedo for geometry / text) */
+        RSHADE, /* Set shade mode + Phong coefficients */
     } instruction;
     
     union {
@@ -88,8 +89,17 @@ typedef struct {
         } text;
         
         struct {
-            float rgb[3]; 
+            float rgb[3];
+            int use_uniform; /* 1 = geometry uses uColor; text always uses rgb */
         } color;
+
+        struct {
+            int mode; /* SCENE_SHADE_SHADED or SCENE_SHADE_FLAT */
+            float ka;
+            float kd;
+            float ks;
+            float shininess;
+        } shade;
     } data;
     
     renderobject *obj;
@@ -100,6 +110,7 @@ DECLARE_VARRAY(renderinstruction, renderinstruction)
 /** Renderer object. */
 typedef struct {
     GLuint shader;
+    GLuint flatshader;
     GLuint textshader;
     varray_renderobject objects;
     varray_renderfont fonts;

@@ -6,10 +6,10 @@
 
 import morphoview
 
-fn vtx(x, y, c, s, r, g, b) {
+fn vtx(x, y, c, s) {
   var xp = c*x - s*y
   var yp = s*x + c*y
-  return "${xp} ${yp} 0  0 0 1  ${r} ${g} ${b}\n"
+  return "${xp} ${yp} 0  0 0 1\n"
 }
 
 fn triangle(angle, header) {
@@ -17,15 +17,15 @@ fn triangle(angle, header) {
   var s = sin(angle)
   return header +
     "c 0 1 0.4 0.1\n" +
+    "C 0\n" +
     "o 1\n" +
-    "v \"xnc\"\n" +
-    vtx(-0.5, -0.5, c, s, 1, 0.4, 0.1) +
-    vtx( 0.5, -0.5, c, s, 1, 0.4, 0.1) +
-    vtx( 0.0,  0.5, c, s, 1, 0.4, 0.1) +
+    "v \"xn\"\n" +
+    vtx(-0.5, -0.5, c, s) +
+    vtx( 0.5, -0.5, c, s) +
+    vtx( 0.0,  0.5, c, s) +
     "l\n" +
     "0 1 1 2 2 0\n" +
     "i\n" +
-    "C 0\n" +
     "d 1\n"
 }
 

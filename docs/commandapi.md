@@ -55,7 +55,8 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_VERTICES` | `v ["format"] <floats...>` | Optional format; float blob |
 | `MVCMD_ELEMENT` | `p` / `l` / `f` `<indices...>` | Points, lines, or facets |
 | `MVCMD_COLOR` | `c <id> <r g b>...` | Color id; RGB triples |
-| `MVCMD_SELECT_COLOR` | `C <id>` | Active color id |
+| `MVCMD_SELECT_COLOR` | `C <id>` | Active color id (uniform albedo for subsequent geometry/text) |
+| `MVCMD_MATERIAL` | `M flat` / `M shaded [ka kd [ks [n]]]` | Shade mode + Phong coeffs |
 | `MVCMD_DRAW` | `d <id>` | Object id; optional baked 4×4 matrix |
 | `MVCMD_FONT` | `F <id> "<path>" <size>` | Font id, path, size |
 | `MVCMD_TEXT` | `T <fontid> "<string>"` | Font id, string; optional matrix |
@@ -81,10 +82,26 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `v` | `["format"] <floats...>` | Vertex data for current object |
 | `p` / `l` / `f` | `<indices...>` | Points / lines / facets |
 | `c` | `<id> <r g b>...` | Define color table entry |
-| `C` | `<id>` | Select color for subsequent draws |
+| `C` | `<id>` | Select uniform color for subsequent geometry and text |
+| `M` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Material: unlit or OpenGL/VTK Phong (default ka=kd=0.5, ks=0) |
 | `d` | `<id>` | Draw object (matrix from prior transforms if any) |
 | `F` | `<id> "<path>" <size>` | Load font |
 | `T` | `<fontid> "<string>"` | Draw text (matrix like `d`) |
+
+### Materials and color
+
+Shading uses the standard Phong model (Lambert when \(k_s=0\)):
+
+\[
+I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V})^n)\,C_\text{light}\,\text{albedo}
+\]
+
+- **`M shaded`** (default) — Phong/Lambert with science-friendly defaults (\(k_a=k_d=0.5\), \(k_s=0\)). Optional floats override coeffs.
+- **`M flat`** — unlit albedo (diagrams / categorical color).
+- **Uniform color:** `c` / `C` then `v "xn"` — `C` sets albedo for subsequent draws.
+- **Vertex color:** `v "xnc"` without a preceding `C` — per-vertex RGB is the albedo.
+
+Lighting and eye position are in model space (stable under camera rotation). Opacity / RGBA is deferred.
 
 ### Transforms (parse-only)
 
@@ -103,20 +120,21 @@ These update a parse-local model matrix and are **not** enqueued. On the next `d
 ```
 S 0 3
 W "Example"
+M shaded
 c 0 1 0 0
+C 0
 o 1
-v "xnc"
--0.5 -0.5 0  0 0 1  1 0 0
- 0.5 -0.5 0  0 0 1  1 0 0
- 0.0  0.5 0  0 0 1  1 0 0
+v "xn"
+-0.5 -0.5 0  0 0 1
+ 0.5 -0.5 0  0 0 1
+ 0.0  0.5 0  0 0 1
 l
 0 1 1 2 2 0
 i
-C 0
 d 1
 ```
 
-See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, and `test/command/largebbox` (geometry outside `[-1,1]`; auto-fit).
+See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, `test/command/largebbox` (auto-fit), `test/command/flatshade`, `test/command/uniformphong`, `test/command/materials` (flat | Lambert | Phong spheres), and `test/command/torus` (specular highlight).
 
 ## ZeroMQ transport
 

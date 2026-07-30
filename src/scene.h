@@ -90,13 +90,24 @@ DECLARE_VARRAY(gtext, gtext);
 typedef enum {
     OBJECT,
     TEXT,
-    COLOR
+    COLOR,
+    SHADE
 } gdrawtype;
+
+/** Shade modes for SHADE draw entries (`M shaded|flat`). */
+#define SCENE_SHADE_SHADED 0
+#define SCENE_SHADE_FLAT   1
+
+/** Default OpenGL/VTK Phong coeffs: Lambert (ks=0) for scientific viz. */
+#define SCENE_MATERIAL_KA_DEFAULT  0.5f
+#define SCENE_MATERIAL_KD_DEFAULT  0.5f
+#define SCENE_MATERIAL_KS_DEFAULT  0.0f
+#define SCENE_MATERIAL_SHININESS_DEFAULT 32.0f
 
 typedef struct {
     gdrawtype type;
-    int id;
-    int matindx;
+    int id;       /**< Object/color/text id, or SCENE_SHADE_* for SHADE */
+    int matindx;  /**< Model matrix, or material coeffs (ka kd ks n) for SHADE */
 } gdraw;
 
 DECLARE_VARRAY(gdraw, gdraw);

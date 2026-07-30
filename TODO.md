@@ -32,7 +32,8 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 - [x] Auto-fit on first `PREPARE` (and after `B`) unless the user moved the camera; Tab restores fitted home view
 - [x] Default light / viewPos placed outside scene AABB (unless an explicit light is set later)
 - [ ] Explicit light command: `L <x y z [r g b]>` / `L a` (auto)
-- [ ] Flat shading (`M shaded|flat`) + RGBA / opacity
+- [x] Material model: `M shaded|flat` + OpenGL/VTK Phong (\(k_a,k_d,k_s,n\)); uniform `C` for meshes
+- [ ] RGBA / opacity (blend + opaque/transparent passes)
 - [ ] Object update/delete (`U O` / `X O`) + persistent apply context
 - [ ] Binary / byte-buffer vertex transport
 - [ ] Pick / view / click events
@@ -61,6 +62,15 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 |---------|--------|--------|
 | `L <x> <y> <z> [r g b]` | Later | Explicit model-space light (optional color); sets `light_explicit` |
 | `L a` | Later | Clear explicit light; resume AABB auto placement |
+
+### Materials
+
+| Command | Status | Intent |
+|---------|--------|--------|
+| `M shaded [ka kd [ks [n]]]` | Done | OpenGL/VTK Phong; defaults ka=kd=0.5, ks=0 (Lambert) |
+| `M flat` | Done | Unlit albedo |
+| `C` on meshes | Done | Uniform albedo for subsequent geometry |
+| RGBA / opacity | Later | Phase 2c |
 
 ### Delete / quit
 
@@ -97,6 +107,10 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 - [x] `U S` replace: [`test/testupdate.morpho`](test/testupdate.morpho)
 - [x] Large geometry auto-fit: [`test/command/largebbox`](test/command/largebbox)
 - [x] Large tetrahedron via Graphics/`View`: [`test/testviewlarge.morpho`](test/testviewlarge.morpho)
+- [x] Flat material: [`test/command/flatshade`](test/command/flatshade)
+- [x] Uniform Phong: [`test/command/uniformphong`](test/command/uniformphong)
+- [x] Material comparison (flat / Lambert / Phong): [`test/command/materials`](test/command/materials)
+- [x] Phong torus: [`test/command/torus`](test/command/torus)
 
 ## Notes
 

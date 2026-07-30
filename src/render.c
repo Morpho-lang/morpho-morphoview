@@ -24,7 +24,7 @@ DEFINE_VARRAY(renderinstruction, renderinstruction)
  * Shaders
  * ------------------------------------------------------- */
 
-/* Default shader */
+/* Shaded: OpenGL/VTK Phong (Lambert when ks=0). Lighting in model space. */
 
 const char *vertexshader = "#version 330 core\n"
     "layout (location = 0) in vec3 vPos;"
@@ -40,8 +40,8 @@ const char *vertexshader = "#version 330 core\n"
     "void main() {"
     "   gl_Position = proj * view * model * vec4(vPos, 1.0);"
     "   fragColor = vColor;"
-    "   fragPos = vPos;"
-    "   normal = mat3(transpose(inverse(view * model))) * vNormal;"
+    "   fragPos = vec3(model * vec4(vPos, 1.0));"
+    "   normal = mat3(transpose(inverse(model))) * vNormal;"
     "}";
 
 const char *fragmentshader = "#version 330 core\n"
@@ -52,31 +52,34 @@ const char *fragmentshader = "#version 330 core\n"
     "uniform vec3 lightColor;"
     "uniform vec3 lightPos;"
     "uniform vec3 viewPos;"
+    "uniform vec3 uColor;"
+    "uniform int uUseUniform;"
+    "uniform float ka;"
+    "uniform float kd;"
+    "uniform float ks;"
+    "uniform float shininess;"
     ""
     "void main() {"
-    "   float ambientStrength = 0.1;"
-    "   vec3 ambient = ambientStrength * lightColor;"
-    ""
+    "   vec3 albedo = (uUseUniform != 0) ? uColor : fragColor;"
     "   vec3 norm = normalize(normal);"
-    "   vec3 lightDir = normalize(lightPos-fragPos);"
-    "   float diff = max(dot(norm, lightDir), 0.0);"
-    "   vec3 diffuse = diff * lightColor;"
-    ""
-    "   float specularStrength = 0.2;"
-    "   vec3 viewDir = normalize(viewPos-fragPos);"
+    "   vec3 lightDir = normalize(lightPos - fragPos);"
+    "   float NdotL = max(dot(norm, lightDir), 0.0);"
+    "   vec3 ambient = ka * lightColor;"
+    "   vec3 diffuse = kd * NdotL * lightColor;"
+    "   vec3 viewDir = normalize(viewPos - fragPos);"
     "   vec3 reflectDir = reflect(-lightDir, norm);"
-    "   float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32);"
-    "   vec3 specular = specularStrength * spec * lightColor;"
-    ""
-    "   vec3 result = (ambient + diffuse + specular) * fragColor;"
-    "   FragColor = vec4(result, 1.0f);"
+    "   float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);"
+    "   vec3 specular = ks * spec * lightColor;"
+    "   vec3 result = (ambient + diffuse + specular) * albedo;"
+    "   FragColor = vec4(result, 1.0);"
     "}";
 
-/* Flat shader */
+/* Flat / unlit */
 
 const char *flatvertexshader = "#version 330 core\n"
     "layout (location = 0) in vec3 vPos;"
     "layout (location = 1) in vec3 vColor;"
+    "layout (location = 2) in vec3 vNormal;"
     "out vec3 fragColor;"
     "uniform mat4 model;"
     "uniform mat4 view;"
@@ -85,15 +88,17 @@ const char *flatvertexshader = "#version 330 core\n"
     "void main() {"
     "   gl_Position = proj * view * model * vec4(vPos, 1.0);"
     "   fragColor = vColor;"
-    "   fragPos = vPos;"
     "}";
 
 const char *flatfragmentshader = "#version 330 core\n"
     "out vec4 FragColor;"
     "in vec3 fragColor;"
+    "uniform vec3 uColor;"
+    "uniform int uUseUniform;"
     ""
     "void main() {"
-    "   FragColor = vec4(fragColor, 1.0f);"
+    "   vec3 albedo = (uUseUniform != 0) ? uColor : fragColor;"
+    "   FragColor = vec4(albedo, 1.0);"
     "}";
 
 /* Text shader */
@@ -157,7 +162,7 @@ bool render_compileprogram(const char *vertexshadersource, const char *fragments
     fragmentshader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragmentshader, 1, &fragmentshadersource, NULL);
     glCompileShader(fragmentshader);
-    glGetShaderiv(vertexshader, GL_COMPILE_STATUS, &success);
+    glGetShaderiv(fragmentshader, GL_COMPILE_STATUS, &success);
     if(!success) {
         glGetShaderInfoLog(fragmentshader, 512, NULL, infoLog);
         fprintf(stderr,"Fragment shader failed to compile with error '%s'\n", infoLog);
@@ -194,9 +199,13 @@ bool render_compileprogram(const char *vertexshadersource, const char *fragments
 
 /** Initializes a display, compiling shaders */
 bool render_init(renderer *r) {
-    
-    render_compileprogram(vertexshader, fragmentshader, &r->shader);
-    render_compileprogram(textvertexshader, textfragmentshader, &r->textshader);
+    r->shader=0;
+    r->flatshader=0;
+    r->textshader=0;
+
+    if (!render_compileprogram(vertexshader, fragmentshader, &r->shader)) return false;
+    if (!render_compileprogram(flatvertexshader, flatfragmentshader, &r->flatshader)) return false;
+    if (!render_compileprogram(textvertexshader, textfragmentshader, &r->textshader)) return false;
     
     /* Enable OpenGL features */
     glEnable(GL_DEPTH_TEST);
@@ -248,8 +257,12 @@ void render_reset(renderer *r) {
 
 void render_clear(renderer *r) {
     render_reset(r);
-    glDeleteProgram(r->shader);
-    glDeleteProgram(r->textshader);
+    if (r->shader) glDeleteProgram(r->shader);
+    if (r->flatshader) glDeleteProgram(r->flatshader);
+    if (r->textshader) glDeleteProgram(r->textshader);
+    r->shader=0;
+    r->flatshader=0;
+    r->textshader=0;
 }
 
 
@@ -525,7 +538,7 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
             glEnableVertexAttribArray(0);
             offset += s->dim;
         } else if (b->format[j]=='c') {
-            glVertexAttribPointer(1, s->dim, GL_FLOAT, GL_FALSE, sizeof(GLfloat)*entrysize, (void*) (sizeof(GLfloat)*offset));
+            glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat)*entrysize, (void*) (sizeof(GLfloat)*offset));
             glEnableVertexAttribArray(1);
             offset += 3;
         } else if (b->format[j]=='n') {
@@ -668,17 +681,35 @@ void render_preparescene(renderer *r, scene *s) {
                 render_preparetext(r, s, drw, &carray);
                 break;
             case COLOR:
-            { // Set current color
+            {
                 gcolor *color = scene_getcolorfromid(s, drw->id);
                 
                 if (color) {
                     renderinstruction ins = { .instruction = RCOLOR };
-                    for (int i=0; i<3; i++) ins.data.color.rgb[i]=s->data.data[color->indx+i];
-                
+                    for (int k=0; k<3; k++) ins.data.color.rgb[k]=s->data.data[color->indx+k];
+                    ins.data.color.use_uniform=1;
                     varray_renderinstructionadd(&r->renderlist, &ins, 1);
                 } else {
                     printf("Color %i not found.\n", drw->id);
                 }
+            }
+                break;
+            case SHADE:
+            {
+                renderinstruction ins = { .instruction = RSHADE };
+                ins.data.shade.mode=drw->id;
+                ins.data.shade.ka=SCENE_MATERIAL_KA_DEFAULT;
+                ins.data.shade.kd=SCENE_MATERIAL_KD_DEFAULT;
+                ins.data.shade.ks=SCENE_MATERIAL_KS_DEFAULT;
+                ins.data.shade.shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
+                if (drw->matindx!=SCENE_EMPTY) {
+                    float *m=&s->data.data[drw->matindx];
+                    ins.data.shade.ka=m[0];
+                    ins.data.shade.kd=m[1];
+                    ins.data.shade.ks=m[2];
+                    ins.data.shade.shininess=m[3];
+                }
+                varray_renderinstructionadd(&r->renderlist, &ins, 1);
             }
                 break;
         }
@@ -689,28 +720,56 @@ void render_preparescene(renderer *r, scene *s) {
  * Render the scene
  * ------------------------------------------------------- */
 
+/** Upload uniforms shared by shaded and flat geometry programs. */
+static void render_setgeometryuniforms(GLuint program, mat4x4 view, mat4x4 proj,
+                                       mat4x4 model, vec3 lightcolor, vec3 lightposn, vec3 viewposn,
+                                       vec3 ucolor, int use_uniform,
+                                       float ka, float kd, float ks, float shininess) {
+    glUseProgram(program);
+    glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, GL_FALSE, model);
+    glUniformMatrix4fv(glGetUniformLocation(program, "view"), 1, GL_FALSE, view);
+    glUniformMatrix4fv(glGetUniformLocation(program, "proj"), 1, GL_FALSE, proj);
+    glUniform3fv(glGetUniformLocation(program, "uColor"), 1, ucolor);
+    glUniform1i(glGetUniformLocation(program, "uUseUniform"), use_uniform);
+
+    GLint loc;
+    loc=glGetUniformLocation(program, "lightColor");
+    if (loc>=0) glUniform3fv(loc, 1, lightcolor);
+    loc=glGetUniformLocation(program, "lightPos");
+    if (loc>=0) glUniform3fv(loc, 1, lightposn);
+    loc=glGetUniformLocation(program, "viewPos");
+    if (loc>=0) glUniform3fv(loc, 1, viewposn);
+    loc=glGetUniformLocation(program, "ka");
+    if (loc>=0) glUniform1f(loc, ka);
+    loc=glGetUniformLocation(program, "kd");
+    if (loc>=0) glUniform1f(loc, kd);
+    loc=glGetUniformLocation(program, "ks");
+    if (loc>=0) glUniform1f(loc, ks);
+    loc=glGetUniformLocation(program, "shininess");
+    if (loc>=0) glUniform1f(loc, shininess);
+}
+
 void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s) {
     /* Clear the display */
     glClearColor(0.160784f, 0.164706f, 0.188235f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+    /* Default vertex color/normal when format lacks those attributes */
+    glVertexAttrib3f(1, 1.0f, 1.0f, 1.0f);
+    glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
     
-    /* Load the shader */
-    glUseProgram(r->shader);
-    
-    /* Location of shader properties */
-    GLint modeluniform = glGetUniformLocation(r->shader, "model");
-    GLint viewuniform = glGetUniformLocation(r->shader, "view");
-    GLint projuniform = glGetUniformLocation(r->shader, "proj");
-    
-    GLint lightcoloruniform = glGetUniformLocation(r->shader, "lightColor");
-    GLint lightposuniform = glGetUniformLocation(r->shader, "lightPos");
-    GLint viewposuniform = glGetUniformLocation(r->shader, "viewPos");
-    
-    /* Lighting in model space (matches fragPos = vPos in the shader).
-     * Explicit light if set; otherwise place outside the scene AABB. */
     vec3 lightcolor = {1.0f, 1.0f, 1.0f};
     vec3 lightposn = {2.0f, 1.0f, 5.0f};
     vec3 viewposn = {0.0f, 0.0f, 1.0f};
+
+    /* Eye position in model/world space from inverse view */
+    {
+        mat4x4 invview;
+        mat3d_invert4x4(view, invview);
+        viewposn[0]=invview[12];
+        viewposn[1]=invview[13];
+        viewposn[2]=invview[14];
+    }
 
     if (s && s->light_explicit) {
         lightposn[0]=s->light_pos[0];
@@ -719,9 +778,6 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
         lightcolor[0]=s->light_color[0];
         lightcolor[1]=s->light_color[1];
         lightcolor[2]=s->light_color[2];
-        viewposn[0]=s->light_pos[0];
-        viewposn[1]=s->light_pos[1];
-        viewposn[2]=s->light_pos[2];
     } else if (s && s->bbox_valid) {
         float cx=0.5f*(s->bbox[0]+s->bbox[1]);
         float cy=0.5f*(s->bbox[2]+s->bbox[3]);
@@ -732,40 +788,55 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
         float radius = sqrtf(hx*hx + hy*hy + hz*hz);
         if (radius < 1e-6f) radius = 1.0f;
 
-        /* Upper-right-front — outside the mesh */
         lightposn[0] = cx + 0.7f * radius;
         lightposn[1] = cy + 1.0f * radius;
         lightposn[2] = cz + 1.5f * radius;
-        /* Specular eye along +Z from center (default ortho look direction) */
-        viewposn[0] = cx;
-        viewposn[1] = cy;
-        viewposn[2] = cz + 2.5f * radius;
     }
     
-    glUniform3fv(lightcoloruniform, 1, lightcolor);
-    glUniform3fv(lightposuniform, 1, lightposn);
-    glUniform3fv(viewposuniform, 1, viewposn);
-    
-    /* Set up the view matrix */
-    glUniformMatrix4fv(viewuniform, 1, GL_FALSE, view);
-    
-    /* Set up the projection matrix */
     mat4x4 proj;
     mat3d_ortho(NULL, proj, -1.0*aspectratio, 1.0*aspectratio, -1.0, 1.0, near, far);
-    glUniformMatrix4fv(projuniform, 1, GL_FALSE, proj);
 
-    /* Default model to identity; draw commands may override via RMODEL */
     mat4x4 model;
     mat3d_identity4x4(model);
-    glUniformMatrix4fv(modeluniform, 1, GL_FALSE, model);
+
+    int shade_mode=SCENE_SHADE_SHADED;
+    float ka=SCENE_MATERIAL_KA_DEFAULT;
+    float kd=SCENE_MATERIAL_KD_DEFAULT;
+    float ks=SCENE_MATERIAL_KS_DEFAULT;
+    float shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
+    vec3 ucolor = {1.0f, 1.0f, 1.0f};
+    int use_uniform=0;
+
+    GLuint program = (shade_mode==SCENE_SHADE_FLAT) ? r->flatshader : r->shader;
+    render_setgeometryuniforms(program, view, proj, model, lightcolor, lightposn, viewposn,
+                               ucolor, use_uniform, ka, kd, ks, shininess);
     
-    /* Render objects */
+    /* Geometry pass */
     for (unsigned i=0; i<r->renderlist.count; i++) {
         renderinstruction *ins=&r->renderlist.data[i];
         switch (ins->instruction) {
             case RNOP: break;
+            case RSHADE:
+                shade_mode=ins->data.shade.mode;
+                ka=ins->data.shade.ka;
+                kd=ins->data.shade.kd;
+                ks=ins->data.shade.ks;
+                shininess=ins->data.shade.shininess;
+                program = (shade_mode==SCENE_SHADE_FLAT) ? r->flatshader : r->shader;
+                render_setgeometryuniforms(program, view, proj, model, lightcolor, lightposn, viewposn,
+                                           ucolor, use_uniform, ka, kd, ks, shininess);
+                break;
+            case RCOLOR:
+                ucolor[0]=ins->data.color.rgb[0];
+                ucolor[1]=ins->data.color.rgb[1];
+                ucolor[2]=ins->data.color.rgb[2];
+                use_uniform=ins->data.color.use_uniform;
+                glUniform3fv(glGetUniformLocation(program, "uColor"), 1, ucolor);
+                glUniform1i(glGetUniformLocation(program, "uUseUniform"), use_uniform);
+                break;
             case RMODEL:
-                glUniformMatrix4fv(modeluniform, 1, GL_FALSE, ins->data.model.model);
+                memcpy(model, ins->data.model.model, sizeof(mat4x4));
+                glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, GL_FALSE, model);
                 break;
             case RARRAY:
                 glBindVertexArray(ins->data.array.handle);
@@ -779,12 +850,12 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
             case RPOINTS:
                 glDrawElements(GL_POINTS, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
                 break;
-            case RTEXT: case RCOLOR:
+            case RTEXT:
                 break;
         }
     }
     
-    /* Now text rendering pass */
+    /* Text rendering pass */
     glUseProgram(r->textshader);
     
     glEnable(GL_BLEND);
@@ -794,9 +865,9 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     vec3 textcolor = {1.0f, 1.0f, 1.0f};
     glUniform3fv(textcoloruniform, 1, textcolor);
     
-    modeluniform = glGetUniformLocation(r->textshader, "model");
-    viewuniform = glGetUniformLocation(r->textshader, "view");
-    projuniform = glGetUniformLocation(r->textshader, "proj");
+    GLint modeluniform = glGetUniformLocation(r->textshader, "model");
+    GLint viewuniform = glGetUniformLocation(r->textshader, "view");
+    GLint projuniform = glGetUniformLocation(r->textshader, "proj");
     
     glUniformMatrix4fv(viewuniform, 1, GL_FALSE, view);
     glUniformMatrix4fv(projuniform, 1, GL_FALSE, proj);
@@ -807,7 +878,6 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(r->fontvao);
     
-    /* Render objects */
     for (unsigned i=0; i<r->renderlist.count; i++) {
         renderinstruction *ins=&r->renderlist.data[i];
         switch (ins->instruction) {
@@ -816,7 +886,6 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
                 break;
             case RTEXT:
                 render_rendertext(r, ins->data.text.rfontid, ins->data.text.txt);
-                //render_renderfonttextureatlas(r, ins->data.text.rfontid);
                 break;
             case RCOLOR:
                 glUniform3fv(textcoloruniform, 1, ins->data.color.rgb);
@@ -825,7 +894,6 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
                 break;
         }
     }
-    /* End text rendering */
     
     GLenum er = glGetError();
     if (er!=0) {

@@ -283,6 +283,15 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             scene_adddraw(ctx->scene, COLOR, MVCMD_AS_SELECT_COLOR(cmd)->id, -1);
             return true;
 
+        case MVCMD_MATERIAL: {
+            mv_cmd_material *c = MVCMD_AS_MATERIAL(cmd);
+            if (!ctx->scene) return false;
+            float coeffs[4] = { c->ka, c->kd, c->ks, c->shininess };
+            int matindx=scene_adddata(ctx->scene, coeffs, 4);
+            scene_adddraw(ctx->scene, SHADE, c->mode, matindx);
+            return true;
+        }
+
         case MVCMD_DRAW: {
             mv_cmd_draw *c = MVCMD_AS_DRAW(cmd);
             if (!ctx->scene) return false;
@@ -388,6 +397,9 @@ enum {
     MVTOKEN_BOUNDS,
     MVTOKEN_FONT,
     MVTOKEN_TEXT,
+    MVTOKEN_MATERIAL,
+    MVTOKEN_SHADED,
+    MVTOKEN_FLAT,
 
     MVTOKEN_QUOTE,
     MVTOKEN_MINUS,
@@ -420,6 +432,9 @@ tokendefn mvtokens[] = {
     { "v",          MVTOKEN_VERTICES              , NULL },
     { "W",          MVTOKEN_WINDOW                , NULL },
     { "B",          MVTOKEN_BOUNDS                , NULL },
+    { "M",          MVTOKEN_MATERIAL              , NULL },
+    { "shaded",     MVTOKEN_SHADED                , NULL },
+    { "flat",       MVTOKEN_FLAT                  , NULL },
 
     { "\"",         MVTOKEN_QUOTE                 , command_lexstring },
     { "-",          MVTOKEN_MINUS                 , command_lexnumber },
@@ -650,6 +665,52 @@ bool command_parseselectcolor(parser *p, void *out) {
         return false;
     }
     cmd->id=id;
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parsematerial(parser *p, void *out) {
+    (void) out;
+
+    int shademode;
+    if (parse_checktokenadvance(p, MVTOKEN_SHADED)) {
+        shademode=SCENE_SHADE_SHADED;
+    } else if (parse_checktokenadvance(p, MVTOKEN_FLAT)) {
+        shademode=SCENE_SHADE_FLAT;
+    } else {
+        parse_error(p, false, COMMAND_INVLDMATERIAL);
+        return false;
+    }
+
+    float ka=SCENE_MATERIAL_KA_DEFAULT;
+    float kd=SCENE_MATERIAL_KD_DEFAULT;
+    float ks=SCENE_MATERIAL_KS_DEFAULT;
+    float shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
+
+    if (shademode==SCENE_SHADE_SHADED && command_isnumerical(p)) {
+        PARSE_CHECK(command_parsefloat(p, &ka));
+        if (!command_isnumerical(p)) {
+            parse_error(p, false, COMMAND_EXPECTNUMBER);
+            return false;
+        }
+        PARSE_CHECK(command_parsefloat(p, &kd));
+        if (command_isnumerical(p)) {
+            PARSE_CHECK(command_parsefloat(p, &ks));
+            if (command_isnumerical(p)) {
+                PARSE_CHECK(command_parsefloat(p, &shininess));
+            }
+        }
+    }
+
+    mv_cmd_material *cmd = command_new(MVCMD_MATERIAL, sizeof(mv_cmd_material));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->mode=shademode;
+    cmd->ka=ka;
+    cmd->kd=kd;
+    cmd->ks=ks;
+    cmd->shininess=shininess;
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
@@ -1073,6 +1134,7 @@ parserule mv_parserules[] = {
     PARSERULE_PREFIX(MVTOKEN_BOUNDS, command_parsebounds),
     PARSERULE_PREFIX(MVTOKEN_FONT, command_parsefont),
     PARSERULE_PREFIX(MVTOKEN_TEXT, command_parsetext),
+    PARSERULE_PREFIX(MVTOKEN_MATERIAL, command_parsematerial),
     PARSERULE_UNUSED(TOKEN_NONE)
 };
 
@@ -1199,6 +1261,7 @@ void command_initialize(void) {
     morpho_defineerror(COMMAND_EXPECTSTRING, ERROR_PARSE, COMMAND_EXPECTSTRING_MSG);
     morpho_defineerror(COMMAND_INVLDUPDATE, ERROR_PARSE, COMMAND_INVLDUPDATE_MSG);
     morpho_defineerror(COMMAND_INVLDDELETE, ERROR_PARSE, COMMAND_INVLDDELETE_MSG);
+    morpho_defineerror(COMMAND_INVLDMATERIAL, ERROR_PARSE, COMMAND_INVLDMATERIAL_MSG);
 }
 
 void command_finalize(void) {
