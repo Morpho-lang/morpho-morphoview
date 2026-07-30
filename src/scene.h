@@ -150,6 +150,10 @@ void scene_free(scene *s);
 void scene_setbbox(scene *s, float xmin, float xmax, float ymin, float ymax, float zmin, float zmax);
 bool scene_computebbox(scene *s);
 
+void scene_setlight(scene *s, float x, float y, float z, float r, float g, float b);
+void scene_setlightpos(scene *s, float x, float y, float z);
+void scene_clearlight(scene *s);
+
 gobject *scene_addobject(scene *s, int id);
 int scene_adddata(scene *s, float *data, int count);
 int scene_addindex(scene *s, int *data, int count);

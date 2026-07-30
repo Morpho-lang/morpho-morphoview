@@ -31,9 +31,10 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 - [x] Scene AABB: auto-compute from drawn geometry, or explicit `B xmin xmax ymin ymax zmin zmax`
 - [x] Auto-fit on first `PREPARE` (and after `B`) unless the user moved the camera; Tab restores fitted home view
 - [x] Default light / viewPos placed outside scene AABB (unless an explicit light is set later)
-- [ ] Explicit light command: `L <x y z [r g b]>` / `L a` (auto)
+- [x] Explicit light command: `L <x y z [r g b]>` / `L a` (auto)
 - [x] Material model: `M shaded|flat` + OpenGL/VTK Phong (\(k_a,k_d,k_s,n\)); uniform `C` for meshes
 - [x] RGBA / opacity (blend + opaque/transparent passes)
+- [ ] Phase 2c: consolidate geometry shaders; transparent depth sort (object centroid, far→near)
 - [ ] Object update/delete (`U O` / `X O`) + persistent apply context
 - [ ] Binary / byte-buffer vertex transport
 - [ ] Pick / view / click events
@@ -60,8 +61,8 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 
 | Command | Status | Intent |
 |---------|--------|--------|
-| `L <x> <y> <z> [r g b]` | Later | Explicit model-space light (optional color); sets `light_explicit` |
-| `L a` | Later | Clear explicit light; resume AABB auto placement |
+| `L <x> <y> <z> [r g b]` | Done | Explicit model-space light (optional color); sets `light_explicit` |
+| `L a` | Done | Clear explicit light; resume AABB auto placement |
 
 ### Materials
 
@@ -70,7 +71,8 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 | `M shaded [ka kd [ks [n]]]` | Done | OpenGL/VTK Phong; defaults ka=kd=0.5, ks=0 (Lambert) |
 | `M flat` | Done | Unlit albedo |
 | `C` on meshes | Done | Uniform albedo for subsequent geometry |
-| RGBA / opacity | Done | Phase 2b: `c … a`, blend, opaque then transparent pass |
+| RGBA / opacity | Done | `c … a`, blend, opaque then transparent pass |
+| Shader consolidate + depth sort | Later | Phase 2c: one geometry program; transparent far→near by object centroid |
 
 ### Delete / quit
 
@@ -112,6 +114,7 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 - [x] Material comparison (flat / Lambert / Phong): [`test/command/materials`](test/command/materials)
 - [x] Phong torus: [`test/command/torus`](test/command/torus)
 - [x] Opacity (RGBA blend): [`test/command/opacity`](test/command/opacity)
+- [x] Explicit light (auto vs `L`): [`test/command/light`](test/command/light)
 
 ## Notes
 

@@ -125,6 +125,27 @@ void scene_setbbox(scene *s, float xmin, float xmax, float ymin, float ymax, flo
     s->bbox_fit_pending=true;
 }
 
+/** Set an explicit model-space light position and color. */
+void scene_setlight(scene *s, float x, float y, float z, float r, float g, float b) {
+    if (!s) return;
+    s->light_pos[0]=x; s->light_pos[1]=y; s->light_pos[2]=z;
+    s->light_color[0]=r; s->light_color[1]=g; s->light_color[2]=b;
+    s->light_explicit=true;
+}
+
+/** Set explicit light position; leave color unchanged. */
+void scene_setlightpos(scene *s, float x, float y, float z) {
+    if (!s) return;
+    s->light_pos[0]=x; s->light_pos[1]=y; s->light_pos[2]=z;
+    s->light_explicit=true;
+}
+
+/** Clear explicit light; resume AABB auto placement. */
+void scene_clearlight(scene *s) {
+    if (!s) return;
+    scene_resetlight(s);
+}
+
 /** Vertex float stride from a format string (same rules as render_entrysizefromformat). */
 static int scene_entrysizefromformat(scene *s, char *format) {
     int size = 0;

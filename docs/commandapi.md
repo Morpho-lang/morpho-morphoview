@@ -51,6 +51,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_QUIT` | `Q` | Request close of all windows / quit viewer |
 | `MVCMD_WINDOW_TITLE` | `W "<title>"` | Owned title string |
 | `MVCMD_BOUNDS` | `B <xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; requests camera refit |
+| `MVCMD_LIGHT` | `L <x y z [r g b]>` / `L a` | Explicit model-space light, or clear for AABB auto |
 | `MVCMD_OBJECT` | `o <id>` | Object id |
 | `MVCMD_VERTICES` | `v ["format"] <floats...>` | Optional format; float blob |
 | `MVCMD_ELEMENT` | `p` / `l` / `f` `<indices...>` | Points, lines, or facets |
@@ -78,6 +79,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `Q` | — | Quit viewer (close all windows); Morpho `View.close` sends this |
 | `W` | `"<title>"` | Set current window title |
 | `B` | `<xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; next prepare refits unless the user moved the camera |
+| `L` | `<x> <y> <z> [<r> <g> <b>]` \| `a` | Explicit model-space light (optional color), or `a` to resume AABB auto placement |
 | `o` | `<id>` | Current object (requires a scene) |
 | `v` | `["format"] <floats...>` | Vertex data for current object |
 | `p` / `l` / `f` | `<indices...>` | Points / lines / facets |
@@ -102,7 +104,7 @@ I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V
 - **Vertex color:** `v "xnc"` without a preceding `C` — per-vertex RGB is the albedo (opaque).
 - **Opacity:** `c <id> <r g b a>` — alpha on the selected color. Opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off and standard alpha blending. Display-list order for transparent (no OIT).
 
-Lighting and eye position are in model space (stable under camera rotation).
+Lighting and eye position are in model space (stable under camera rotation). By default the light is placed outside the scene AABB. `L <x> <y> <z>` sets an explicit position (color unchanged; default white); optional `<r g b>` sets light color; `L a` clears the override and resumes AABB auto placement.
 
 ### Transforms (parse-only)
 
@@ -135,7 +137,7 @@ i
 d 1
 ```
 
-See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, `test/command/largebbox` (auto-fit), `test/command/flatshade`, `test/command/uniformphong`, `test/command/materials` (flat | Lambert | Phong spheres), and `test/command/opacity` (semi-transparent over opaque).
+See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, `test/command/largebbox` (auto-fit), `test/command/flatshade`, `test/command/uniformphong`, `test/command/materials` (flat | Lambert | Phong spheres), `test/command/opacity` (semi-transparent over opaque), and `test/command/light` (two windows: AABB auto vs explicit `L`).
 
 ## ZeroMQ transport
 

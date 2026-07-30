@@ -222,6 +222,20 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             return true;
         }
 
+        case MVCMD_LIGHT: {
+            mv_cmd_light *c = MVCMD_AS_LIGHT(cmd);
+            if (!ctx->scene) return false;
+            if (c->auto_mode) {
+                scene_clearlight(ctx->scene);
+            } else if (c->has_color) {
+                scene_setlight(ctx->scene, c->pos[0], c->pos[1], c->pos[2],
+                               c->color[0], c->color[1], c->color[2]);
+            } else {
+                scene_setlightpos(ctx->scene, c->pos[0], c->pos[1], c->pos[2]);
+            }
+            return true;
+        }
+
         case MVCMD_OBJECT:
             if (!ctx->scene) return false;
             ctx->cobject=scene_addobject(ctx->scene, MVCMD_AS_OBJECT(cmd)->id);
@@ -396,6 +410,8 @@ enum {
     MVTOKEN_TRANSLATE,
     MVTOKEN_WINDOW,
     MVTOKEN_BOUNDS,
+    MVTOKEN_LIGHT,
+    MVTOKEN_AUTO,
     MVTOKEN_FONT,
     MVTOKEN_TEXT,
     MVTOKEN_MATERIAL,
@@ -433,6 +449,8 @@ tokendefn mvtokens[] = {
     { "v",          MVTOKEN_VERTICES              , NULL },
     { "W",          MVTOKEN_WINDOW                , NULL },
     { "B",          MVTOKEN_BOUNDS                , NULL },
+    { "L",          MVTOKEN_LIGHT                 , NULL },
+    { "a",          MVTOKEN_AUTO                  , NULL },
     { "M",          MVTOKEN_MATERIAL              , NULL },
     { "shaded",     MVTOKEN_SHADED                , NULL },
     { "flat",       MVTOKEN_FLAT                  , NULL },
@@ -1063,6 +1081,51 @@ bool command_parsebounds(parser *p, void *out) {
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
+/** `L <x> <y> <z> [r g b]` | `L a` — explicit light or AABB auto. */
+bool command_parselight(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+
+    bool auto_mode=false;
+    bool has_color=false;
+    float pos[3]={0.0f, 0.0f, 0.0f};
+    float color[3]={1.0f, 1.0f, 1.0f};
+
+    if (parse_checktokenadvance(p, MVTOKEN_AUTO)) {
+        auto_mode=true;
+    } else if (command_isnumerical(p)) {
+        for (int i=0; i<3; i++) {
+            PARSE_CHECK(command_parsefloat(p, &pos[i]));
+        }
+        if (command_isnumerical(p)) {
+            for (int i=0; i<3; i++) {
+                PARSE_CHECK(command_parsefloat(p, &color[i]));
+            }
+            has_color=true;
+        }
+    } else {
+        parse_error(p, false, COMMAND_INVLDLIGHT);
+        return false;
+    }
+
+    if (!ctx->has_scene) {
+        parse_error(p, true, COMMAND_NOSCENE);
+        return false;
+    }
+
+    mv_cmd_light *cmd = command_new(MVCMD_LIGHT, sizeof(mv_cmd_light));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->auto_mode=auto_mode;
+    cmd->has_color=has_color;
+    for (int i=0; i<3; i++) {
+        cmd->pos[i]=pos[i];
+        cmd->color[i]=color[i];
+    }
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
 bool command_parsefont(parser *p, void *out) {
     (void) out;
     int id;
@@ -1152,6 +1215,7 @@ parserule mv_parserules[] = {
     PARSERULE_PREFIX(MVTOKEN_TRANSLATE, command_parsetranslate),
     PARSERULE_PREFIX(MVTOKEN_WINDOW, command_parsewindow),
     PARSERULE_PREFIX(MVTOKEN_BOUNDS, command_parsebounds),
+    PARSERULE_PREFIX(MVTOKEN_LIGHT, command_parselight),
     PARSERULE_PREFIX(MVTOKEN_FONT, command_parsefont),
     PARSERULE_PREFIX(MVTOKEN_TEXT, command_parsetext),
     PARSERULE_PREFIX(MVTOKEN_MATERIAL, command_parsematerial),
@@ -1283,6 +1347,7 @@ void command_initialize(void) {
     morpho_defineerror(COMMAND_INVLDDELETE, ERROR_PARSE, COMMAND_INVLDDELETE_MSG);
     morpho_defineerror(COMMAND_INVLDMATERIAL, ERROR_PARSE, COMMAND_INVLDMATERIAL_MSG);
     morpho_defineerror(COMMAND_INVLDCOLOR, ERROR_PARSE, COMMAND_INVLDCOLOR_MSG);
+    morpho_defineerror(COMMAND_INVLDLIGHT, ERROR_PARSE, COMMAND_INVLDLIGHT_MSG);
 }
 
 void command_finalize(void) {
