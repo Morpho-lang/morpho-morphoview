@@ -1,0 +1,15 @@
+// Higher-level smoke test via the morphoview `View` helper.
+// Expect: prints "ok" then exits.
+// Uses View's optional sessionTimeOut so the viewer auto-closes (non-interactive).
+// Requires: morphoview on PATH, morpho-zeromq package, display available.
+//
+//   cd test && morpho6 testview.morpho
+
+import morphoview
+
+var f = File("zmqtri", "read")
+var commands = f.readall()
+f.close()
+
+View(commands, sessionTimeOut=1500)
+print "ok"

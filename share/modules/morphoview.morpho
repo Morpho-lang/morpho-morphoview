@@ -1,0 +1,75 @@
+/** MorphoView live session helper.
+ *
+ *  `View` opens a duplex ZMQ PAIR session with morphoview (distinct from
+ *  graphics `Show`, which writes a temp file and fire-and-forgets).
+ *
+ *  View(commands)
+ *  View(commands, sessionTimeOut=1500)  // ms after `ok` before auto-exit
+ *
+ *  Requires: import zeromq  (morpho-zeromq package)
+ */
+
+import zeromq
+
+class View {
+  init(commands, sessionTimeOut=0) {
+    self.connecttimeout = 5000 // Milliseconds to wait for an initial `ok` after sending commands
+    self.pollms = 100 // Idle poll interval while waiting for window.closed
+    self.sessionTimeOut = sessionTimeOut // 0 = wait indefinitely for window.closed
+
+    self.sock = ZMQPair()
+    self.sock.bind("tcp://127.0.0.1:!")
+    self.ep = self.sock.endpoint()
+
+    var isWindows = System.platform()=="windows"
+    if (isWindows) {
+      system("powershell -Command \"Start-Process 'morphoview' -ArgumentList '-c', '${self.ep}'\"")
+    } else {
+      system("morphoview -c \"${self.ep}\" > /dev/null 2>&1 &")
+    }
+
+    self.sock.send(commands)
+
+    var poller = ZMQPoller(self.sock)
+    var gotok = false
+    var waited = 0
+
+    while (true) {
+      var ready = poller.wait(self.pollms)
+      if (ready) {
+        var msg = self.sock.receive()
+        if (!isstring(msg)) {
+          break // peer gone (killed or crashed)
+        } else if (msg == "ok") {
+          gotok = true
+          waited = 0
+        } else if (msg == "window.closed") {
+          break
+        } else if (msg.count() >= 3 && msg[0]=="e" && msg[1]=="r" && msg[2]=="r") {
+          print "morphoview: ${msg}"
+          self.kill()
+          break
+        }
+      } else if (!gotok) {
+        waited += self.pollms
+        if (waited >= self.connecttimeout) {
+          print "morphoview: timed out waiting for ok"
+          self.kill()
+          break
+        }
+      } else if (self.sessionTimeOut > 0) {
+        waited += self.pollms
+        if (waited >= self.sessionTimeOut) {
+          self.kill()
+          break
+        }
+      }
+    }
+  }
+
+  // Best-effort: stop a viewer that did not close cleanly
+  kill() {
+    if (System.platform()=="windows") return
+    system("pkill -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
+  }
+}

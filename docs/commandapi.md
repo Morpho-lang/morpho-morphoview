@@ -19,9 +19,9 @@ producer → command_parse / command_enqueue → queue
 3. **Wake** (`command_wake`) — `glfwPostEmptyEvent()`, so a blocked `glfwWaitEvents` can run.
 4. **Process** (`command_process`) — apply every queued command in order on the **caller** thread, then free them. Returns the number applied. On apply failure, frees the remainder and stops.
 
-`main` processes once after loading a file (bootstrap, so windows exist), then `display_loop` processes again after each `glfwWaitEvents` (live updates).
+`main` processes once after loading a file (bootstrap, so windows exist), then `display_loop` processes again after each `glfwWaitEvents` (live updates). With `-b`/`-c`, an I/O thread also enqueues via ZMQ while the loop runs.
 
-**Invariant:** only the main/GLFW thread calls `command_process` and touches GL. A mutex around the queue will land with a future I/O thread; wake is already in place.
+**Invariant:** only the main/GLFW thread calls `command_process` and touches GL. The command queue is mutex-protected so the I/O thread can `command_enqueue` safely; `command_wake` posts an empty GLFW event.
 
 ## Public C API
 
@@ -109,3 +109,22 @@ d 1
 ```
 
 See also `test/linespts`, `test/polyhedra`, and `test/twoscenes`.
+
+## ZeroMQ transport
+
+CLI:
+
+| Flag | Meaning |
+|------|---------|
+| `-b <endpoint>` | Bind a ZMQ PAIR socket (e.g. `tcp://127.0.0.1:5555`) |
+| `-c <endpoint>` | Connect a ZMQ PAIR socket (used by Morpho `View`) |
+
+An I/O thread owns the socket. Each received string is an ASCII command chunk (`command_parse`). Replies/events (also strings):
+
+| Message | Meaning |
+|---------|---------|
+| `ok` | Chunk parsed and enqueued successfully |
+| `err …` | Parse failed |
+| `window.closed` | Last display window closed |
+
+Morpho helper: `import morphoview` then `View(commands)` in [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho). Distinct from graphics `Show` (temp file + `-t`).

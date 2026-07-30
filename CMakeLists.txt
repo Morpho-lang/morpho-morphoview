@@ -139,6 +139,73 @@ target_link_libraries(morphoview PRIVATE glfw)
 find_package(Freetype REQUIRED)
 target_link_libraries(morphoview PRIVATE Freetype::Freetype)
 
+#-------------------------------------------------------------------------------
+# ZeroMQ / CZMQ
+#-------------------------------------------------------------------------------
+# Homebrew and most Linux distros ship libczmq.pc (no CZMQConfig.cmake).
+# Prefer pkg-config; fall back to find_path / find_library.
+
+# Help CMake find brew's pkg-config when it is not on the default PATH.
+find_program(PKG_CONFIG_EXECUTABLE NAMES pkg-config pkgconf
+    HINTS
+        /opt/homebrew/bin
+        /usr/local/bin
+        /home/linuxbrew/.linuxbrew/bin
+)
+find_package(PkgConfig)
+set(MORPHOVIEW_HAVE_CZMQ FALSE)
+
+if(PkgConfig_FOUND)
+    pkg_check_modules(CZMQ IMPORTED_TARGET libczmq)
+    if(TARGET PkgConfig::CZMQ)
+        target_link_libraries(morphoview PRIVATE PkgConfig::CZMQ)
+        set(MORPHOVIEW_HAVE_CZMQ TRUE)
+        message(STATUS "Found czmq via pkg-config")
+    endif()
+endif()
+
+if(NOT MORPHOVIEW_HAVE_CZMQ)
+    find_path(CZMQ_INCLUDE_DIR czmq.h
+        HINTS
+            /usr/local/include
+            /opt/homebrew/include
+            /home/linuxbrew/.linuxbrew/include
+            "C:/Program Files/Morpho/include"
+    )
+    find_library(CZMQ_LIBRARY
+        NAMES czmq libczmq
+        HINTS
+            /usr/local/lib
+            /opt/homebrew/lib
+            /home/linuxbrew/.linuxbrew/lib
+            "C:/Program Files/Morpho/lib"
+    )
+    find_library(ZMQ_LIBRARY
+        NAMES zmq libzmq
+        HINTS
+            /usr/local/lib
+            /opt/homebrew/lib
+            /home/linuxbrew/.linuxbrew/lib
+            "C:/Program Files/Morpho/lib"
+    )
+    if(CZMQ_INCLUDE_DIR AND CZMQ_LIBRARY)
+        target_include_directories(morphoview PRIVATE ${CZMQ_INCLUDE_DIR})
+        target_link_libraries(morphoview PRIVATE ${CZMQ_LIBRARY})
+        if(ZMQ_LIBRARY)
+            target_link_libraries(morphoview PRIVATE ${ZMQ_LIBRARY})
+        endif()
+        set(MORPHOVIEW_HAVE_CZMQ TRUE)
+        message(STATUS "Found czmq at ${CZMQ_LIBRARY}")
+    endif()
+endif()
+
+if(NOT MORPHOVIEW_HAVE_CZMQ)
+    message(FATAL_ERROR "czmq not found. Install czmq (e.g. brew install czmq / apt install libczmq-dev).")
+endif()
+
+find_package(Threads REQUIRED)
+target_link_libraries(morphoview PRIVATE Threads::Threads)
+
 # Link with math library [needed on linux]
 IF (NOT WIN32)
   target_link_libraries(morphoview PRIVATE m)

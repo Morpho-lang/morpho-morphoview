@@ -6,6 +6,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <pthread.h>
 
 #include "morpho.h"
 #include "parse.h"
@@ -96,16 +97,19 @@ void command_free(mv_command *cmd) {
  * ------------------------------------------------------- */
 
 static varray_mv_commandptr command_queue;
+static pthread_mutex_t command_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void command_queue_init(void) {
     varray_mv_commandptrinit(&command_queue);
 }
 
 void command_queue_clear(void) {
+    pthread_mutex_lock(&command_queue_mutex);
     for (unsigned int i=0; i<command_queue.count; i++) {
         command_free(command_queue.data[i]);
     }
     varray_mv_commandptrclear(&command_queue);
+    pthread_mutex_unlock(&command_queue_mutex);
 }
 
 void command_wake(void) {
@@ -113,8 +117,11 @@ void command_wake(void) {
 }
 
 bool command_enqueue(mv_command *cmd) {
+    pthread_mutex_lock(&command_queue_mutex);
     bool wasempty = (command_queue.count == 0);
-    if (!varray_mv_commandptradd(&command_queue, &cmd, 1)) return false;
+    bool ok = varray_mv_commandptradd(&command_queue, &cmd, 1);
+    pthread_mutex_unlock(&command_queue_mutex);
+    if (!ok) return false;
     if (wasempty) command_wake();
     return true;
 }
@@ -267,21 +274,30 @@ int command_process(void) {
     command_applyctx ctx;
     command_applyctx_init(&ctx);
 
+    /* Steal the queue under the lock so apply (GL) does not block the I/O thread. */
+    varray_mv_commandptr batch;
+    pthread_mutex_lock(&command_queue_mutex);
+    batch = command_queue;
+    varray_mv_commandptrinit(&command_queue);
+    pthread_mutex_unlock(&command_queue_mutex);
+
     int applied=0;
-    for (unsigned int i=0; i<command_queue.count; i++) {
-        mv_command *cmd = command_queue.data[i];
+    for (unsigned int i=0; i<batch.count; i++) {
+        mv_command *cmd = batch.data[i];
         if (!command_apply(cmd, &ctx)) {
-            for (unsigned int j=i; j<command_queue.count; j++) {
-                command_free(command_queue.data[j]);
+            for (unsigned int j=i; j<batch.count; j++) {
+                command_free(batch.data[j]);
             }
-            command_queue.count=0;
+            batch.count=0;
+            varray_mv_commandptrclear(&batch);
             return applied;
         }
         command_free(cmd);
         applied++;
     }
 
-    command_queue.count=0;
+    batch.count=0;
+    varray_mv_commandptrclear(&batch);
     return applied;
 }
 

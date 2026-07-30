@@ -20,6 +20,12 @@ You need to compile the extension, which you can do by navigating to the reposit
     cmake -DCMAKE_BUILD_TYPE=Release ..
     make install
 
-You may need to use `sudo`. The package can be loaded into morpho using the `import` keyword.
+You may need to use `sudo`. Dependencies include GLFW, FreeType, and [czmq](https://github.com/zeromq/czmq) (`brew install czmq` / `apt install libczmq-dev`).
+
+The package can be loaded into morpho using the `import` keyword.
 
     import morphoview
+
+Fire-and-forget display of graphics still uses `Show` from `import graphics` (temp file). For a live ZMQ session use `View` from this package (see `share/modules/morphoview.morpho`).
+
+Viewer CLI extras: `-b <endpoint>` binds a ZMQ PAIR socket; `-c <endpoint>` connects (used by `View`).

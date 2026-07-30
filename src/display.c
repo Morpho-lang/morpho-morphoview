@@ -9,6 +9,7 @@
 #include "scene.h"
 #include "render.h"
 #include "command.h"
+#include "listener.h"
 
 /* -------------------------------------------------------
  * Global variables
@@ -284,9 +285,14 @@ void display_prepareall(void) {
  * ------------------------------------------------------- */
 
 void display_loop(void) {
-    while (opendisplays!=NULL) {
+    bool had_displays = (opendisplays != NULL);
+
+    while (opendisplays != NULL || listener_isactive()) {
         glfwWaitEvents();
         command_process();
+
+        if (opendisplays != NULL) had_displays = true;
+
         for (display *d=opendisplays; d!=NULL; d=d->next) {
             if (glfwWindowShouldClose(d->window)) {
                 /* Free GL resources while this window's context is still current */
@@ -303,8 +309,12 @@ void display_loop(void) {
                 glfwSwapBuffers(d->window);
             }
         }
-        
-        //glfwPollEvents();
+
+        /* After the last window closes, notify Morpho and stop the listener. */
+        if (had_displays && opendisplays == NULL && listener_isactive()) {
+            listener_reply(LISTENER_WINDOW_CLOSED);
+            listener_stop();
+        }
     }
 }
 

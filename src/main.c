@@ -11,6 +11,7 @@
 #include "command.h"
 #include "display.h"
 #include "text.h"
+#include "listener.h"
 
 int main(int argc, const char * argv[]) {
     morpho_initialize();
@@ -20,6 +21,7 @@ int main(int argc, const char * argv[]) {
     text_initialize();
     bool temp = false;
     bool parsed = false;
+    bool listening = false;
 
     // Process arguments
     const char *file=NULL;
@@ -29,6 +31,24 @@ int main(int argc, const char * argv[]) {
             switch (option[1]) {
                 case 't': /* Temporary file; delete after */
                     temp=true;
+                    break;
+                case 'b': /* Bind ZMQ PAIR to endpoint */
+                    if (option[2]!='\0') {
+                        listening = listener_bind(option+2);
+                    } else if (i+1<argc) {
+                        listening = listener_bind(argv[++i]);
+                    } else {
+                        fprintf(stderr, "morphoview: -b requires an endpoint.\n");
+                    }
+                    break;
+                case 'c': /* Connect ZMQ PAIR to endpoint */
+                    if (option[2]!='\0') {
+                        listening = listener_connect(option+2);
+                    } else if (i+1<argc) {
+                        listening = listener_connect(argv[++i]);
+                    } else {
+                        fprintf(stderr, "morphoview: -c requires an endpoint.\n");
+                    }
                     break;
             }
         } else {
@@ -48,10 +68,13 @@ int main(int argc, const char * argv[]) {
         if (buffer) MORPHO_FREE(buffer);
     }
 
-    if (parsed) {
-        command_process();
+    if (parsed) command_process();
+
+    if (parsed || listening) {
         display_loop();
     }
+
+    listener_stop();
 
     text_finalize();
     display_finalize();

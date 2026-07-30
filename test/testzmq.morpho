@@ -1,0 +1,29 @@
+// Smoke-test morphoview over ZMQ PAIR.
+// Expect: prints "ok" then exits (kills the viewer).
+// Requires: morphoview on PATH, morpho-zeromq package, display available.
+//
+//   cd test && morpho6 testzmq.morpho
+
+import zeromq
+
+var f = File("zmqtri", "read")
+var commands = f.readall()
+f.close()
+
+var sock = ZMQPair()
+sock.bind("tcp://127.0.0.1:!")
+var ep = sock.endpoint()
+
+system("morphoview -c \"${ep}\" > /dev/null 2>&1 &")
+
+sock.send(commands)
+
+var poller = ZMQPoller(sock)
+var ready = poller.wait(5000)
+if (ready) {
+  print sock.receive()
+} else {
+  print "timeout"
+}
+
+system("pkill -f \"morphoview -c ${ep}\" > /dev/null 2>&1")
