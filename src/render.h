@@ -107,11 +107,29 @@ typedef struct {
 
 DECLARE_VARRAY(renderinstruction, renderinstruction)
 
+/** Cached uniform locations for the geometry program. */
+typedef struct {
+    GLint model;
+    GLint view;
+    GLint proj;
+    GLint normalMatrix;
+    GLint lightColor;
+    GLint lightPos;
+    GLint viewPos;
+    GLint uColor;
+    GLint uUseUniform;
+    GLint uFlat;
+    GLint ka;
+    GLint kd;
+    GLint ks;
+    GLint shininess;
+} renderuniforms;
+
 /** Renderer object. */
 typedef struct {
     GLuint shader;
-    GLuint flatshader;
     GLuint textshader;
+    renderuniforms uniforms;
     varray_renderobject objects;
     varray_renderfont fonts;
     varray_renderglbuffers glbuffers;

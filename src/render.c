@@ -24,113 +24,94 @@ DEFINE_VARRAY(renderinstruction, renderinstruction)
  * Shaders
  * ------------------------------------------------------- */
 
-/* Shaded: OpenGL/VTK Phong (Lambert when ks=0). Lighting in model space. */
+/* Geometry: OpenGL/VTK Phong when uFlat==0 (Lambert when ks=0); unlit albedo when uFlat!=0.
+ * Lighting and normals in model space; normalMatrix supplied from CPU. */
 
-const char *vertexshader = "#version 330 core\n"
-    "layout (location = 0) in vec3 vPos;"
-    "layout (location = 1) in vec3 vColor;"
-    "layout (location = 2) in vec3 vNormal;"
-    "out vec3 fragColor;"
-    "out vec3 fragPos;"
-    "out vec3 normal;"
-    "uniform mat4 model;"
-    "uniform mat4 view;"
-    "uniform mat4 proj;"
+const char *vertexshader =
+    "#version 330 core\n"
+    "layout (location = 0) in vec3 vPos;\n"
+    "layout (location = 1) in vec3 vColor;\n"
+    "layout (location = 2) in vec3 vNormal;\n"
+    "out vec3 fragColor;\n"
+    "out vec3 fragPos;\n"
+    "out vec3 normal;\n"
+    "uniform mat4 model;\n"
+    "uniform mat4 view;\n"
+    "uniform mat4 proj;\n"
+    "uniform mat3 normalMatrix;\n"
+    "\n"
+    "void main() {\n"
+    "   gl_Position = proj * view * model * vec4(vPos, 1.0);\n"
+    "   fragColor = vColor;\n"
+    "   fragPos = vec3(model * vec4(vPos, 1.0));\n"
+    "   normal = normalMatrix * vNormal;\n"
+    "}\n";
 
-    "void main() {"
-    "   gl_Position = proj * view * model * vec4(vPos, 1.0);"
-    "   fragColor = vColor;"
-    "   fragPos = vec3(model * vec4(vPos, 1.0));"
-    "   normal = mat3(transpose(inverse(model))) * vNormal;"
-    "}";
-
-const char *fragmentshader = "#version 330 core\n"
-    "out vec4 FragColor;"
-    "in vec3 fragColor;"
-    "in vec3 fragPos;"
-    "in vec3 normal;"
-    "uniform vec3 lightColor;"
-    "uniform vec3 lightPos;"
-    "uniform vec3 viewPos;"
-    "uniform vec4 uColor;"
-    "uniform int uUseUniform;"
-    "uniform float ka;"
-    "uniform float kd;"
-    "uniform float ks;"
-    "uniform float shininess;"
-    ""
-    "void main() {"
-    "   vec3 albedo = (uUseUniform != 0) ? uColor.rgb : fragColor;"
-    "   float alpha = (uUseUniform != 0) ? uColor.a : 1.0;"
-    "   vec3 norm = normalize(normal);"
-    "   vec3 lightDir = normalize(lightPos - fragPos);"
-    "   float NdotL = max(dot(norm, lightDir), 0.0);"
-    "   vec3 ambient = ka * lightColor;"
-    "   vec3 diffuse = kd * NdotL * lightColor;"
-    "   vec3 viewDir = normalize(viewPos - fragPos);"
-    "   vec3 reflectDir = reflect(-lightDir, norm);"
-    "   float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);"
-    "   vec3 specular = ks * spec * lightColor;"
-    "   vec3 result = (ambient + diffuse + specular) * albedo;"
-    "   FragColor = vec4(result, alpha);"
-    "}";
-
-/* Flat / unlit */
-
-const char *flatvertexshader = "#version 330 core\n"
-    "layout (location = 0) in vec3 vPos;"
-    "layout (location = 1) in vec3 vColor;"
-    "layout (location = 2) in vec3 vNormal;"
-    "out vec3 fragColor;"
-    "uniform mat4 model;"
-    "uniform mat4 view;"
-    "uniform mat4 proj;"
-
-    "void main() {"
-    "   gl_Position = proj * view * model * vec4(vPos, 1.0);"
-    "   fragColor = vColor;"
-    "}";
-
-const char *flatfragmentshader = "#version 330 core\n"
-    "out vec4 FragColor;"
-    "in vec3 fragColor;"
-    "uniform vec4 uColor;"
-    "uniform int uUseUniform;"
-    ""
-    "void main() {"
-    "   vec3 albedo = (uUseUniform != 0) ? uColor.rgb : fragColor;"
-    "   float alpha = (uUseUniform != 0) ? uColor.a : 1.0;"
-    "   FragColor = vec4(albedo, alpha);"
-    "}";
+const char *fragmentshader =
+    "#version 330 core\n"
+    "out vec4 FragColor;\n"
+    "in vec3 fragColor;\n"
+    "in vec3 fragPos;\n"
+    "in vec3 normal;\n"
+    "uniform vec3 lightColor;\n"
+    "uniform vec3 lightPos;\n"
+    "uniform vec3 viewPos;\n"
+    "uniform vec4 uColor;\n"
+    "uniform int uUseUniform;\n"
+    "uniform int uFlat;\n"
+    "uniform float ka;\n"
+    "uniform float kd;\n"
+    "uniform float ks;\n"
+    "uniform float shininess;\n"
+    "\n"
+    "void main() {\n"
+    "   vec3 albedo = (uUseUniform != 0) ? uColor.rgb : fragColor;\n"
+    "   float alpha = (uUseUniform != 0) ? uColor.a : 1.0;\n"
+    "   if (uFlat != 0) {\n"
+    "       FragColor = vec4(albedo, alpha);\n"
+    "       return;\n"
+    "   }\n"
+    "   vec3 norm = normalize(normal);\n"
+    "   vec3 lightDir = normalize(lightPos - fragPos);\n"
+    "   float NdotL = max(dot(norm, lightDir), 0.0);\n"
+    "   vec3 ambient = ka * lightColor;\n"
+    "   vec3 diffuse = kd * NdotL * lightColor;\n"
+    "   vec3 viewDir = normalize(viewPos - fragPos);\n"
+    "   vec3 reflectDir = reflect(-lightDir, norm);\n"
+    "   float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);\n"
+    "   vec3 specular = ks * spec * lightColor;\n"
+    "   vec3 result = (ambient + diffuse + specular) * albedo;\n"
+    "   FragColor = vec4(result, alpha);\n"
+    "}\n";
 
 /* Text shader */
 
 const char *textvertexshader =
     "#version 330 core\n"
-    "layout (location = 0) in vec3 vertex;"
-    "layout (location = 1) in vec2 tex;"
-    "out vec2 TexCoords;"
-
-    "uniform mat4 model;"
-    "uniform mat4 view;"
-    "uniform mat4 proj;"
-
-    "void main() {"
-    "    gl_Position = proj * view * model * vec4(vertex, 1.0);"
-    "    TexCoords = tex;"
-    "}";
+    "layout (location = 0) in vec3 vertex;\n"
+    "layout (location = 1) in vec2 tex;\n"
+    "out vec2 TexCoords;\n"
+    "\n"
+    "uniform mat4 model;\n"
+    "uniform mat4 view;\n"
+    "uniform mat4 proj;\n"
+    "\n"
+    "void main() {\n"
+    "    gl_Position = proj * view * model * vec4(vertex, 1.0);\n"
+    "    TexCoords = tex;\n"
+    "}\n";
 
 const char *textfragmentshader =
     "#version 330 core\n"
-    "in vec2 TexCoords;"
-    "out vec4 color;"
-    "uniform sampler2D text;"
-    "uniform vec4 textColor;"
-
-    "void main() {"
-    "   vec4 sampled = vec4(1.0, 1.0, 1.0, texture(text, TexCoords).r);"
-    "   color = textColor * sampled;"
-    "}";
+    "in vec2 TexCoords;\n"
+    "out vec4 color;\n"
+    "uniform sampler2D text;\n"
+    "uniform vec4 textColor;\n"
+    "\n"
+    "void main() {\n"
+    "   vec4 sampled = vec4(1.0, 1.0, 1.0, texture(text, TexCoords).r);\n"
+    "   color = textColor * sampled;\n"
+    "}\n";
 
 /* -------------------------------------------------------
  * Compile shaders
@@ -195,6 +176,34 @@ bool render_compileprogram(const char *vertexshadersource, const char *fragments
     return true;
 }
 
+/** Cache geometry-program uniform locations after a successful link. */
+static void render_cacheuniforms(renderer *r) {
+    GLuint p = r->shader;
+    r->uniforms.model = glGetUniformLocation(p, "model");
+    r->uniforms.view = glGetUniformLocation(p, "view");
+    r->uniforms.proj = glGetUniformLocation(p, "proj");
+    r->uniforms.normalMatrix = glGetUniformLocation(p, "normalMatrix");
+    r->uniforms.lightColor = glGetUniformLocation(p, "lightColor");
+    r->uniforms.lightPos = glGetUniformLocation(p, "lightPos");
+    r->uniforms.viewPos = glGetUniformLocation(p, "viewPos");
+    r->uniforms.uColor = glGetUniformLocation(p, "uColor");
+    r->uniforms.uUseUniform = glGetUniformLocation(p, "uUseUniform");
+    r->uniforms.uFlat = glGetUniformLocation(p, "uFlat");
+    r->uniforms.ka = glGetUniformLocation(p, "ka");
+    r->uniforms.kd = glGetUniformLocation(p, "kd");
+    r->uniforms.ks = glGetUniformLocation(p, "ks");
+    r->uniforms.shininess = glGetUniformLocation(p, "shininess");
+}
+
+/** normalMatrix = transpose(inverse(upper 3x3 of model)), column-major. */
+static void render_normalmatrix(mat4x4 model, mat3x3 out) {
+    mat4x4 inv;
+    mat3d_invert4x4(model, inv);
+    out[0]=inv[0]; out[1]=inv[4]; out[2]=inv[8];
+    out[3]=inv[1]; out[4]=inv[5]; out[5]=inv[9];
+    out[6]=inv[2]; out[7]=inv[6]; out[8]=inv[10];
+}
+
 /* -------------------------------------------------------
  * Initialize/finalize display
  * ------------------------------------------------------- */
@@ -202,11 +211,11 @@ bool render_compileprogram(const char *vertexshadersource, const char *fragments
 /** Initializes a display, compiling shaders */
 bool render_init(renderer *r) {
     r->shader=0;
-    r->flatshader=0;
     r->textshader=0;
+    memset(&r->uniforms, 0, sizeof(r->uniforms));
 
     if (!render_compileprogram(vertexshader, fragmentshader, &r->shader)) return false;
-    if (!render_compileprogram(flatvertexshader, flatfragmentshader, &r->flatshader)) return false;
+    render_cacheuniforms(r);
     if (!render_compileprogram(textvertexshader, textfragmentshader, &r->textshader)) return false;
     
     /* Enable OpenGL features */
@@ -260,10 +269,8 @@ void render_reset(renderer *r) {
 void render_clear(renderer *r) {
     render_reset(r);
     if (r->shader) glDeleteProgram(r->shader);
-    if (r->flatshader) glDeleteProgram(r->flatshader);
     if (r->textshader) glDeleteProgram(r->textshader);
     r->shader=0;
-    r->flatshader=0;
     r->textshader=0;
 }
 
@@ -724,33 +731,34 @@ void render_preparescene(renderer *r, scene *s) {
  * Render the scene
  * ------------------------------------------------------- */
 
-/** Upload uniforms shared by shaded and flat geometry programs. */
-static void render_setgeometryuniforms(GLuint program, mat4x4 view, mat4x4 proj,
-                                       mat4x4 model, vec3 lightcolor, vec3 lightposn, vec3 viewposn,
-                                       float *ucolor, int use_uniform,
-                                       float ka, float kd, float ks, float shininess) {
-    glUseProgram(program);
-    glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, GL_FALSE, model);
-    glUniformMatrix4fv(glGetUniformLocation(program, "view"), 1, GL_FALSE, view);
-    glUniformMatrix4fv(glGetUniformLocation(program, "proj"), 1, GL_FALSE, proj);
-    glUniform4fv(glGetUniformLocation(program, "uColor"), 1, ucolor);
-    glUniform1i(glGetUniformLocation(program, "uUseUniform"), use_uniform);
+/** Upload model + derived normalMatrix via cached locations. */
+static void render_setmodel(renderer *r, mat4x4 model) {
+    mat3x3 nmat;
+    render_normalmatrix(model, nmat);
+    glUniformMatrix4fv(r->uniforms.model, 1, GL_FALSE, model);
+    glUniformMatrix3fv(r->uniforms.normalMatrix, 1, GL_FALSE, nmat);
+}
 
-    GLint loc;
-    loc=glGetUniformLocation(program, "lightColor");
-    if (loc>=0) glUniform3fv(loc, 1, lightcolor);
-    loc=glGetUniformLocation(program, "lightPos");
-    if (loc>=0) glUniform3fv(loc, 1, lightposn);
-    loc=glGetUniformLocation(program, "viewPos");
-    if (loc>=0) glUniform3fv(loc, 1, viewposn);
-    loc=glGetUniformLocation(program, "ka");
-    if (loc>=0) glUniform1f(loc, ka);
-    loc=glGetUniformLocation(program, "kd");
-    if (loc>=0) glUniform1f(loc, kd);
-    loc=glGetUniformLocation(program, "ks");
-    if (loc>=0) glUniform1f(loc, ks);
-    loc=glGetUniformLocation(program, "shininess");
-    if (loc>=0) glUniform1f(loc, shininess);
+/** Upload uniforms for the geometry program. */
+static void render_setgeometryuniforms(renderer *r, mat4x4 view, mat4x4 proj,
+                                       mat4x4 model, vec3 lightcolor, vec3 lightposn, vec3 viewposn,
+                                       float *ucolor, int use_uniform, int uflat,
+                                       float ka, float kd, float ks, float shininess) {
+    renderuniforms *u = &r->uniforms;
+    glUseProgram(r->shader);
+    glUniformMatrix4fv(u->view, 1, GL_FALSE, view);
+    glUniformMatrix4fv(u->proj, 1, GL_FALSE, proj);
+    render_setmodel(r, model);
+    glUniform4fv(u->uColor, 1, ucolor);
+    glUniform1i(u->uUseUniform, use_uniform);
+    glUniform1i(u->uFlat, uflat);
+    glUniform3fv(u->lightColor, 1, lightcolor);
+    glUniform3fv(u->lightPos, 1, lightposn);
+    glUniform3fv(u->viewPos, 1, viewposn);
+    glUniform1f(u->ka, ka);
+    glUniform1f(u->kd, kd);
+    glUniform1f(u->ks, ks);
+    glUniform1f(u->shininess, shininess);
 }
 
 #define RENDER_OPAQUE_ALPHA_EPS 0.999f
@@ -819,8 +827,7 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     float shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
     float ucolor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     int use_uniform=0;
-
-    GLuint program = (shade_mode==SCENE_SHADE_FLAT) ? r->flatshader : r->shader;
+    int uflat=0;
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -837,10 +844,10 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
         shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
         ucolor[0]=ucolor[1]=ucolor[2]=ucolor[3]=1.0f;
         use_uniform=0;
+        uflat=0;
         mat3d_identity4x4(model);
-        program = r->shader;
-        render_setgeometryuniforms(program, view, proj, model, lightcolor, lightposn, viewposn,
-                                   ucolor, use_uniform, ka, kd, ks, shininess);
+        render_setgeometryuniforms(r, view, proj, model, lightcolor, lightposn, viewposn,
+                                   ucolor, use_uniform, uflat, ka, kd, ks, shininess);
 
         for (unsigned i=0; i<r->renderlist.count; i++) {
             renderinstruction *ins=&r->renderlist.data[i];
@@ -852,9 +859,9 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
                     kd=ins->data.shade.kd;
                     ks=ins->data.shade.ks;
                     shininess=ins->data.shade.shininess;
-                    program = (shade_mode==SCENE_SHADE_FLAT) ? r->flatshader : r->shader;
-                    render_setgeometryuniforms(program, view, proj, model, lightcolor, lightposn, viewposn,
-                                               ucolor, use_uniform, ka, kd, ks, shininess);
+                    uflat = (shade_mode==SCENE_SHADE_FLAT) ? 1 : 0;
+                    render_setgeometryuniforms(r, view, proj, model, lightcolor, lightposn, viewposn,
+                                               ucolor, use_uniform, uflat, ka, kd, ks, shininess);
                     break;
                 case RCOLOR:
                     ucolor[0]=ins->data.color.rgba[0];
@@ -862,12 +869,12 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
                     ucolor[2]=ins->data.color.rgba[2];
                     ucolor[3]=ins->data.color.rgba[3];
                     use_uniform=ins->data.color.use_uniform;
-                    glUniform4fv(glGetUniformLocation(program, "uColor"), 1, ucolor);
-                    glUniform1i(glGetUniformLocation(program, "uUseUniform"), use_uniform);
+                    glUniform4fv(r->uniforms.uColor, 1, ucolor);
+                    glUniform1i(r->uniforms.uUseUniform, use_uniform);
                     break;
                 case RMODEL:
                     memcpy(model, ins->data.model.model, sizeof(mat4x4));
-                    glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, GL_FALSE, model);
+                    render_setmodel(r, model);
                     break;
                 case RARRAY:
                     glBindVertexArray(ins->data.array.handle);

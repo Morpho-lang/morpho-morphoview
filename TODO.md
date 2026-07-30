@@ -34,7 +34,8 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 - [x] Explicit light command: `L <x y z [r g b]>` / `L a` (auto)
 - [x] Material model: `M shaded|flat` + OpenGL/VTK Phong (\(k_a,k_d,k_s,n\)); uniform `C` for meshes
 - [x] RGBA / opacity (blend + opaque/transparent passes)
-- [ ] Phase 2c: consolidate geometry shaders; transparent depth sort (object centroid, far→near)
+- [x] Phase 2c: consolidate geometry shaders (one program + `uFlat`, cached uniforms, CPU normal matrix)
+- [ ] Phase 2c: transparent depth sort (object centroid, far→near)
 - [ ] Object update/delete (`U O` / `X O`) + persistent apply context
 - [ ] Binary / byte-buffer vertex transport
 - [ ] Pick / view / click events
@@ -72,7 +73,8 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 | `M flat` | Done | Unlit albedo |
 | `C` on meshes | Done | Uniform albedo for subsequent geometry |
 | RGBA / opacity | Done | `c … a`, blend, opaque then transparent pass |
-| Shader consolidate + depth sort | Later | Phase 2c: one geometry program; transparent far→near by object centroid |
+| Shader consolidate | Done | Phase 2c: one geometry program + `uFlat`; cached uniforms; CPU normal matrix |
+| Transparent depth sort | Later | Phase 2c: far→near by object centroid |
 
 ### Delete / quit
 
