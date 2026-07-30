@@ -41,6 +41,9 @@
 #define COMMAND_INVLDUPDATE                 "InvldUpd"
 #define COMMAND_INVLDUPDATE_MSG             "Unrecognized update target (expected S)."
 
+#define COMMAND_INVLDDELETE               "InvldDel"
+#define COMMAND_INVLDDELETE_MSG           "Unrecognized delete target (expected S)."
+
 /* -------------------------------------------------------
  * Command IR — header + typed payloads
  * ------------------------------------------------------- */
@@ -48,6 +51,8 @@
 typedef enum {
     MVCMD_SCENE_CREATE,   /**< Create scene + open window (`S`) */
     MVCMD_UPDATE_SCENE,   /**< Clear + select existing scene (`U S`) */
+    MVCMD_CLOSE_SCENE,    /**< Close scene window (`X S`) */
+    MVCMD_QUIT,           /**< Quit viewer (`Q`) */
     MVCMD_WINDOW_TITLE,   /**< Set window title (`W`) */
     MVCMD_OBJECT,         /**< Select/create current object (`o`) */
     MVCMD_VERTICES,       /**< Append vertex data (`v`) */
@@ -82,6 +87,14 @@ typedef struct {
     mv_command cmd;
     int id;
 } mv_cmd_update_scene;
+
+/** Close the window for an existing scene.
+ *  Language: `X S <id>`
+ *  @param id  Scene identifier (must already exist) */
+typedef struct {
+    mv_command cmd;
+    int id;
+} mv_cmd_close_scene;
 
 /** Set the current display window title.
  *  Language: `W "<title>"`
@@ -183,6 +196,7 @@ typedef struct {
 
 #define MVCMD_AS_SCENE(c)         ((mv_cmd_scene *) (c))
 #define MVCMD_AS_UPDATE_SCENE(c)  ((mv_cmd_update_scene *) (c))
+#define MVCMD_AS_CLOSE_SCENE(c)   ((mv_cmd_close_scene *) (c))
 #define MVCMD_AS_WINDOW(c)        ((mv_cmd_window *) (c))
 #define MVCMD_AS_OBJECT(c)        ((mv_cmd_object *) (c))
 #define MVCMD_AS_VERTICES(c)      ((mv_cmd_vertices *) (c))

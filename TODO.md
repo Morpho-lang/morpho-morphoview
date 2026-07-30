@@ -43,8 +43,8 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 | Command | Status | Intent |
 |---------|--------|--------|
 | `X O <id>` | Later | Delete object from current scene |
-| `X S <id>` | Later | Close scene / window |
-| `Q` | Later | Quit viewer cleanly (prefer over Morpho-side `pkill`) |
+| `X S <id>` | Done | Close scene / window |
+| `Q` | Done | Quit viewer cleanly (prefer over Morpho-side `pkill`) |
 
 ### Events (viewer → Morpho)
 
@@ -68,6 +68,7 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 - [x] High-level `View` smoke: [`test/testview.morpho`](test/testview.morpho) (`open` + `wait`)
 - [x] Animation demo: [`test/testviewanim.morpho`](test/testviewanim.morpho) (`U S` + `update` / `poll`)
 - [x] Graphics → View: [`test/testviewgraphics.morpho`](test/testviewgraphics.morpho) (`open`/`update` + `Show`)
+- [x] Quit via `Q`: [`test/testquit.morpho`](test/testquit.morpho) (`close` → `window.closed`)
 - [x] Low-level transport: [`test/testzmq.morpho`](test/testzmq.morpho)
 - [x] `U S` replace: [`test/testupdate.morpho`](test/testupdate.morpho)
 

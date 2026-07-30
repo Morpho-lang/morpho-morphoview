@@ -378,12 +378,20 @@ class View {
     }
   }
 
-  // Best-effort stop of the viewer; idempotent.
+  // Best-effort stop of the viewer; idempotent. Prefers command `Q` over pkill.
   close() {
-    if (!self.closed) {
-      self._kill()
-      self.closed = true
+    if (self.closed) return
+    if (!isnil(self.sock)) {
+      self._send("Q")
+      var waited = 0
+      while (!self.closed && waited < self.connectTimeOut) {
+        self.poll(timeoutMs=self.pollMs)
+        if (self.closed) break
+        waited += self.pollMs
+      }
     }
+    if (!self.closed) self._kill()
+    self.closed = true
   }
 
   _bind() {

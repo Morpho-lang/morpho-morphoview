@@ -271,6 +271,23 @@ void display_setwindowtitle(display *d, char *title) {
     if (d) glfwSetWindowTitle(d->window, title);
 }
 
+/** Mark a display's window for close; display_loop performs teardown. */
+void display_requestclose(display *d) {
+    if (d && d->window) glfwSetWindowShouldClose(d->window, true);
+}
+
+/** Mark every open display for close. */
+void display_requestcloseall(void) {
+    for (display *d = opendisplays; d!=NULL; d=d->next) {
+        display_requestclose(d);
+    }
+}
+
+/** True if at least one display is open. */
+bool display_anyopen(void) {
+    return opendisplays != NULL;
+}
+
 /** Upload every open display's scene to GL (each with its own context) */
 void display_prepareall(void) {
     for (display *d = opendisplays; d!=NULL; d=d->next) {

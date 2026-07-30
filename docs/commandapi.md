@@ -47,6 +47,8 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 |------|-------|---------|
 | `MVCMD_SCENE_CREATE` | `S <id> <dim>` | Scene id, dimension (2 or 3) |
 | `MVCMD_UPDATE_SCENE` | `U S <id>` | Clear existing scene in place; select as current |
+| `MVCMD_CLOSE_SCENE` | `X S <id>` | Close scene window (same teardown as Escape) |
+| `MVCMD_QUIT` | `Q` | Request close of all windows / quit viewer |
 | `MVCMD_WINDOW_TITLE` | `W "<title>"` | Owned title string |
 | `MVCMD_OBJECT` | `o <id>` | Object id |
 | `MVCMD_VERTICES` | `v ["format"] <floats...>` | Optional format; float blob |
@@ -58,7 +60,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_TEXT` | `T <fontid> "<string>"` | Font id, string; optional matrix |
 | `MVCMD_PREPARE` | *(none — appended by parse)* | Upload every open display’s scene to GL |
 
-`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `MVCMD_PREPARE` calls `display_prepareall()`.
+`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `X S` marks that scene’s window for close (loop tears it down). `Q` marks every window for close; if none are open and the listener is active, emits `window.closed` and stops. `MVCMD_PREPARE` calls `display_prepareall()`.
 
 ## ASCII language
 
@@ -70,6 +72,8 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 |--------|-----------|-------|
 | `S` | `<id> <dim>` | Create or select scene; open window if needed (does not clear) |
 | `U` | `S <id>` | Clear scene `id` in place and select it (window kept); see also `TODO.md` for `U O` / `U V` |
+| `X` | `S <id>` | Close scene `id` / its window; see also `TODO.md` for `X O` |
+| `Q` | — | Quit viewer (close all windows); Morpho `View.close` sends this |
 | `W` | `"<title>"` | Set current window title |
 | `o` | `<id>` | Current object (requires a scene) |
 | `v` | `["format"] <floats...>` | Vertex data for current object |
@@ -110,7 +114,7 @@ C 0
 d 1
 ```
 
-See also `test/linespts`, `test/polyhedra`, and `test/twoscenes`.
+See also `test/command/linespts`, `test/command/polyhedra`, and `test/command/twoscenes`.
 
 ## ZeroMQ transport
 
@@ -127,8 +131,8 @@ An I/O thread owns the socket. Each received string is an ASCII command chunk (`
 |---------|---------|
 | `ok` | Chunk parsed and enqueued successfully |
 | `err …` | Parse failed |
-| `window.closed` | Last display window closed |
+| `window.closed` | Last display window closed (also after `Q` with no windows) |
 
-Morpho helper: `import morphoview` then `View()` / `open` / `update` / `poll` / `wait` / `close` in [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho).
+Morpho helper: `import morphoview` then `View()` / `open` / `update` / `poll` / `wait` / `close` in [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho). `View.close()` sends `Q` and waits for `window.closed` (falls back to `pkill` only if the peer hangs).
 
 `open` / `update` accept either an ASCII string or a `Graphics` object. Graphics is serialized by the package’s prototype `Show` (same visitor as graphics.morpho) into this command language; `View.write` is the File-compatible sink, so the serializer never knows about ZMQ. `Show(g)` remains fire-and-forget (temp file + `-t`). Live scene replace uses `U S <id>` (also what `update(Graphics)` emits).

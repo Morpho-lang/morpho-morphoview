@@ -58,6 +58,9 @@ typedef struct sdisplay {
 display *display_open(scene *s);
 display *display_findforscene(scene *s);
 void display_setwindowtitle(display *d, char *title);
+void display_requestclose(display *d);
+void display_requestcloseall(void);
+bool display_anyopen(void);
 void display_prepareall(void);
 
 void display_loop(void);

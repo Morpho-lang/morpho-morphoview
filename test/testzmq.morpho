@@ -6,7 +6,7 @@
 
 import zeromq
 
-var f = File("zmqtri", "read")
+var f = File("command/zmqtri", "read")
 var commands = f.readall()
 f.close()
 

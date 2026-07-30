@@ -18,6 +18,7 @@
 #include "display.h"
 #include "render.h"
 #include "matrix3d.h"
+#include "listener.h"
 
 DEFINE_VARRAY(mv_commandptr, mv_command *);
 
@@ -177,6 +178,33 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             ctx->cobject = NULL;
             return true;
         }
+
+        case MVCMD_CLOSE_SCENE: {
+            mv_cmd_close_scene *c = MVCMD_AS_CLOSE_SCENE(cmd);
+            scene *s = scene_find(c->id);
+            if (!s) {
+                fprintf(stderr, "morphoview: No scene with id '%i'.\n", c->id);
+                return false;
+            }
+
+            display *d = display_findforscene(s);
+            display_requestclose(d);
+
+            if (ctx->scene == s) {
+                ctx->scene = NULL;
+                ctx->display = NULL;
+                ctx->cobject = NULL;
+            }
+            return true;
+        }
+
+        case MVCMD_QUIT:
+            display_requestcloseall();
+            if (!display_anyopen() && listener_isactive()) {
+                listener_reply(LISTENER_WINDOW_CLOSED);
+                listener_stop();
+            }
+            return true;
 
         case MVCMD_WINDOW_TITLE: {
             mv_cmd_window *c = MVCMD_AS_WINDOW(cmd);
@@ -345,6 +373,8 @@ enum {
     MVTOKEN_SCALE,
     MVTOKEN_SCENE,
     MVTOKEN_UPDATE,
+    MVTOKEN_DELETE,
+    MVTOKEN_QUIT,
     MVTOKEN_TRANSLATE,
     MVTOKEN_WINDOW,
     MVTOKEN_FONT,
@@ -374,6 +404,8 @@ tokendefn mvtokens[] = {
     { "s",          MVTOKEN_SCALE                 , NULL },
     { "S",          MVTOKEN_SCENE                 , NULL },
     { "U",          MVTOKEN_UPDATE                , NULL },
+    { "X",          MVTOKEN_DELETE                , NULL },
+    { "Q",          MVTOKEN_QUIT                  , NULL },
     { "t",          MVTOKEN_TRANSLATE             , NULL },
     { "T",          MVTOKEN_TEXT                  , NULL },
     { "v",          MVTOKEN_VERTICES              , NULL },
@@ -865,6 +897,42 @@ bool command_parseupdate(parser *p, void *out) {
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
+/** `X S <id>` — close the window for an existing scene. */
+bool command_parsedelete(parser *p, void *out) {
+    (void) out;
+    int id;
+
+    if (!parse_checktokenadvance(p, MVTOKEN_SCENE)) {
+        parse_error(p, true, COMMAND_INVLDDELETE);
+        return false;
+    }
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+
+    mv_cmd_close_scene *cmd = command_new(MVCMD_CLOSE_SCENE, sizeof(mv_cmd_close_scene));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+/** `Q` — quit the viewer. */
+bool command_parsequit(parser *p, void *out) {
+    (void) p;
+    (void) out;
+
+    mv_command *cmd = command_new(MVCMD_QUIT, sizeof(mv_command));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+
+    return command_enqueue_owned(p, cmd);
+}
+
 bool command_parsewindow(parser *p, void *out) {
     (void) out;
     char *name=NULL;
@@ -965,6 +1033,8 @@ parserule mv_parserules[] = {
     PARSERULE_PREFIX(MVTOKEN_SCALE, command_parsescale),
     PARSERULE_PREFIX(MVTOKEN_SCENE, command_parsescene),
     PARSERULE_PREFIX(MVTOKEN_UPDATE, command_parseupdate),
+    PARSERULE_PREFIX(MVTOKEN_DELETE, command_parsedelete),
+    PARSERULE_PREFIX(MVTOKEN_QUIT, command_parsequit),
     PARSERULE_PREFIX(MVTOKEN_TRANSLATE, command_parsetranslate),
     PARSERULE_PREFIX(MVTOKEN_WINDOW, command_parsewindow),
     PARSERULE_PREFIX(MVTOKEN_FONT, command_parsefont),
@@ -1094,6 +1164,7 @@ void command_initialize(void) {
     morpho_defineerror(COMMAND_EXPECTNUMBER, ERROR_PARSE, COMMAND_EXPECTNUMBER_MSG);
     morpho_defineerror(COMMAND_EXPECTSTRING, ERROR_PARSE, COMMAND_EXPECTSTRING_MSG);
     morpho_defineerror(COMMAND_INVLDUPDATE, ERROR_PARSE, COMMAND_INVLDUPDATE_MSG);
+    morpho_defineerror(COMMAND_INVLDDELETE, ERROR_PARSE, COMMAND_INVLDDELETE_MSG);
 }
 
 void command_finalize(void) {
