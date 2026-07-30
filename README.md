@@ -26,6 +26,6 @@ The package can be loaded into morpho using the `import` keyword.
 
     import morphoview
 
-Fire-and-forget display of graphics still uses `Show` from `import graphics` (temp file). For a live ZMQ session use `View` from this package (see `share/modules/morphoview.morpho`).
+Fire-and-forget display: `Show(g)` (temp file + `-t`). Live ZMQ session: `View` with `open`/`update` taking either ASCII or a `Graphics` object (serialized by the package’s prototype `Show` — candidate to push upstream). See `share/modules/morphoview.morpho`.
 
 Viewer CLI extras: `-b <endpoint>` binds a ZMQ PAIR socket; `-c <endpoint>` connects (used by `View`).

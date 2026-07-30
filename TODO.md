@@ -8,11 +8,23 @@ Near-term and later work. Command-language details also live in [`docs/commandap
 
 - [x] `init` — defaults only (no spawn)
 - [x] `open(commands)` — bind, spawn, send, wait for `ok`
+- [x] `open(Graphics)` — serialize via prototype `Show`, then open
 - [x] `update(commands)` — send another chunk, wait for `ok`
+- [x] `update(Graphics)` — serialize with `U S` replace, then update
+- [x] `write(line)` — File-compatible sink for `Show.write(g, out)`
 - [x] `poll(timeoutMs)` — non-blocking / short wait; return event or `nil`
 - [x] `wait(sessionTimeOut=0)` — convenience loop until closed / timeout
 - [x] `close()` — idempotent cleanup
 - [x] Private helpers prefixed with `_`
+
+### Show serializer prototype (upstream candidate)
+
+Mild rewrite of graphics `Show`, living here until pushed back to morpho:
+
+- [x] `Show()` / `Show(g)` — two inits via multiple dispatch; fire-and-forget still `-t`
+- [x] `write(g, out)` — any `out.write(line)` delegate (File, `View`, …)
+- [x] `replace` / `sceneid` — preamble emits `U S` vs `S` for live updates
+- [ ] Push to morpho `graphics.morpho` once API feels right
 
 ## Command language extensions
 
@@ -55,10 +67,11 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 
 - [x] High-level `View` smoke: [`test/testview.morpho`](test/testview.morpho) (`open` + `wait`)
 - [x] Animation demo: [`test/testviewanim.morpho`](test/testviewanim.morpho) (`U S` + `update` / `poll`)
+- [x] Graphics → View: [`test/testviewgraphics.morpho`](test/testviewgraphics.morpho) (`open`/`update` + `Show`)
 - [x] Low-level transport: [`test/testzmq.morpho`](test/testzmq.morpho)
 - [x] `U S` replace: [`test/testupdate.morpho`](test/testupdate.morpho)
 
 ## Notes
 
 - Each `command_process` batch currently starts with an empty apply context, so every chunk that draws must establish a scene (`S` or `U S`) before `o`/`v`/….
-- Graphics `Show` stays fire-and-forget (temp file + `-t`). Package `View` is the live duplex path.
+- Package `Show` prototypes the upstream split: fire-and-forget (`Show(g)` / `-t`) vs serialize-to-delegate (`Show().write(g, out)`). `View` is the live duplex path and a `write` sink.
