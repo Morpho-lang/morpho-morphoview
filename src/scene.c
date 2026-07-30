@@ -317,11 +317,11 @@ int scene_addtext(scene *s, int fontid, char *text) {
 }
 
 /** Adds a color to a scene */
-int scene_addcolor(scene *s, int colorid, int length, int indx) {
+int scene_addcolor(scene *s, int colorid, int length, int components, int indx) {
     gcolor color = { .colorid = colorid,
                      .length = length,
+                     .components = components,
                      .indx = indx
-        
     };
     
     return varray_gcolorwrite(&s->colorlist, color);

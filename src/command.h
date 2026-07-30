@@ -47,6 +47,9 @@
 #define COMMAND_INVLDMATERIAL             "InvldMat"
 #define COMMAND_INVLDMATERIAL_MSG         "Unrecognized material (expected shaded or flat)."
 
+#define COMMAND_INVLDCOLOR                "InvldClr"
+#define COMMAND_INVLDCOLOR_MSG            "Color data length must be RGB triples or RGBA quads."
+
 /* -------------------------------------------------------
  * Command IR — header + typed payloads
  * ------------------------------------------------------- */
@@ -149,16 +152,18 @@ typedef struct {
     int length;
 } mv_cmd_element;
 
-/** Define a named color table entry from RGB triples.
- *  Language: `c <id> <r g b>...`
- *  @param id      Color identifier
- *  @param rgb     Owned float blob of length*3 components (r,g,b per entry)
- *  @param length  Number of RGB triples */
+/** Define a named color table entry from RGB or RGBA values.
+ *  Language: `c <id> <r g b>` or `c <id> <r g b a>` (multi-entry: RGB triples or RGBA quads)
+ *  @param id          Color identifier
+ *  @param rgb         Owned float blob of length*components (r,g,b[,a] per entry)
+ *  @param length      Number of color entries
+ *  @param components  3 (RGB) or 4 (RGBA) */
 typedef struct {
     mv_command cmd;
     int id;
     float *rgb;
     int length;
+    int components;
 } mv_cmd_color;
 
 /** Select the active color for subsequent draws.

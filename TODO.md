@@ -33,7 +33,7 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 - [x] Default light / viewPos placed outside scene AABB (unless an explicit light is set later)
 - [ ] Explicit light command: `L <x y z [r g b]>` / `L a` (auto)
 - [x] Material model: `M shaded|flat` + OpenGL/VTK Phong (\(k_a,k_d,k_s,n\)); uniform `C` for meshes
-- [ ] RGBA / opacity (blend + opaque/transparent passes)
+- [x] RGBA / opacity (blend + opaque/transparent passes)
 - [ ] Object update/delete (`U O` / `X O`) + persistent apply context
 - [ ] Binary / byte-buffer vertex transport
 - [ ] Pick / view / click events
@@ -70,7 +70,7 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 | `M shaded [ka kd [ks [n]]]` | Done | OpenGL/VTK Phong; defaults ka=kd=0.5, ks=0 (Lambert) |
 | `M flat` | Done | Unlit albedo |
 | `C` on meshes | Done | Uniform albedo for subsequent geometry |
-| RGBA / opacity | Later | Phase 2c |
+| RGBA / opacity | Done | Phase 2b: `c … a`, blend, opaque then transparent pass |
 
 ### Delete / quit
 
@@ -111,6 +111,7 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 - [x] Uniform Phong: [`test/command/uniformphong`](test/command/uniformphong)
 - [x] Material comparison (flat / Lambert / Phong): [`test/command/materials`](test/command/materials)
 - [x] Phong torus: [`test/command/torus`](test/command/torus)
+- [x] Opacity (RGBA blend): [`test/command/opacity`](test/command/opacity)
 
 ## Notes
 

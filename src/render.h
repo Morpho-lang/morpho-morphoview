@@ -89,7 +89,7 @@ typedef struct {
         } text;
         
         struct {
-            float rgb[3];
+            float rgba[4];
             int use_uniform; /* 1 = geometry uses uColor; text always uses rgb */
         } color;
 

@@ -272,8 +272,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             if (!ctx->scene) return false;
 
             if (c->length>0 && c->rgb) {
-                int indx=scene_adddata(ctx->scene, c->rgb, c->length*3);
-                scene_addcolor(ctx->scene, c->id, c->length, indx);
+                int ncomp = (c->components==4) ? 4 : 3;
+                int indx=scene_adddata(ctx->scene, c->rgb, c->length*ncomp);
+                scene_addcolor(ctx->scene, c->id, c->length, ncomp, indx);
             }
             return true;
         }
@@ -615,18 +616,36 @@ bool command_parsecolor(parser *p, void *out) {
 
     varray_floatinit(&rgb);
     while (command_isnumerical(p)) {
-        float r[3];
-        for (int i=0; i<3; i++) {
-            if (!command_parsefloat(p, &r[i])) {
-                varray_floatclear(&rgb);
-                return false;
-            }
+        float f;
+        if (!command_parsefloat(p, &f)) {
+            varray_floatclear(&rgb);
+            return false;
         }
-        if (!varray_floatadd(&rgb, r, 3)) {
+        if (!varray_floatadd(&rgb, &f, 1)) {
             varray_floatclear(&rgb);
             parse_error(p, true, ERROR_ALLOCATIONFAILED);
             return false;
         }
+    }
+
+    int components=3;
+    int length=0;
+    if (rgb.count==0) {
+        components=3;
+        length=0;
+    } else if (rgb.count==4) {
+        components=4;
+        length=1;
+    } else if (rgb.count%3==0) {
+        components=3;
+        length=rgb.count/3;
+    } else if (rgb.count%4==0) {
+        components=4;
+        length=rgb.count/4;
+    } else {
+        varray_floatclear(&rgb);
+        parse_error(p, false, COMMAND_INVLDCOLOR);
+        return false;
     }
 
     mv_cmd_color *cmd = command_new(MVCMD_COLOR, sizeof(mv_cmd_color));
@@ -636,7 +655,8 @@ bool command_parsecolor(parser *p, void *out) {
         return false;
     }
     cmd->id=id;
-    cmd->length=rgb.count/3;
+    cmd->length=length;
+    cmd->components=components;
 
     if (rgb.count>0) {
         cmd->rgb=malloc(sizeof(float)*rgb.count);
@@ -1262,6 +1282,7 @@ void command_initialize(void) {
     morpho_defineerror(COMMAND_INVLDUPDATE, ERROR_PARSE, COMMAND_INVLDUPDATE_MSG);
     morpho_defineerror(COMMAND_INVLDDELETE, ERROR_PARSE, COMMAND_INVLDDELETE_MSG);
     morpho_defineerror(COMMAND_INVLDMATERIAL, ERROR_PARSE, COMMAND_INVLDMATERIAL_MSG);
+    morpho_defineerror(COMMAND_INVLDCOLOR, ERROR_PARSE, COMMAND_INVLDCOLOR_MSG);
 }
 
 void command_finalize(void) {

@@ -54,7 +54,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_OBJECT` | `o <id>` | Object id |
 | `MVCMD_VERTICES` | `v ["format"] <floats...>` | Optional format; float blob |
 | `MVCMD_ELEMENT` | `p` / `l` / `f` `<indices...>` | Points, lines, or facets |
-| `MVCMD_COLOR` | `c <id> <r g b>...` | Color id; RGB triples |
+| `MVCMD_COLOR` | `c <id> <r g b [a]>...` | Color id; RGB triples or RGBA quads |
 | `MVCMD_SELECT_COLOR` | `C <id>` | Active color id (uniform albedo for subsequent geometry/text) |
 | `MVCMD_MATERIAL` | `M flat` / `M shaded [ka kd [ks [n]]]` | Shade mode + Phong coeffs |
 | `MVCMD_DRAW` | `d <id>` | Object id; optional baked 4×4 matrix |
@@ -81,7 +81,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `o` | `<id>` | Current object (requires a scene) |
 | `v` | `["format"] <floats...>` | Vertex data for current object |
 | `p` / `l` / `f` | `<indices...>` | Points / lines / facets |
-| `c` | `<id> <r g b>...` | Define color table entry |
+| `c` | `<id> <r g b [a]>...` | Define color table entry (RGB or RGBA) |
 | `C` | `<id>` | Select uniform color for subsequent geometry and text |
 | `M` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Material: unlit or OpenGL/VTK Phong (default ka=kd=0.5, ks=0) |
 | `d` | `<id>` | Draw object (matrix from prior transforms if any) |
@@ -98,10 +98,11 @@ I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V
 
 - **`M shaded`** (default) — Phong/Lambert with science-friendly defaults (\(k_a=k_d=0.5\), \(k_s=0\)). Optional floats override coeffs.
 - **`M flat`** — unlit albedo (diagrams / categorical color).
-- **Uniform color:** `c` / `C` then `v "xn"` — `C` sets albedo for subsequent draws.
-- **Vertex color:** `v "xnc"` without a preceding `C` — per-vertex RGB is the albedo.
+- **Uniform color:** `c` / `C` then `v "xn"` — `C` sets albedo (and optional alpha) for subsequent draws.
+- **Vertex color:** `v "xnc"` without a preceding `C` — per-vertex RGB is the albedo (opaque).
+- **Opacity:** `c <id> <r g b a>` — alpha on the selected color. Opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off and standard alpha blending. Display-list order for transparent (no OIT).
 
-Lighting and eye position are in model space (stable under camera rotation). Opacity / RGBA is deferred.
+Lighting and eye position are in model space (stable under camera rotation).
 
 ### Transforms (parse-only)
 
@@ -134,7 +135,7 @@ i
 d 1
 ```
 
-See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, `test/command/largebbox` (auto-fit), `test/command/flatshade`, `test/command/uniformphong`, `test/command/materials` (flat | Lambert | Phong spheres), and `test/command/torus` (specular highlight).
+See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, `test/command/largebbox` (auto-fit), `test/command/flatshade`, `test/command/uniformphong`, `test/command/materials` (flat | Lambert | Phong spheres), and `test/command/opacity` (semi-transparent over opaque).
 
 ## ZeroMQ transport
 

@@ -52,7 +52,7 @@ const char *fragmentshader = "#version 330 core\n"
     "uniform vec3 lightColor;"
     "uniform vec3 lightPos;"
     "uniform vec3 viewPos;"
-    "uniform vec3 uColor;"
+    "uniform vec4 uColor;"
     "uniform int uUseUniform;"
     "uniform float ka;"
     "uniform float kd;"
@@ -60,7 +60,8 @@ const char *fragmentshader = "#version 330 core\n"
     "uniform float shininess;"
     ""
     "void main() {"
-    "   vec3 albedo = (uUseUniform != 0) ? uColor : fragColor;"
+    "   vec3 albedo = (uUseUniform != 0) ? uColor.rgb : fragColor;"
+    "   float alpha = (uUseUniform != 0) ? uColor.a : 1.0;"
     "   vec3 norm = normalize(normal);"
     "   vec3 lightDir = normalize(lightPos - fragPos);"
     "   float NdotL = max(dot(norm, lightDir), 0.0);"
@@ -71,7 +72,7 @@ const char *fragmentshader = "#version 330 core\n"
     "   float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);"
     "   vec3 specular = ks * spec * lightColor;"
     "   vec3 result = (ambient + diffuse + specular) * albedo;"
-    "   FragColor = vec4(result, 1.0);"
+    "   FragColor = vec4(result, alpha);"
     "}";
 
 /* Flat / unlit */
@@ -93,12 +94,13 @@ const char *flatvertexshader = "#version 330 core\n"
 const char *flatfragmentshader = "#version 330 core\n"
     "out vec4 FragColor;"
     "in vec3 fragColor;"
-    "uniform vec3 uColor;"
+    "uniform vec4 uColor;"
     "uniform int uUseUniform;"
     ""
     "void main() {"
-    "   vec3 albedo = (uUseUniform != 0) ? uColor : fragColor;"
-    "   FragColor = vec4(albedo, 1.0);"
+    "   vec3 albedo = (uUseUniform != 0) ? uColor.rgb : fragColor;"
+    "   float alpha = (uUseUniform != 0) ? uColor.a : 1.0;"
+    "   FragColor = vec4(albedo, alpha);"
     "}";
 
 /* Text shader */
@@ -123,11 +125,11 @@ const char *textfragmentshader =
     "in vec2 TexCoords;"
     "out vec4 color;"
     "uniform sampler2D text;"
-    "uniform vec3 textColor;"
+    "uniform vec4 textColor;"
 
     "void main() {"
     "   vec4 sampled = vec4(1.0, 1.0, 1.0, texture(text, TexCoords).r);"
-    "   color = vec4(textColor, 1.0) * sampled;"
+    "   color = textColor * sampled;"
     "}";
 
 /* -------------------------------------------------------
@@ -686,7 +688,9 @@ void render_preparescene(renderer *r, scene *s) {
                 
                 if (color) {
                     renderinstruction ins = { .instruction = RCOLOR };
-                    for (int k=0; k<3; k++) ins.data.color.rgb[k]=s->data.data[color->indx+k];
+                    int ncomp = (color->components==4) ? 4 : 3;
+                    for (int k=0; k<3; k++) ins.data.color.rgba[k]=s->data.data[color->indx+k];
+                    ins.data.color.rgba[3]=(ncomp==4) ? s->data.data[color->indx+3] : 1.0f;
                     ins.data.color.use_uniform=1;
                     varray_renderinstructionadd(&r->renderlist, &ins, 1);
                 } else {
@@ -723,13 +727,13 @@ void render_preparescene(renderer *r, scene *s) {
 /** Upload uniforms shared by shaded and flat geometry programs. */
 static void render_setgeometryuniforms(GLuint program, mat4x4 view, mat4x4 proj,
                                        mat4x4 model, vec3 lightcolor, vec3 lightposn, vec3 viewposn,
-                                       vec3 ucolor, int use_uniform,
+                                       float *ucolor, int use_uniform,
                                        float ka, float kd, float ks, float shininess) {
     glUseProgram(program);
     glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, GL_FALSE, model);
     glUniformMatrix4fv(glGetUniformLocation(program, "view"), 1, GL_FALSE, view);
     glUniformMatrix4fv(glGetUniformLocation(program, "proj"), 1, GL_FALSE, proj);
-    glUniform3fv(glGetUniformLocation(program, "uColor"), 1, ucolor);
+    glUniform4fv(glGetUniformLocation(program, "uColor"), 1, ucolor);
     glUniform1i(glGetUniformLocation(program, "uUseUniform"), use_uniform);
 
     GLint loc;
@@ -747,6 +751,15 @@ static void render_setgeometryuniforms(GLuint program, mat4x4 view, mat4x4 proj,
     if (loc>=0) glUniform1f(loc, ks);
     loc=glGetUniformLocation(program, "shininess");
     if (loc>=0) glUniform1f(loc, shininess);
+}
+
+#define RENDER_OPAQUE_ALPHA_EPS 0.999f
+
+/** True for draw instructions that should run in this opacity pass. */
+static bool render_draw_for_pass(int use_uniform, float alpha, bool transparent_pass) {
+    float a = (use_uniform!=0) ? alpha : 1.0f;
+    bool transparent = (a < RENDER_OPAQUE_ALPHA_EPS);
+    return transparent_pass ? transparent : !transparent;
 }
 
 void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s) {
@@ -804,66 +817,87 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     float kd=SCENE_MATERIAL_KD_DEFAULT;
     float ks=SCENE_MATERIAL_KS_DEFAULT;
     float shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
-    vec3 ucolor = {1.0f, 1.0f, 1.0f};
+    float ucolor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     int use_uniform=0;
 
     GLuint program = (shade_mode==SCENE_SHADE_FLAT) ? r->flatshader : r->shader;
-    render_setgeometryuniforms(program, view, proj, model, lightcolor, lightposn, viewposn,
-                               ucolor, use_uniform, ka, kd, ks, shininess);
-    
-    /* Geometry pass */
-    for (unsigned i=0; i<r->renderlist.count; i++) {
-        renderinstruction *ins=&r->renderlist.data[i];
-        switch (ins->instruction) {
-            case RNOP: break;
-            case RSHADE:
-                shade_mode=ins->data.shade.mode;
-                ka=ins->data.shade.ka;
-                kd=ins->data.shade.kd;
-                ks=ins->data.shade.ks;
-                shininess=ins->data.shade.shininess;
-                program = (shade_mode==SCENE_SHADE_FLAT) ? r->flatshader : r->shader;
-                render_setgeometryuniforms(program, view, proj, model, lightcolor, lightposn, viewposn,
-                                           ucolor, use_uniform, ka, kd, ks, shininess);
-                break;
-            case RCOLOR:
-                ucolor[0]=ins->data.color.rgb[0];
-                ucolor[1]=ins->data.color.rgb[1];
-                ucolor[2]=ins->data.color.rgb[2];
-                use_uniform=ins->data.color.use_uniform;
-                glUniform3fv(glGetUniformLocation(program, "uColor"), 1, ucolor);
-                glUniform1i(glGetUniformLocation(program, "uUseUniform"), use_uniform);
-                break;
-            case RMODEL:
-                memcpy(model, ins->data.model.model, sizeof(mat4x4));
-                glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, GL_FALSE, model);
-                break;
-            case RARRAY:
-                glBindVertexArray(ins->data.array.handle);
-                break;
-            case RTRIANGLES:
-                glDrawElements(GL_TRIANGLES, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
-                break;
-            case RLINES:
-                glDrawElements(GL_LINES, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
-                break;
-            case RPOINTS:
-                glDrawElements(GL_POINTS, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
-                break;
-            case RTEXT:
-                break;
+
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    /* Geometry: opaque pass then transparent (depth write off for transparent). */
+    for (int pass=0; pass<2; pass++) {
+        bool transparent_pass = (pass==1);
+        glDepthMask(transparent_pass ? GL_FALSE : GL_TRUE);
+
+        shade_mode=SCENE_SHADE_SHADED;
+        ka=SCENE_MATERIAL_KA_DEFAULT;
+        kd=SCENE_MATERIAL_KD_DEFAULT;
+        ks=SCENE_MATERIAL_KS_DEFAULT;
+        shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
+        ucolor[0]=ucolor[1]=ucolor[2]=ucolor[3]=1.0f;
+        use_uniform=0;
+        mat3d_identity4x4(model);
+        program = r->shader;
+        render_setgeometryuniforms(program, view, proj, model, lightcolor, lightposn, viewposn,
+                                   ucolor, use_uniform, ka, kd, ks, shininess);
+
+        for (unsigned i=0; i<r->renderlist.count; i++) {
+            renderinstruction *ins=&r->renderlist.data[i];
+            switch (ins->instruction) {
+                case RNOP: break;
+                case RSHADE:
+                    shade_mode=ins->data.shade.mode;
+                    ka=ins->data.shade.ka;
+                    kd=ins->data.shade.kd;
+                    ks=ins->data.shade.ks;
+                    shininess=ins->data.shade.shininess;
+                    program = (shade_mode==SCENE_SHADE_FLAT) ? r->flatshader : r->shader;
+                    render_setgeometryuniforms(program, view, proj, model, lightcolor, lightposn, viewposn,
+                                               ucolor, use_uniform, ka, kd, ks, shininess);
+                    break;
+                case RCOLOR:
+                    ucolor[0]=ins->data.color.rgba[0];
+                    ucolor[1]=ins->data.color.rgba[1];
+                    ucolor[2]=ins->data.color.rgba[2];
+                    ucolor[3]=ins->data.color.rgba[3];
+                    use_uniform=ins->data.color.use_uniform;
+                    glUniform4fv(glGetUniformLocation(program, "uColor"), 1, ucolor);
+                    glUniform1i(glGetUniformLocation(program, "uUseUniform"), use_uniform);
+                    break;
+                case RMODEL:
+                    memcpy(model, ins->data.model.model, sizeof(mat4x4));
+                    glUniformMatrix4fv(glGetUniformLocation(program, "model"), 1, GL_FALSE, model);
+                    break;
+                case RARRAY:
+                    glBindVertexArray(ins->data.array.handle);
+                    break;
+                case RTRIANGLES:
+                    if (render_draw_for_pass(use_uniform, ucolor[3], transparent_pass))
+                        glDrawElements(GL_TRIANGLES, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
+                    break;
+                case RLINES:
+                    if (render_draw_for_pass(use_uniform, ucolor[3], transparent_pass))
+                        glDrawElements(GL_LINES, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
+                    break;
+                case RPOINTS:
+                    if (render_draw_for_pass(use_uniform, ucolor[3], transparent_pass))
+                        glDrawElements(GL_POINTS, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
+                    break;
+                case RTEXT:
+                    break;
+            }
         }
     }
+
+    glDepthMask(GL_TRUE);
     
     /* Text rendering pass */
     glUseProgram(r->textshader);
     
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    
     GLint textcoloruniform = glGetUniformLocation(r->textshader, "textColor");
-    vec3 textcolor = {1.0f, 1.0f, 1.0f};
-    glUniform3fv(textcoloruniform, 1, textcolor);
+    float textcolor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
+    glUniform4fv(textcoloruniform, 1, textcolor);
     
     GLint modeluniform = glGetUniformLocation(r->textshader, "model");
     GLint viewuniform = glGetUniformLocation(r->textshader, "view");
@@ -888,7 +922,7 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
                 render_rendertext(r, ins->data.text.rfontid, ins->data.text.txt);
                 break;
             case RCOLOR:
-                glUniform3fv(textcoloruniform, 1, ins->data.color.rgb);
+                glUniform4fv(textcoloruniform, 1, ins->data.color.rgba);
                 break;
             default:
                 break;

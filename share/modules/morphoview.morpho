@@ -273,7 +273,11 @@ class XShow {
   addColor(color, out) {
     if (!self.colors.contains(color)) {
       var id = self.colors[color] = self.colors.count()
-      out.write("c ${id} ${color.r} ${color.g} ${color.b}")
+      if (isdefined(color.a) && color.a < 1) {
+        out.write("c ${id} ${color.r} ${color.g} ${color.b} ${color.a}")
+      } else {
+        out.write("c ${id} ${color.r} ${color.g} ${color.b}")
+      }
     }
     return self.colors[color]
   }

@@ -56,7 +56,8 @@ DECLARE_VARRAY(gobject, gobject);
 typedef struct {
     int colorid;
     int indx;
-    int length;
+    int length;      /**< Number of color entries */
+    int components;  /**< 3 (RGB) or 4 (RGBA) */
 } gcolor;
 
 DECLARE_VARRAY(gcolor, gcolor);
@@ -156,7 +157,7 @@ int scene_addelement(gobject *obj, gelement *el);
 bool scene_addfont(scene *s, int id, char *file, float size, int *fontindx);
 textfont *scene_getfontfromid(scene *s, int fontid);
 int scene_addtext(scene *s, int fontid, char *text);
-int scene_addcolor(scene *s, int colorid, int length, int indx);
+int scene_addcolor(scene *s, int colorid, int length, int components, int indx);
 void scene_adddraw(scene *scene, gdrawtype type, int id, int matindx);
 
 gobject *scene_getgobjectfromid(scene *s, int id);
