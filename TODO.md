@@ -4,17 +4,15 @@ Near-term and later work. Command-language details also live in [`docs/commandap
 
 ## View session API (Morpho)
 
-Refactor [`share/modules/morphoview.morpho`](share/modules/morphoview.morpho) away from a blocking constructor:
+[`share/modules/morphoview.morpho`](share/modules/morphoview.morpho) — duplex session (Morpho has no async runtime; scripts drive `poll` / `System.sleep`):
 
-- [ ] `init` — defaults only (no spawn)
-- [ ] `open(commands)` — bind, spawn, send, wait for `ok`
-- [ ] `update(commands)` — send another chunk, wait for `ok`
-- [ ] `poll(timeoutMs)` — non-blocking / short wait; return event or `nil`
-- [ ] `wait(sessionTimeOut=0)` — convenience loop until closed / timeout
-- [ ] `close()` — idempotent cleanup
-- [ ] Private helpers prefixed with `_`
-
-Morpho has no async runtime: scripts drive the loop with `poll` / `System.sleep`.
+- [x] `init` — defaults only (no spawn)
+- [x] `open(commands)` — bind, spawn, send, wait for `ok`
+- [x] `update(commands)` — send another chunk, wait for `ok`
+- [x] `poll(timeoutMs)` — non-blocking / short wait; return event or `nil`
+- [x] `wait(sessionTimeOut=0)` — convenience loop until closed / timeout
+- [x] `close()` — idempotent cleanup
+- [x] Private helpers prefixed with `_`
 
 ## Command language extensions
 
@@ -55,9 +53,10 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 
 ## Demos / tests
 
-- [ ] High-level `View` smoke: `open` + `wait(sessionTimeOut=…)`
-- [ ] Animation demo: rotating triangle via `U S` + `update` / `poll` loop
-- [ ] Keep low-level [`test/testzmq.morpho`](test/testzmq.morpho) as transport smoke
+- [x] High-level `View` smoke: [`test/testview.morpho`](test/testview.morpho) (`open` + `wait`)
+- [x] Animation demo: [`test/testviewanim.morpho`](test/testviewanim.morpho) (`U S` + `update` / `poll`)
+- [x] Low-level transport: [`test/testzmq.morpho`](test/testzmq.morpho)
+- [x] `U S` replace: [`test/testupdate.morpho`](test/testupdate.morpho)
 
 ## Notes
 

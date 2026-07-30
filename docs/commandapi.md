@@ -129,4 +129,4 @@ An I/O thread owns the socket. Each received string is an ASCII command chunk (`
 | `err …` | Parse failed |
 | `window.closed` | Last display window closed |
 
-Morpho helper: `import morphoview` then `View(commands)` in [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho). Distinct from graphics `Show` (temp file + `-t`).
+Morpho helper: `import morphoview` then `View()` / `open` / `update` / `poll` / `wait` / `close` in [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho). Distinct from graphics `Show` (temp file + `-t`). Live scene replace uses `U S <id>` in update chunks.

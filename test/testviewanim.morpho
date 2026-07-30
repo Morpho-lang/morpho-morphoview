@@ -1,0 +1,44 @@
+// Animate a rotating triangle via View.update + U S.
+// Expect: prints "ok" then exits.
+// Requires: morphoview on PATH (with U S support), morpho-zeromq, display.
+//
+//   cd test && morpho6 testviewanim.morpho
+
+import morphoview
+
+fn vtx(x, y, c, s, r, g, b) {
+  var xp = c*x - s*y
+  var yp = s*x + c*y
+  return "${xp} ${yp} 0  0 0 1  ${r} ${g} ${b}\n"
+}
+
+fn triangle(angle, header) {
+  var c = cos(angle)
+  var s = sin(angle)
+  return header +
+    "c 0 1 0.4 0.1\n" +
+    "o 1\n" +
+    "v \"xnc\"\n" +
+    vtx(-0.5, -0.5, c, s, 1, 0.4, 0.1) +
+    vtx( 0.5, -0.5, c, s, 1, 0.4, 0.1) +
+    vtx( 0.0,  0.5, c, s, 1, 0.4, 0.1) +
+    "l\n" +
+    "0 1 1 2 2 0\n" +
+    "i\n" +
+    "C 0\n" +
+    "d 1\n"
+}
+
+var v = View()
+if (!v.open(triangle(0, "S 0 3\nW \"spin\"\n"))) {
+  print "open failed"
+} else {
+  for (i in 1...360) {
+    if (v.closed) break
+    v.update(triangle(Float(i)*0.12, "U S 0\n"))
+    System.sleep(0.03)
+    v.poll(timeoutMs=0)
+  }
+  v.close()
+  print "ok"
+}

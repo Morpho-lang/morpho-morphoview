@@ -1,10 +1,17 @@
 /** MorphoView live session helper.
  *
- *  `View` opens a duplex ZMQ PAIR session with morphoview (distinct from
+ *  `View` is a duplex ZMQ PAIR session with morphoview (distinct from
  *  graphics `Show`, which writes a temp file and fire-and-forgets).
  *
- *  View(commands)
- *  View(commands, sessionTimeOut=1500)  // ms after `ok` before auto-exit
+ *  Morpho has no async runtime: keep the channel open and drive the loop
+ *  with `poll` / `System.sleep`, or use `wait` as a convenience.
+ *
+ *    var v = View()
+ *    v.open(commands)
+ *    v.update(morecommands)   // e.g. chunk starting with `U S <id>`
+ *    v.poll(timeoutMs=0)
+ *    v.wait(sessionTimeOut=1500)
+ *    v.close()
  *
  *  Requires: import zeromq  (morpho-zeromq package)
  */
@@ -12,63 +19,131 @@
 import zeromq
 
 class View {
-  init(commands, sessionTimeOut=0) {
-    self.connecttimeout = 5000 // Milliseconds to wait for an initial `ok` after sending commands
-    self.pollms = 100 // Idle poll interval while waiting for window.closed
-    self.sessionTimeOut = sessionTimeOut // 0 = wait indefinitely for window.closed
+  init(connectTimeOut=5000, pollMs=100) {
+    self.connectTimeOut = connectTimeOut
+    self.pollMs = pollMs
+    self.sock = nil
+    self.ep = nil
+    self.poller = nil
+    self.closed = true
+    self.gotOk = false
+  }
 
-    self.sock = ZMQPair()
-    self.sock.bind("tcp://127.0.0.1:!")
-    self.ep = self.sock.endpoint()
-
-    var isWindows = System.platform()=="windows"
-    if (isWindows) {
-      system("powershell -Command \"Start-Process 'morphoview' -ArgumentList '-c', '${self.ep}'\"")
-    } else {
-      system("morphoview -c \"${self.ep}\" > /dev/null 2>&1 &")
+  // Bind, spawn morphoview, send the first command chunk, wait for `ok`.
+  open(commands) {
+    if (!isnil(self.sock)) {
+      print "morphoview: View already open"
+      return false
     }
+    self._bind()
+    self._spawn()
+    self.poller = ZMQPoller(self.sock)
+    self.closed = false
+    self.gotOk = false
+    self._send(commands)
+    return self._waitOk()
+  }
 
-    self.sock.send(commands)
+  // Send another command chunk and wait for `ok`.
+  update(commands) {
+    if (self.closed) return false
+    self.gotOk = false
+    self._send(commands)
+    return self._waitOk()
+  }
 
-    var poller = ZMQPoller(self.sock)
-    var gotok = false
+  // Wait briefly for one reply/event. Returns the message string, or nil.
+  // Default timeout is self.pollMs; use poll(timeoutMs=0) for a non-blocking check.
+  poll(timeoutMs=nil) {
+    if (self.closed || isnil(self.poller)) return nil
+    var t = self.pollMs
+    if (!isnil(timeoutMs)) t = timeoutMs
+    var ready = self.poller.wait(t)
+    if (!ready) return nil
+    return self._handle(self.sock.receive())
+  }
+
+  // Poll until the window closes, the peer dies, or sessionTimeOut ms elapse
+  // (0 = wait indefinitely for window.closed).
+  wait(sessionTimeOut=0) {
     var waited = 0
-
-    while (true) {
-      var ready = poller.wait(self.pollms)
-      if (ready) {
-        var msg = self.sock.receive()
-        if (!isstring(msg)) {
-          break // peer gone (killed or crashed)
-        } else if (msg == "ok") {
-          gotok = true
-          waited = 0
-        } else if (msg == "window.closed") {
-          break
-        } else if (msg.count() >= 3 && msg[0]=="e" && msg[1]=="r" && msg[2]=="r") {
-          print "morphoview: ${msg}"
-          self.kill()
-          break
-        }
-      } else if (!gotok) {
-        waited += self.pollms
-        if (waited >= self.connecttimeout) {
-          print "morphoview: timed out waiting for ok"
-          self.kill()
-          break
-        }
-      } else if (self.sessionTimeOut > 0) {
-        waited += self.pollms
-        if (waited >= self.sessionTimeOut) {
-          self.kill()
+    while (!self.closed) {
+      self.poll(timeoutMs=self.pollMs)
+      if (self.closed) break
+      if (sessionTimeOut > 0) {
+        waited += self.pollMs
+        if (waited >= sessionTimeOut) {
+          self.close()
           break
         }
       }
     }
   }
 
-  // Best-effort: stop a viewer that did not close cleanly
-  kill() {
+  // Best-effort stop of the viewer; idempotent.
+  close() {
+    if (!self.closed) {
+      self._kill()
+      self.closed = true
+    }
+  }
+
+  _bind() {
+    self.sock = ZMQPair()
+    self.sock.bind("tcp://127.0.0.1:!")
+    self.ep = self.sock.endpoint()
+  }
+
+  _spawn() {
+    if (System.platform()=="windows") {
+      system("powershell -Command \"Start-Process 'morphoview' -ArgumentList '-c', '${self.ep}'\"")
+    } else {
+      system("morphoview -c \"${self.ep}\" > /dev/null 2>&1 &")
+    }
+  }
+
+  _send(commands) {
+    self.sock.send(commands)
+  }
+
+  // Block (via poll) until `ok`, error/close, or connectTimeOut.
+  _waitOk() {
+    var waited = 0
+    while (!self.closed && !self.gotOk) {
+      self.poll(timeoutMs=self.pollMs)
+      if (self.gotOk) return true
+      if (self.closed) return false
+      waited += self.pollMs
+      if (waited >= self.connectTimeOut) {
+        print "morphoview: timed out waiting for ok"
+        self._kill()
+        self.closed = true
+        return false
+      }
+    }
+    return self.gotOk
+  }
+
+  // Interpret one reply; update gotOk / closed. Returns msg (or nil if peer gone).
+  _handle(msg) {
+    if (!isstring(msg)) {
+      self.closed = true
+      return nil
+    }
+    if (msg == "ok") {
+      self.gotOk = true
+    } else if (msg == "window.closed") {
+      self.closed = true
+    } else if (msg.count() >= 3 && msg[0]=="e" && msg[1]=="r" && msg[2]=="r") {
+      print "morphoview: ${msg}"
+      self._kill()
+      self.closed = true
+    }
+    return msg
+  }
+
+  _kill() {
+    if (isnil(self.ep)) return
     if (System.platform()=="windows") return
     system("pkill -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
   }
