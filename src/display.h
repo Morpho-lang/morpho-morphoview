@@ -51,6 +51,11 @@ typedef struct sdisplay {
     } state; /** Current action */
     
     mat4x4 view; /** Current view matrix for window */
+
+    bool view_fitted;
+    bool view_user_modified;
+    float ortho_near;
+    float ortho_far;
     
     renderer render;
 } display;
@@ -61,6 +66,7 @@ void display_setwindowtitle(display *d, char *title);
 void display_requestclose(display *d);
 void display_requestcloseall(void);
 bool display_anyopen(void);
+void display_fit(display *d);
 void display_prepareall(void);
 
 void display_loop(void);

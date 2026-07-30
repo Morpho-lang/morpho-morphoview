@@ -114,6 +114,6 @@ void render_reset(renderer *r); /**< Drop GL geometry; keep shaders */
 void render_clear(renderer *r);
 
 void render_preparescene(renderer *r, scene *s);
-void render_render(renderer *r, float aspectratio, mat4x4 view);
+void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s);
 
 #endif /* render_h */

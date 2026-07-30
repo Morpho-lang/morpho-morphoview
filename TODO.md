@@ -26,6 +26,17 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 - [x] `replace` / `sceneId` — preamble emits `U S` vs `S` for live updates
 - [ ] Push to morpho `graphics.morpho` once API feels right
 
+## Framing / camera
+
+- [x] Scene AABB: auto-compute from drawn geometry, or explicit `B xmin xmax ymin ymax zmin zmax`
+- [x] Auto-fit on first `PREPARE` (and after `B`) unless the user moved the camera; Tab restores fitted home view
+- [x] Default light / viewPos placed outside scene AABB (unless an explicit light is set later)
+- [ ] Explicit light command: `L <x y z [r g b]>` / `L a` (auto)
+- [ ] Flat shading (`M shaded|flat`) + RGBA / opacity
+- [ ] Object update/delete (`U O` / `X O`) + persistent apply context
+- [ ] Binary / byte-buffer vertex transport
+- [ ] Pick / view / click events
+
 ## Command language extensions
 
 ### Replace / update
@@ -37,6 +48,19 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 | `U V <objid>` | Later | Replace vertex blob only (morph targets / pointwise edits) |
 
 `S` stays find-or-create/select. Replace is always explicit via `U`, so re-selecting a scene cannot wipe it by accident.
+
+### Bounds
+
+| Command | Status | Intent |
+|---------|--------|--------|
+| `B …` | Done | Explicit scene AABB; prepare refits camera if user has not moved the view |
+
+### Lighting
+
+| Command | Status | Intent |
+|---------|--------|--------|
+| `L <x> <y> <z> [r g b]` | Later | Explicit model-space light (optional color); sets `light_explicit` |
+| `L a` | Later | Clear explicit light; resume AABB auto placement |
 
 ### Delete / quit
 
@@ -71,6 +95,8 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 - [x] Quit via `Q`: [`test/testquit.morpho`](test/testquit.morpho) (`close` → `window.closed`)
 - [x] Low-level transport: [`test/testzmq.morpho`](test/testzmq.morpho)
 - [x] `U S` replace: [`test/testupdate.morpho`](test/testupdate.morpho)
+- [x] Large geometry auto-fit: [`test/command/largebbox`](test/command/largebbox)
+- [x] Large tetrahedron via Graphics/`View`: [`test/testviewlarge.morpho`](test/testviewlarge.morpho)
 
 ## Notes
 

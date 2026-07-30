@@ -50,6 +50,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_CLOSE_SCENE` | `X S <id>` | Close scene window (same teardown as Escape) |
 | `MVCMD_QUIT` | `Q` | Request close of all windows / quit viewer |
 | `MVCMD_WINDOW_TITLE` | `W "<title>"` | Owned title string |
+| `MVCMD_BOUNDS` | `B <xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; requests camera refit |
 | `MVCMD_OBJECT` | `o <id>` | Object id |
 | `MVCMD_VERTICES` | `v ["format"] <floats...>` | Optional format; float blob |
 | `MVCMD_ELEMENT` | `p` / `l` / `f` `<indices...>` | Points, lines, or facets |
@@ -60,7 +61,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_TEXT` | `T <fontid> "<string>"` | Font id, string; optional matrix |
 | `MVCMD_PREPARE` | *(none — appended by parse)* | Upload every open display’s scene to GL |
 
-`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `X S` marks that scene’s window for close (loop tears it down). `Q` marks every window for close; if none are open and the listener is active, emits `window.closed` and stops. `MVCMD_PREPARE` calls `display_prepareall()`.
+`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `X S` marks that scene’s window for close (loop tears it down). `Q` marks every window for close; if none are open and the listener is active, emits `window.closed` and stops. `MVCMD_PREPARE` calls `display_prepareall()`, which auto-computes the scene AABB when no explicit `B` was given and fits the camera on first prepare (or after `B`) unless the user has already moved the view.
 
 ## ASCII language
 
@@ -75,6 +76,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `X` | `S <id>` | Close scene `id` / its window; see also `TODO.md` for `X O` |
 | `Q` | — | Quit viewer (close all windows); Morpho `View.close` sends this |
 | `W` | `"<title>"` | Set current window title |
+| `B` | `<xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; next prepare refits unless the user moved the camera |
 | `o` | `<id>` | Current object (requires a scene) |
 | `v` | `["format"] <floats...>` | Vertex data for current object |
 | `p` / `l` / `f` | `<indices...>` | Points / lines / facets |
@@ -114,7 +116,7 @@ C 0
 d 1
 ```
 
-See also `test/command/linespts`, `test/command/polyhedra`, and `test/command/twoscenes`.
+See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, and `test/command/largebbox` (geometry outside `[-1,1]`; auto-fit).
 
 ## ZeroMQ transport
 

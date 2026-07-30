@@ -5,6 +5,7 @@
  */
 
 #include <string.h>
+#include <math.h>
 #include "render.h"
 
 /* -------------------------------------------------------
@@ -688,7 +689,7 @@ void render_preparescene(renderer *r, scene *s) {
  * Render the scene
  * ------------------------------------------------------- */
 
-void render_render(renderer *r, float aspectratio, mat4x4 view) {
+void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s) {
     /* Clear the display */
     glClearColor(0.160784f, 0.164706f, 0.188235f, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -705,10 +706,41 @@ void render_render(renderer *r, float aspectratio, mat4x4 view) {
     GLint lightposuniform = glGetUniformLocation(r->shader, "lightPos");
     GLint viewposuniform = glGetUniformLocation(r->shader, "viewPos");
     
-    /* Set up the lighting */
+    /* Lighting in model space (matches fragPos = vPos in the shader).
+     * Explicit light if set; otherwise place outside the scene AABB. */
     vec3 lightcolor = {1.0f, 1.0f, 1.0f};
     vec3 lightposn = {2.0f, 1.0f, 5.0f};
     vec3 viewposn = {0.0f, 0.0f, 1.0f};
+
+    if (s && s->light_explicit) {
+        lightposn[0]=s->light_pos[0];
+        lightposn[1]=s->light_pos[1];
+        lightposn[2]=s->light_pos[2];
+        lightcolor[0]=s->light_color[0];
+        lightcolor[1]=s->light_color[1];
+        lightcolor[2]=s->light_color[2];
+        viewposn[0]=s->light_pos[0];
+        viewposn[1]=s->light_pos[1];
+        viewposn[2]=s->light_pos[2];
+    } else if (s && s->bbox_valid) {
+        float cx=0.5f*(s->bbox[0]+s->bbox[1]);
+        float cy=0.5f*(s->bbox[2]+s->bbox[3]);
+        float cz=0.5f*(s->bbox[4]+s->bbox[5]);
+        float hx=0.5f*(s->bbox[1]-s->bbox[0]);
+        float hy=0.5f*(s->bbox[3]-s->bbox[2]);
+        float hz=0.5f*(s->bbox[5]-s->bbox[4]);
+        float radius = sqrtf(hx*hx + hy*hy + hz*hz);
+        if (radius < 1e-6f) radius = 1.0f;
+
+        /* Upper-right-front — outside the mesh */
+        lightposn[0] = cx + 0.7f * radius;
+        lightposn[1] = cy + 1.0f * radius;
+        lightposn[2] = cz + 1.5f * radius;
+        /* Specular eye along +Z from center (default ortho look direction) */
+        viewposn[0] = cx;
+        viewposn[1] = cy;
+        viewposn[2] = cz + 2.5f * radius;
+    }
     
     glUniform3fv(lightcoloruniform, 1, lightcolor);
     glUniform3fv(lightposuniform, 1, lightposn);
@@ -719,7 +751,7 @@ void render_render(renderer *r, float aspectratio, mat4x4 view) {
     
     /* Set up the projection matrix */
     mat4x4 proj;
-    mat3d_ortho(NULL, proj, -1.0*aspectratio, 1.0*aspectratio, -1.0, 1.0, 1.0, 10.0);
+    mat3d_ortho(NULL, proj, -1.0*aspectratio, 1.0*aspectratio, -1.0, 1.0, near, far);
     glUniformMatrix4fv(projuniform, 1, GL_FALSE, proj);
 
     /* Default model to identity; draw commands may override via RMODEL */

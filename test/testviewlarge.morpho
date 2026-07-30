@@ -1,0 +1,60 @@
+// Large tetrahedron → View: exercises auto scene bounds / camera fit.
+// Geometry is deliberately far outside [-1,1]; without auto-fit it would
+// be clipped or tiny. Expect: tet fills the window; prints "ok" on close.
+// Requires: morphoview on PATH, morpho-zeromq, display, graphics.
+//
+//   cd test && morpho6 testviewlarge.morpho
+
+import morphoview
+import graphics
+
+fn largeTetrahedron(scale) {
+  // Regular tetrahedron: rows xyz, columns vertices (unnormalized).
+  var verts = Matrix([
+    [ 1.0,  1.0, -1.0, -1.0],
+    [ 1.0, -1.0,  1.0, -1.0],
+    [ 1.0, -1.0, -1.0,  1.0]
+  ])
+
+  for (i in 0...4) {
+    var n = sqrt(verts[0,i]*verts[0,i] + verts[1,i]*verts[1,i] + verts[2,i]*verts[2,i])
+    for (j in 0...3) verts[j,i] /= n
+  }
+
+  // Tilt so default ortho isn't a flat square silhouette (~23° × ~40°).
+  var cx = cos(0.4)
+  var sx = sin(0.4)
+  var cy = cos(0.7)
+  var sy = sin(0.7)
+  var Rx = Matrix([[1, 0, 0], [0, cx, -sx], [0, sx, cx]])
+  var Ry = Matrix([[cy, 0, sy], [0, 1, 0], [-sy, 0, cy]])
+  var nrm = Ry*Rx*verts
+  var pos = scale*nrm
+  var col = Matrix([
+    [0.2, 0.2, 0.2, 0.2],
+    [0.65, 0.65, 0.65, 0.65],
+    [0.95, 0.95, 0.95, 0.95]
+  ])
+
+  // Rows = vertices, columns = faces; nonzero ⇒ vertex in face.
+  // Faces: 012, 013, 023, 123
+  var conn = Matrix([
+    [1, 1, 1, 0],
+    [1, 1, 0, 1],
+    [1, 0, 1, 1],
+    [0, 1, 1, 1]
+  ])
+
+  var g = Graphics()
+  g.title = "large tetrahedron (auto-fit)"
+  g.display(TriangleComplex(pos, nrm, col, conn))
+  return g
+}
+
+var v = View()
+if (!v.open(largeTetrahedron(40))) {
+  print "open failed"
+} else {
+  v.wait(sessionTimeOut=6000)
+  print "ok"
+}

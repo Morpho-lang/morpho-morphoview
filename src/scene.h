@@ -8,6 +8,7 @@
 #define scene_h
 
 #include <stdio.h>
+#include <stdbool.h>
 #include "varray.h"
 #include "text.h"
 
@@ -109,6 +110,15 @@ typedef struct sscene {
     
     int id; /** The scene ID */
     int dim; /** Number of dimensions; 2 or 3 */
+
+    float bbox[6]; /** xmin,xmax,ymin,ymax,zmin,zmax */
+    bool bbox_valid;
+    bool bbox_explicit;
+    bool bbox_fit_pending; /** set by B; cleared after display_fit */
+
+    bool light_explicit; /** true if light_pos was set by a command */
+    float light_pos[3];
+    float light_color[3];
     
     varray_float data;
     varray_int indx;
@@ -124,6 +134,9 @@ scene *scene_new(int id, int dim);
 scene *scene_find(int id);
 void scene_clear(scene *s); /**< Free contents; keep id/dim and list link */
 void scene_free(scene *s);
+
+void scene_setbbox(scene *s, float xmin, float xmax, float ymin, float ymax, float zmin, float zmax);
+bool scene_computebbox(scene *s);
 
 gobject *scene_addobject(scene *s, int id);
 int scene_adddata(scene *s, float *data, int count);

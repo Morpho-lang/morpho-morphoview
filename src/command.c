@@ -214,6 +214,14 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             return true;
         }
 
+        case MVCMD_BOUNDS: {
+            mv_cmd_bounds *c = MVCMD_AS_BOUNDS(cmd);
+            if (!ctx->scene) return false;
+            scene_setbbox(ctx->scene, c->bbox[0], c->bbox[1], c->bbox[2],
+                          c->bbox[3], c->bbox[4], c->bbox[5]);
+            return true;
+        }
+
         case MVCMD_OBJECT:
             if (!ctx->scene) return false;
             ctx->cobject=scene_addobject(ctx->scene, MVCMD_AS_OBJECT(cmd)->id);
@@ -377,6 +385,7 @@ enum {
     MVTOKEN_QUIT,
     MVTOKEN_TRANSLATE,
     MVTOKEN_WINDOW,
+    MVTOKEN_BOUNDS,
     MVTOKEN_FONT,
     MVTOKEN_TEXT,
 
@@ -410,6 +419,7 @@ tokendefn mvtokens[] = {
     { "T",          MVTOKEN_TEXT                  , NULL },
     { "v",          MVTOKEN_VERTICES              , NULL },
     { "W",          MVTOKEN_WINDOW                , NULL },
+    { "B",          MVTOKEN_BOUNDS                , NULL },
 
     { "\"",         MVTOKEN_QUOTE                 , command_lexstring },
     { "-",          MVTOKEN_MINUS                 , command_lexnumber },
@@ -949,6 +959,29 @@ bool command_parsewindow(parser *p, void *out) {
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
+/** `B <xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` — explicit scene AABB. */
+bool command_parsebounds(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    float bbox[6];
+
+    for (int i=0; i<6; i++) {
+        PARSE_CHECK(command_parsefloat(p, &bbox[i]));
+    }
+
+    if (!ctx->has_scene) {
+        parse_error(p, true, COMMAND_NOSCENE);
+        return false;
+    }
+
+    mv_cmd_bounds *cmd = command_new(MVCMD_BOUNDS, sizeof(mv_cmd_bounds));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    for (int i=0; i<6; i++) cmd->bbox[i]=bbox[i];
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
 bool command_parsefont(parser *p, void *out) {
     (void) out;
     int id;
@@ -1037,6 +1070,7 @@ parserule mv_parserules[] = {
     PARSERULE_PREFIX(MVTOKEN_QUIT, command_parsequit),
     PARSERULE_PREFIX(MVTOKEN_TRANSLATE, command_parsetranslate),
     PARSERULE_PREFIX(MVTOKEN_WINDOW, command_parsewindow),
+    PARSERULE_PREFIX(MVTOKEN_BOUNDS, command_parsebounds),
     PARSERULE_PREFIX(MVTOKEN_FONT, command_parsefont),
     PARSERULE_PREFIX(MVTOKEN_TEXT, command_parsetext),
     PARSERULE_UNUSED(TOKEN_NONE)

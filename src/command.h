@@ -54,6 +54,7 @@ typedef enum {
     MVCMD_CLOSE_SCENE,    /**< Close scene window (`X S`) */
     MVCMD_QUIT,           /**< Quit viewer (`Q`) */
     MVCMD_WINDOW_TITLE,   /**< Set window title (`W`) */
+    MVCMD_BOUNDS,         /**< Set scene AABB (`B`) */
     MVCMD_OBJECT,         /**< Select/create current object (`o`) */
     MVCMD_VERTICES,       /**< Append vertex data (`v`) */
     MVCMD_ELEMENT,        /**< Append points/lines/facets (`p`/`l`/`f`) */
@@ -103,6 +104,14 @@ typedef struct {
     mv_command cmd;
     char *title;
 } mv_cmd_window;
+
+/** Set an explicit scene axis-aligned bounding box.
+ *  Language: `B <xmin> <xmax> <ymin> <ymax> <zmin> <zmax>`
+ *  @param bbox  xmin,xmax,ymin,ymax,zmin,zmax */
+typedef struct {
+    mv_command cmd;
+    float bbox[6];
+} mv_cmd_bounds;
 
 /** Select/create the current geometry object in the active scene.
  *  Language: `o <id>`
@@ -198,6 +207,7 @@ typedef struct {
 #define MVCMD_AS_UPDATE_SCENE(c)  ((mv_cmd_update_scene *) (c))
 #define MVCMD_AS_CLOSE_SCENE(c)   ((mv_cmd_close_scene *) (c))
 #define MVCMD_AS_WINDOW(c)        ((mv_cmd_window *) (c))
+#define MVCMD_AS_BOUNDS(c)        ((mv_cmd_bounds *) (c))
 #define MVCMD_AS_OBJECT(c)        ((mv_cmd_object *) (c))
 #define MVCMD_AS_VERTICES(c)      ((mv_cmd_vertices *) (c))
 #define MVCMD_AS_ELEMENT(c)       ((mv_cmd_element *) (c))

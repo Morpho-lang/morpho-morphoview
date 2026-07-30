@@ -5,6 +5,7 @@
  */
 
 #include <stdlib.h>
+#include <string.h>
 #include "scene.h"
 
 /* -------------------------------------------------------
@@ -39,13 +40,30 @@ static void scene_remove(scene *s) {
  * Constructor/Destructor
  * ------------------------------------------------------- */
 
+/** Reset bbox flags (used by scene_new / scene_clear). */
+static void scene_resetbbox(scene *s) {
+    for (int i=0; i<6; i++) s->bbox[i]=0.0f;
+    s->bbox_valid=false;
+    s->bbox_explicit=false;
+    s->bbox_fit_pending=false;
+}
+
+/** Reset lighting to defaults (used by scene_new / scene_clear). */
+static void scene_resetlight(scene *s) {
+    s->light_explicit=false;
+    s->light_pos[0]=2.0f; s->light_pos[1]=1.0f; s->light_pos[2]=5.0f;
+    s->light_color[0]=1.0f; s->light_color[1]=1.0f; s->light_color[2]=1.0f;
+}
+
 /** Create a new scene */
 scene *scene_new(int id, int dim) {
     scene *new = malloc(sizeof(scene));
     if (new) {
         new->next=NULL;
         new->id=id;
-        new->dim=dim; 
+        new->dim=dim;
+        scene_resetbbox(new);
+        scene_resetlight(new);
         varray_gobjectinit(&new->objectlist);
         varray_gdrawinit(&new->displaylist);
         varray_gcolorinit(&new->colorlist);
@@ -91,6 +109,103 @@ void scene_clear(scene *s) {
     varray_gtextinit(&s->textlist);
     varray_floatinit(&s->data);
     varray_intinit(&s->indx);
+
+    scene_resetbbox(s);
+    scene_resetlight(s);
+}
+
+/** Set an explicit scene AABB and request a camera refit. */
+void scene_setbbox(scene *s, float xmin, float xmax, float ymin, float ymax, float zmin, float zmax) {
+    if (!s) return;
+    s->bbox[0]=xmin; s->bbox[1]=xmax;
+    s->bbox[2]=ymin; s->bbox[3]=ymax;
+    s->bbox[4]=zmin; s->bbox[5]=zmax;
+    s->bbox_valid=true;
+    s->bbox_explicit=true;
+    s->bbox_fit_pending=true;
+}
+
+/** Vertex float stride from a format string (same rules as render_entrysizefromformat). */
+static int scene_entrysizefromformat(scene *s, char *format) {
+    int size = 0;
+    for (char *c = format; *c != '\0'; c++) {
+        switch (*c) {
+            case 'x':
+            case 'n': size+=s->dim; break;
+            case 'c': size+=3; break;
+            default: break;
+        }
+    }
+    return size;
+}
+
+/** Expand AABB with a world-space point. */
+static void scene_bbox_expand(float bbox[6], float x, float y, float z, bool *any) {
+    if (!*any) {
+        bbox[0]=bbox[1]=x;
+        bbox[2]=bbox[3]=y;
+        bbox[4]=bbox[5]=z;
+        *any=true;
+    } else {
+        if (x<bbox[0]) bbox[0]=x; if (x>bbox[1]) bbox[1]=x;
+        if (y<bbox[2]) bbox[2]=y; if (y>bbox[3]) bbox[3]=y;
+        if (z<bbox[4]) bbox[4]=z; if (z>bbox[5]) bbox[5]=z;
+    }
+}
+
+/** Auto-compute AABB from drawn object positions (× draw matrix when present). */
+bool scene_computebbox(scene *s) {
+    if (!s) return false;
+
+    float bbox[6]={0};
+    bool any=false;
+
+    for (unsigned int i=0; i<s->displaylist.count; i++) {
+        gdraw *drw=&s->displaylist.data[i];
+        if (drw->type!=OBJECT) continue;
+
+        gobject *obj=scene_getgobjectfromid(s, drw->id);
+        if (!obj || !obj->vertexdata.format || !strchr(obj->vertexdata.format, 'x')) continue;
+        if (obj->vertexdata.indx==SCENE_EMPTY || obj->vertexdata.length<=0) continue;
+
+        int stride=scene_entrysizefromformat(s, obj->vertexdata.format);
+        if (stride<=0) continue;
+
+        int xpos=0;
+        for (char *c=obj->vertexdata.format; *c!='\0' && *c!='x'; c++) {
+            if (*c=='n') xpos+=s->dim;
+            else if (*c=='c') xpos+=3;
+        }
+
+        float *M=NULL;
+        if (drw->matindx!=SCENE_EMPTY) M=&s->data.data[drw->matindx];
+
+        int nvert=obj->vertexdata.length/stride;
+        for (int v=0; v<nvert; v++) {
+            float *base=&s->data.data[obj->vertexdata.indx + v*stride + xpos];
+            float x=base[0];
+            float y=(s->dim>1) ? base[1] : 0.0f;
+            float z=(s->dim>2) ? base[2] : 0.0f;
+
+            if (M) {
+                float wx=M[0]*x + M[4]*y + M[8]*z  + M[12];
+                float wy=M[1]*x + M[5]*y + M[9]*z  + M[13];
+                float wz=M[2]*x + M[6]*y + M[10]*z + M[14];
+                x=wx; y=wy; z=wz;
+            }
+
+            scene_bbox_expand(bbox, x, y, z, &any);
+        }
+    }
+
+    if (!any) {
+        s->bbox_valid=false;
+        return false;
+    }
+
+    for (int i=0; i<6; i++) s->bbox[i]=bbox[i];
+    s->bbox_valid=true;
+    return true;
 }
 
 /** Free a scene and associated data structures */
