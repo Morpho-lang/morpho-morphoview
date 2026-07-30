@@ -77,11 +77,11 @@ fn _morphoviewbin() {
 class XShow {
   // Serializer only — use write(g, out) with any write-able sink.
   init() {
-    self.uidinit()
+    self.uidInit()
     self.spheres = Dictionary()
     self.fonts = []
     self.colors = Dictionary()
-    self.sceneid = 1
+    self.sceneId = 1
     self.replace = false
   }
 
@@ -94,9 +94,9 @@ class XShow {
   /** Fire-and-forget: temp file + morphoview -t (former init body). */
   _launch(g) {
     var isWindows = System.platform()=="windows"
-    var tempfolder = (isWindows ? "${System.homefolder()}\\AppData\\local\\Temp" : "/tmp")
-    var fname = self._randomalphanumstring(10)
-    var out = File("${tempfolder}/morpho${fname}.draw", "w")
+    var tempFolder = (isWindows ? "${System.homefolder()}\\AppData\\local\\Temp" : "/tmp")
+    var fname = self._randomAlphanumString(10)
+    var out = File("${tempFolder}/morpho${fname}.draw", "w")
     var bin = _morphoviewbin()
 
     self.write(g, out)
@@ -104,22 +104,22 @@ class XShow {
     out.close()
 
     if (isWindows) {
-      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${tempfolder}/morpho${fname}.draw' -WindowStyle Hidden\"")
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${tempFolder}/morpho${fname}.draw' -WindowStyle Hidden\"")
     } else {
       // 1/7/25 Redirect error output to /dev/null
-      system("\"${bin}\" -t ${tempfolder}/morpho${fname}.draw > /dev/null 2>&1 &")
+      system("\"${bin}\" -t ${tempFolder}/morpho${fname}.draw > /dev/null 2>&1 &")
     }
   }
 
   /** Generate a random name */
-  _randomalphanumstring(n) {
+  _randomAlphanumString(n) {
     var alpha="abcdefghijklmnopqrstuvwxyz0123456789"
     var name=""
     for (i in 1..n) name+=alpha[Int(random()*(alpha.count()-1))]
     return name
   }
 
-  uidinit() {
+  uidInit() {
     self.uid = 0
   }
 
@@ -130,38 +130,38 @@ class XShow {
 
   preamble(graphic, out) {
     if (self.replace) {
-      out.write("U S ${self.sceneid}")
+      out.write("U S ${self.sceneId}")
     } else {
-      out.write("S ${self.sceneid} 3")
+      out.write("S ${self.sceneId} 3")
       out.write("W \"${graphic.title}\"")
     }
   }
 
   /* The visit method for a generic `item`.
 
-  Here, we define this separate `visitgeneric` method that performs the intended generic task, and have the actual generic `visit` method call `visitgeneric`. This enables calls to the generic fallback from *within a specific implementation*.
-  For example, the `visit` method for a `Sphere` object can call `self.visitgeneric(item, out)` to visit the `TriangleComplex` representation of the sphere, but calling `self.visit(item, out)` would result in an infinite loop.
+  Here, we define this separate `visitGeneric` method that performs the intended generic task, and have the actual generic `visit` method call `visitGeneric`. This enables calls to the generic fallback from *within a specific implementation*.
+  For example, the `visit` method for a `Sphere` object can call `self.visitGeneric(item, out)` to visit the `TriangleComplex` representation of the sphere, but calling `self.visit(item, out)` would result in an infinite loop.
   */
-  visitgeneric(item, out) {
+  visitGeneric(item, out) {
     self.visit(item.totrianglecomplex(), out)
   }
 
   // Will be used by Cylinder, Arrow and Tube
   visit(item, out) {
-    self.visitgeneric(item, out)
+    self.visitGeneric(item, out)
   }
 
   visit(Sphere item, out) {
     var n = item.refinementlevel()
 
     if (item.color) {
-      self.visitgeneric(item, out)
+      self.visitGeneric(item, out)
       return
     } else if (!self.spheres.contains(n)) { // Check if we already have a sphere object at this refinement level
       var tri=item.totrianglecomplex(scale=false)
       tri.id = self.uid()
       out.write("o ${tri.id}")
-      self.trianglecomplexobjectdata(tri,out)
+      self.triangleComplexObjectData(tri,out)
       self.spheres[n]=tri
     }
 
@@ -171,17 +171,17 @@ class XShow {
     out.write("d ${self.spheres[n].id}")
   }
 
-  trianglecomplexobjectdata(item, out) {
+  triangleComplexObjectData(item, out) {
     var x = item.position
     var n = item.normals
     var col = item.colors
-    var localcolor = false
+    var localColor = false
     var dimensions=x.dimensions()
     var dim = dimensions[0]
     var nv = dimensions[1]
 
     if (ismatrix(col)) {
-      if (col.dimensions()[1]>1) localcolor = true
+      if (col.dimensions()[1]>1) localColor = true
     } else if (isobject(col) && !islist(col)) col = col.rgb(0)
 
     out.write("v \"xnc\"")
@@ -193,7 +193,7 @@ class XShow {
       for (j in 0...dim) {
         line+="${n[j,i]} "
       }
-      if (localcolor) {
+      if (localColor) {
         for (j in 0...3) line+="${col[j,i]} "
       } else {
         for (j in 0...item.colors.count()) line+="${col[j]} "
@@ -218,12 +218,12 @@ class XShow {
   visit(TriangleComplex item, out) {
     var id = self.uid()
     out.write("o ${id}")
-    self.trianglecomplexobjectdata(item, out)
+    self.triangleComplexObjectData(item, out)
     out.write("i")
     out.write("d ${id}")
   }
 
-  fontpath() {
+  fontPath() {
     var platform = System.platform()
     if (platform=="macos") {
       return ["/System/Library/Fonts"]
@@ -232,36 +232,36 @@ class XShow {
     } else return ["/usr/share/fonts","/usr/local/share/fonts"]
   }
 
-  matchfontfile(file, font) {
+  matchFontFile(file, font) {
     var fname = file.split(".")
     if (fname[0]==font &&
         (fname[1]=="ttc" || fname[1]=="ttf")) return true
     return false
   }
 
-  searchfontfolder(folder, font) {
+  searchFontFolder(folder, font) {
     for (f in Folder.contents(folder)) {
       var path = folder + "/" + f
-      if (self.matchfontfile(f, font)) return path
+      if (self.matchFontFile(f, font)) return path
 
-      if (Folder.isfolder(path)) { // Recurse
-        var result = self.searchfontfolder(path, font)
+      if (Folder.isFolder(path)) { // Recurse
+        var result = self.searchFontFolder(path, font)
         if (result) return result
       }
     }
     return nil
   }
 
-  findfont(font) {
-    var base = self.fontpath()
+  findFont(font) {
+    var base = self.fontPath()
     for (f in base) {
-      var found = self.searchfontfolder(f, font)
+      var found = self.searchFontFolder(f, font)
       if (found) return found
     }
     return nil
   }
 
-  defaultfontname() {
+  defaultFontName() {
     var platform = System.platform()
     if (platform=="macos") {
       return "Helvetica"
@@ -270,7 +270,7 @@ class XShow {
     } else return "FreeSans"
   }
 
-  addcolor(color, out) {
+  addColor(color, out) {
     if (!self.colors.contains(color)) {
       var id = self.colors[color] = self.colors.count()
       out.write("c ${id} ${color.r} ${color.g} ${color.b}")
@@ -278,8 +278,8 @@ class XShow {
     return self.colors[color]
   }
 
-  addfont(font, size, out) {
-    var path = self.findfont(font)
+  addFont(font, size, out) {
+    var path = self.findFont(font)
     if (!path) _fntntfnd.throw()
     var id = self.uid()
     var fnt = Font(font, size, id=id)
@@ -289,20 +289,20 @@ class XShow {
     return id
   }
 
-  findfontid(font, size, out) {
+  findFontId(font, size, out) {
     for (f in self.fonts) {
       if (f.name == font && f.size == size) return f.id
     }
-    return self.addfont(font, size, out)
+    return self.addFont(font, size, out)
   }
 
   visit(Text item, out) {
     var font = item.font
-    if (!font) font = self.defaultfontname()
-    var id = self.findfontid(font, item.size, out)
+    if (!font) font = self.defaultFontName()
+    var id = self.findFontId(font, item.size, out)
 
     if (item.color) {
-      var id = self.addcolor(item.color, out)
+      var id = self.addColor(item.color, out)
       out.write("C ${id}")
     }
 
@@ -337,13 +337,13 @@ class View {
     self.poller = nil
     self.closed = true
     self.gotOk = false
-    self.cmdbuf = ""
+    self.cmdBuf = ""
   }
 
   // File-compatible sink for Show.write(g, out): each line gets a trailing newline
   // (Morpho File.write does the same).
   write(line) {
-    self.cmdbuf += "${line}\n"
+    self.cmdBuf += "${line}\n"
   }
 
   // Bind, spawn morphoview, send the first command chunk, wait for `ok`.
@@ -363,10 +363,10 @@ class View {
 
   // Serialize Graphics via Show, then open the resulting ASCII chunk.
   open(Graphics g) {
-    self.cmdbuf = ""
+    self.cmdBuf = ""
     var show = XShow()
     show.write(g, self)
-    return self.open(self.cmdbuf)
+    return self.open(self.cmdBuf)
   }
 
   // Send another command chunk and wait for `ok`.
@@ -379,11 +379,11 @@ class View {
 
   // Serialize Graphics with replace preamble (`U S`), then update.
   update(Graphics g) {
-    self.cmdbuf = ""
+    self.cmdBuf = ""
     var show = XShow()
     show.replace = true
     show.write(g, self)
-    return self.update(self.cmdbuf)
+    return self.update(self.cmdBuf)
   }
 
   // Wait briefly for one reply/event. Returns the message string, or nil.

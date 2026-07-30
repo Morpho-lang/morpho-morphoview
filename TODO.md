@@ -23,7 +23,7 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 
 - [x] `Show()` / `Show(g)` — two inits via multiple dispatch; fire-and-forget still `-t`
 - [x] `write(g, out)` — any `out.write(line)` delegate (File, `View`, …)
-- [x] `replace` / `sceneid` — preamble emits `U S` vs `S` for live updates
+- [x] `replace` / `sceneId` — preamble emits `U S` vs `S` for live updates
 - [ ] Push to morpho `graphics.morpho` once API feels right
 
 ## Command language extensions
