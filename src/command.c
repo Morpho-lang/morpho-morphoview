@@ -971,19 +971,8 @@ bool command_getfilesize(FILE *f, size_t *s) {
 /** Removes a command file (for temporary files)
  *  @param[in] in file name */
 void command_removefile(const char *in) {
-    size_t len = strlen(in) + 16;
-    char remove[len];
-
-#ifdef _WIN32
-    sprintf(remove, "del \"%s\"", in);
-    for (char *c = remove; *c != '\0'; c++) if (*c=='/') *c='\\';
-#else
-    sprintf(remove, "rm %s", in);
-#endif
-
-    int systemRet = system(remove);
-    if(systemRet == -1){
-        printf("Warning: the system method to remove a temporary file has failed.");
+    if (remove(in) != 0) {
+        printf("Warning: failed to remove temporary file '%s'.\n", in);
     }
 }
 

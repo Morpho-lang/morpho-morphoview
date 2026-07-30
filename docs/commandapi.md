@@ -1,0 +1,111 @@
+# MorphoView command API
+
+Commands are the viewer’s public API. ASCII files (and later other producers) emit the same intermediate representation (`mv_command`); only the main/GLFW thread applies them and touches GL.
+
+## Pipeline
+
+```
+producer → command_parse / command_enqueue → queue
+                                              ↓
+                    command_wake → glfwWaitEvents returns
+                                              ↓
+                         command_process (apply + free)
+                                              ↓
+                              scene / display / GL
+```
+
+1. **Parse** (`command_parse`) — lex an ASCII buffer and **enqueue** only. Does not open windows or mutate GL. On success, appends a trailing `MVCMD_PREPARE`. On failure, clears the queue.
+2. **Enqueue** (`command_enqueue`) — takes ownership of an `mv_command`. If the queue was empty, calls `command_wake()`.
+3. **Wake** (`command_wake`) — `glfwPostEmptyEvent()`, so a blocked `glfwWaitEvents` can run.
+4. **Process** (`command_process`) — apply every queued command in order on the **caller** thread, then free them. Returns the number applied. On apply failure, frees the remainder and stops.
+
+`main` processes once after loading a file (bootstrap, so windows exist), then `display_loop` processes again after each `glfwWaitEvents` (live updates).
+
+**Invariant:** only the main/GLFW thread calls `command_process` and touches GL. A mutex around the queue will land with a future I/O thread; wake is already in place.
+
+## Public C API
+
+Declared in [`src/command.h`](../src/command.h):
+
+| Function | Role |
+|----------|------|
+| `command_initialize` / `command_finalize` | Set up / tear down the queue and parse errors |
+| `command_queue_init` / `command_queue_clear` | Init empty queue; free all pending commands |
+| `command_enqueue` | Own and append a command; edge-triggered wake |
+| `command_wake` | Post an empty GLFW event |
+| `command_process` | Apply and free the queue |
+| `command_parse` | ASCII → enqueue (+ `MVCMD_PREPARE`) |
+| `command_loadinput` | Read a file into a buffer (`MORPHO_FREE` when done) |
+| `command_removefile` | `remove()` a temp file (CLI `-t`) |
+| `command_free` | Free one command’s owned payloads |
+
+## Intermediate representation
+
+Each command is a tagged `mv_command` (typed structs embed it as the first field). Producers may enqueue IR directly without going through the ASCII parser.
+
+| Type | ASCII | Payload |
+|------|-------|---------|
+| `MVCMD_SCENE_CREATE` | `S <id> <dim>` | Scene id, dimension (2 or 3) |
+| `MVCMD_WINDOW_TITLE` | `W "<title>"` | Owned title string |
+| `MVCMD_OBJECT` | `o <id>` | Object id |
+| `MVCMD_VERTICES` | `v ["format"] <floats...>` | Optional format; float blob |
+| `MVCMD_ELEMENT` | `p` / `l` / `f` `<indices...>` | Points, lines, or facets |
+| `MVCMD_COLOR` | `c <id> <r g b>...` | Color id; RGB triples |
+| `MVCMD_SELECT_COLOR` | `C <id>` | Active color id |
+| `MVCMD_DRAW` | `d <id>` | Object id; optional baked 4×4 matrix |
+| `MVCMD_FONT` | `F <id> "<path>" <size>` | Font id, path, size |
+| `MVCMD_TEXT` | `T <fontid> "<string>"` | Font id, string; optional matrix |
+| `MVCMD_PREPARE` | *(none — appended by parse)* | Upload every open display’s scene to GL |
+
+`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current. `MVCMD_PREPARE` calls `display_prepareall()`.
+
+## ASCII language
+
+Whitespace between tokens is ignored. Prefixes are single letters. Strings use `"..."` with `\` escaping the next character.
+
+### Geometry and drawing
+
+| Letter | Arguments | Notes |
+|--------|-----------|-------|
+| `S` | `<id> <dim>` | Create or select scene; open window if needed |
+| `W` | `"<title>"` | Set current window title |
+| `o` | `<id>` | Current object (requires a scene) |
+| `v` | `["format"] <floats...>` | Vertex data for current object |
+| `p` / `l` / `f` | `<indices...>` | Points / lines / facets |
+| `c` | `<id> <r g b>...` | Define color table entry |
+| `C` | `<id>` | Select color for subsequent draws |
+| `d` | `<id>` | Draw object (matrix from prior transforms if any) |
+| `F` | `<id> "<path>" <size>` | Load font |
+| `T` | `<fontid> "<string>"` | Draw text (matrix like `d`) |
+
+### Transforms (parse-only)
+
+These update a parse-local model matrix and are **not** enqueued. On the next `d` or `T`, if the matrix changed, it is baked into that command and the dirty flag is cleared (the matrix itself is kept until `i`).
+
+| Letter | Arguments | Effect |
+|--------|-----------|--------|
+| `i` | — | Identity |
+| `m` | 16 floats | Left-multiply by 4×4 |
+| `r` | `<phi> <ax ay az>` | Rotate about axis |
+| `s` | `<scale>` | Uniform scale |
+| `t` | `<tx ty tz>` | Translate |
+
+## Example
+
+```
+S 0 3
+W "Example"
+c 0 1 0 0
+o 1
+v "xnc"
+-0.5 -0.5 0  0 0 1  1 0 0
+ 0.5 -0.5 0  0 0 1  1 0 0
+ 0.0  0.5 0  0 0 1  1 0 0
+l
+0 1 1 2 2 0
+i
+C 0
+d 1
+```
+
+See also `test/linespts`, `test/polyhedra`, and `test/twoscenes`.
