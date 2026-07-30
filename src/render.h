@@ -125,6 +125,25 @@ typedef struct {
     GLint shininess;
 } renderuniforms;
 
+/** Baked transparent draw with state needed to replay out of list order. */
+typedef struct {
+    GLenum mode;
+    int length;
+    void *offset;
+    GLuint vao;
+    mat4x4 model;
+    float rgba[4];
+    int use_uniform;
+    int uflat;
+    float ka;
+    float kd;
+    float ks;
+    float shininess;
+    float depth; /* view-space z of object centroid; ascending = far → near */
+} rendertdraw;
+
+DECLARE_VARRAY(rendertdraw, rendertdraw)
+
 /** Renderer object. */
 typedef struct {
     GLuint shader;
@@ -134,6 +153,7 @@ typedef struct {
     varray_renderfont fonts;
     varray_renderglbuffers glbuffers;
     varray_renderinstruction renderlist;
+    varray_rendertdraw tdraws; /* scratch: transparent draws (capacity retained) */
     GLuint fontvao;
     GLuint fontvbo;
 } renderer;
