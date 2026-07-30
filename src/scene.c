@@ -8,6 +8,34 @@
 #include "scene.h"
 
 /* -------------------------------------------------------
+ * Global variables
+ * ------------------------------------------------------- */
+
+scene *openscenes;
+
+/** Add to list of open scenes */
+static void scene_add(scene *s) {
+    s->next=openscenes;
+    openscenes=s;
+}
+
+/** Remove from list of open scenes (does not free) */
+static void scene_remove(scene *s) {
+    if (openscenes==s) {
+        openscenes=s->next;
+    } else {
+        scene *prev = NULL;
+        for (scene *e = openscenes; e!=NULL; e=e->next) {
+            if (s==e) {
+                prev->next=s->next;
+                return;
+            }
+            prev=e;
+        }
+    }
+}
+
+/* -------------------------------------------------------
  * Constructor/Destructor
  * ------------------------------------------------------- */
 
@@ -15,6 +43,7 @@
 scene *scene_new(int id, int dim) {
     scene *new = malloc(sizeof(scene));
     if (new) {
+        new->next=NULL;
         new->id=id;
         new->dim=dim; 
         varray_gobjectinit(&new->objectlist);
@@ -24,12 +53,15 @@ scene *scene_new(int id, int dim) {
         varray_gtextinit(&new->textlist);
         varray_floatinit(&new->data);
         varray_intinit(&new->indx);
+        scene_add(new);
     }
     return new;
 }
 
 /** Free a scene and associated data structures */
 void scene_free(scene *s) {
+    scene_remove(s);
+
     for (unsigned int i=0; i<s->objectlist.count; i++) {
         gobject *obj = &s->objectlist.data[i];
         if (obj->vertexdata.format) free(obj->vertexdata.format);
@@ -56,6 +88,9 @@ void scene_free(scene *s) {
 
 /** Find a scene from the id */
 scene *scene_find(int id) {
+    for (scene *s = openscenes; s!=NULL; s=s->next) {
+        if (s->id==id) return s;
+    }
     return NULL;
 }
 
@@ -197,7 +232,11 @@ DEFINE_VARRAY(float, float);
  * ------------------------------------------------------- */
 
 void scene_initialize(void) {
+    openscenes=NULL;
 }
 
 void scene_finalize(void) {
+    while (openscenes!=NULL) {
+        scene_free(openscenes);
+    }
 }

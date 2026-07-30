@@ -696,6 +696,11 @@ void render_render(renderer *r, float aspectratio, mat4x4 view) {
     mat4x4 proj;
     mat3d_ortho(NULL, proj, -1.0*aspectratio, 1.0*aspectratio, -1.0, 1.0, 1.0, 10.0);
     glUniformMatrix4fv(projuniform, 1, GL_FALSE, proj);
+
+    /* Default model to identity; draw commands may override via RMODEL */
+    mat4x4 model;
+    mat3d_identity4x4(model);
+    glUniformMatrix4fv(modeluniform, 1, GL_FALSE, model);
     
     /* Render objects */
     for (unsigned i=0; i<r->renderlist.count; i++) {
@@ -739,7 +744,6 @@ void render_render(renderer *r, float aspectratio, mat4x4 view) {
     glUniformMatrix4fv(viewuniform, 1, GL_FALSE, view);
     glUniformMatrix4fv(projuniform, 1, GL_FALSE, proj);
     
-    mat4x4 model;
     mat3d_identity4x4(model);
     glUniformMatrix4fv(modeluniform, 1, GL_FALSE, model);
     

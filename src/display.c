@@ -24,6 +24,14 @@ static display *display_fromwindow(windowref *window) {
     return (display *) glfwGetWindowUserPointer(window);
 }
 
+/** Find the display attached to a scene */
+display *display_findforscene(scene *s) {
+    for (display *d = opendisplays; d!=NULL; d=d->next) {
+        if (d->s==s) return d;
+    }
+    return NULL;
+}
+
 /** Add to list of open displays */
 void display_add(display *d) {
     d->next=opendisplays;
@@ -33,7 +41,11 @@ void display_add(display *d) {
 /** Frees data attached to a display */
 void display_free(display *d) {
     scene_free(d->s);
-    render_clear(&d->render);
+    /* GL resources are cleared in display_loop before the window is destroyed */
+    if (d->window) {
+        glfwMakeContextCurrent(d->window);
+        render_clear(&d->render);
+    }
     free(d);
 }
 
@@ -50,7 +62,7 @@ void display_remove(display *d) {
                 display_free(d);
                 return;
             }
-            prev=d;
+            prev=e;
         }
     }
 }
@@ -221,8 +233,10 @@ display *display_open(scene *s) {
 #endif
     glfwWindowHint(GLFW_SAMPLES, 4);
     
-    /* Create a windowed mode window and its OpenGL context */
-    window = glfwCreateWindow(DISPLAY_DEFAULTWIDTH, DISPLAY_DEFAULTHEIGHT, DISPLAY_DEFAULTTITLE, NULL, NULL);
+    /* Create a windowed mode window and its OpenGL context.
+     * Share with an existing window so multi-window GL objects behave reliably. */
+    windowref *share = (opendisplays!=NULL) ? opendisplays->window : NULL;
+    window = glfwCreateWindow(DISPLAY_DEFAULTWIDTH, DISPLAY_DEFAULTHEIGHT, DISPLAY_DEFAULTTITLE, NULL, share);
     if (!window) return NULL;
 
     new->width=DISPLAY_DEFAULTWIDTH;
@@ -255,6 +269,15 @@ void display_setwindowtitle(display *d, char *title) {
     if (d) glfwSetWindowTitle(d->window, title);
 }
 
+/** Upload every open display's scene to GL (each with its own context) */
+void display_prepareall(void) {
+    for (display *d = opendisplays; d!=NULL; d=d->next) {
+        if (!d->window || !d->s) continue;
+        glfwMakeContextCurrent(d->window);
+        render_preparescene(&d->render, d->s);
+    }
+}
+
 /* -------------------------------------------------------
  * Main loop
  * ------------------------------------------------------- */
@@ -264,7 +287,11 @@ void display_loop(void) {
         glfwWaitEvents();
         for (display *d=opendisplays; d!=NULL; d=d->next) {
             if (glfwWindowShouldClose(d->window)) {
+                /* Free GL resources while this window's context is still current */
+                glfwMakeContextCurrent(d->window);
+                render_clear(&d->render);
                 glfwDestroyWindow(d->window);
+                d->window=NULL;
                 display_remove(d);
                 break;
             } else {

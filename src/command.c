@@ -120,10 +120,27 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
     switch (cmd->type) {
         case MVCMD_SCENE_CREATE: {
             mv_cmd_scene *c = MVCMD_AS_SCENE(cmd);
-            ctx->scene = scene_new(c->id, c->dim);
-            if (ctx->scene) ctx->display=display_open(ctx->scene);
-            ctx->cobject=NULL;
-            return (ctx->scene!=NULL);
+            bool created = false;
+            scene *s = scene_find(c->id);
+
+            if (!s) {
+                s = scene_new(c->id, c->dim);
+                if (!s) return false;
+                created = true;
+            }
+
+            ctx->display = display_findforscene(s);
+            if (!ctx->display) {
+                ctx->display = display_open(s);
+                if (!ctx->display) {
+                    if (created) scene_free(s);
+                    return false;
+                }
+            }
+
+            ctx->scene = s;
+            ctx->cobject = NULL;
+            return true;
         }
 
         case MVCMD_WINDOW_TITLE: {
@@ -232,9 +249,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
         }
 
         case MVCMD_PREPARE:
-            if (ctx->scene && ctx->display) {
-                render_preparescene(&ctx->display->render, ctx->scene);
-            }
+            display_prepareall();
             return true;
     }
 
