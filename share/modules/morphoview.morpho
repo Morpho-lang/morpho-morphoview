@@ -29,6 +29,41 @@ import graphics
 
 var _fntntfnd = Error("FntNtFnd", "Font not found.")
 
+/* Resolve morphoview executable */
+var _mvbin = nil
+
+fn _morphoviewbin() {
+  if (!isnil(_mvbin)) return _mvbin
+
+  var exe = (System.platform()=="windows" ? "morphoview.exe" : "morphoview")
+  var roots = []
+
+  // Attempt to discover package location with morphopm path
+  var r = System.subprocess("morphopm path morphoview")
+  if (r["exitstatus"]==0) {
+    roots.append(r["stdout"].split("\n")[0])
+  } else if (Folder.contents(System.homefolder()).contains(".morphopackages")) {
+    // Otherwise look in ~/.morphopackages
+    for (p in File("${System.homefolder()}/.morphopackages").lines()) {
+      if (p.split("/\\").contains("morpho-morphoview")) roots.append(p)
+    }
+  }
+
+  // Check in these roots for the executable
+  for (root in roots) {
+    if (root.count()>0 &&
+        Folder.isFolder("${root}/bin") &&
+        Folder.contents("${root}/bin").contains(exe)) {
+      _mvbin = Folder.normalizePath("${root}/bin/${exe}")
+      return _mvbin
+    }
+  }
+
+  // Fall back to just running `morphoview` on PATH
+  _mvbin = "morphoview"
+  return _mvbin
+}
+
 /* **************************************
  * Show — serialize a Graphics object
  *
@@ -62,16 +97,17 @@ class XShow {
     var tempfolder = (isWindows ? "${System.homefolder()}\\AppData\\local\\Temp" : "/tmp")
     var fname = self._randomalphanumstring(10)
     var out = File("${tempfolder}/morpho${fname}.draw", "w")
+    var bin = _morphoviewbin()
 
     self.write(g, out)
 
     out.close()
 
     if (isWindows) {
-      system("powershell -Command \"Start-Process 'morphoview' -ArgumentList '-t', '${tempfolder}/morpho${fname}.draw' -WindowStyle Hidden\"")
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${tempfolder}/morpho${fname}.draw' -WindowStyle Hidden\"")
     } else {
       // 1/7/25 Redirect error output to /dev/null
-      system("morphoview -t ${tempfolder}/morpho${fname}.draw > /dev/null 2>&1 &")
+      system("\"${bin}\" -t ${tempfolder}/morpho${fname}.draw > /dev/null 2>&1 &")
     }
   }
 
@@ -401,10 +437,11 @@ class View {
   }
 
   _spawn() {
+    var bin = _morphoviewbin()
     if (System.platform()=="windows") {
-      system("powershell -Command \"Start-Process 'morphoview' -ArgumentList '-c', '${self.ep}'\"")
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-c', '${self.ep}'\"")
     } else {
-      system("morphoview -c \"${self.ep}\" > /dev/null 2>&1 &")
+      system("\"${bin}\" -c \"${self.ep}\" > /dev/null 2>&1 &")
     }
   }
 
