@@ -4,6 +4,7 @@
  *  @brief OpenGL rendering
  */
 
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include "render.h"
@@ -72,6 +73,7 @@ const char *fragmentshader =
     "       return;\n"
     "   }\n"
     "   vec3 norm = normalize(normal);\n"
+    "   if (!gl_FrontFacing) norm = -norm;\n"
     "   vec3 lightDir = normalize(lightPos - fragPos);\n"
     "   float NdotL = max(dot(norm, lightDir), 0.0);\n"
     "   vec3 ambient = ka * lightColor;\n"
@@ -763,11 +765,104 @@ static void render_setgeometryuniforms(renderer *r, mat4x4 view, mat4x4 proj,
 
 #define RENDER_OPAQUE_ALPHA_EPS 0.999f
 
-/** True for draw instructions that should run in this opacity pass. */
-static bool render_draw_for_pass(int use_uniform, float alpha, bool transparent_pass) {
+/** True when the current uniform/vertex color is treated as transparent. */
+static bool render_is_transparent(int use_uniform, float alpha) {
     float a = (use_uniform!=0) ? alpha : 1.0f;
-    bool transparent = (a < RENDER_OPAQUE_ALPHA_EPS);
-    return transparent_pass ? transparent : !transparent;
+    return (a < RENDER_OPAQUE_ALPHA_EPS);
+}
+
+/** Baked transparent draw with all GL state needed to replay out of list order. */
+typedef struct {
+    GLenum mode;
+    int length;
+    void *offset;
+    GLuint vao;
+    mat4x4 model;
+    float rgba[4];
+    int use_uniform;
+    int uflat;
+    float ka;
+    float kd;
+    float ks;
+    float shininess;
+    float depth; /* view-space z of object centroid; ascending = far → near */
+} rendertdraw;
+
+/** Local-space AABB center of object positions; false if no usable vertices. */
+static bool render_object_centroid(scene *s, gobject *obj, vec3 out) {
+    if (!s || !obj || !obj->vertexdata.format || !strchr(obj->vertexdata.format, 'x')) return false;
+    if (obj->vertexdata.indx==SCENE_EMPTY || obj->vertexdata.length<=0) return false;
+
+    int stride=render_entrysizefromformat(s, obj->vertexdata.format);
+    if (stride<=0) return false;
+
+    int xpos=0;
+    for (char *c=obj->vertexdata.format; *c!='\0' && *c!='x'; c++) {
+        if (*c=='n') xpos+=s->dim;
+        else if (*c=='c') xpos+=3;
+    }
+
+    float bbox[6];
+    bool any=false;
+    int nvert=obj->vertexdata.length/stride;
+    for (int v=0; v<nvert; v++) {
+        float *base=&s->data.data[obj->vertexdata.indx + v*stride + xpos];
+        float x=base[0];
+        float y=(s->dim>1) ? base[1] : 0.0f;
+        float z=(s->dim>2) ? base[2] : 0.0f;
+        if (!any) {
+            bbox[0]=bbox[1]=x; bbox[2]=bbox[3]=y; bbox[4]=bbox[5]=z;
+            any=true;
+        } else {
+            if (x<bbox[0]) bbox[0]=x; if (x>bbox[1]) bbox[1]=x;
+            if (y<bbox[2]) bbox[2]=y; if (y>bbox[3]) bbox[3]=y;
+            if (z<bbox[4]) bbox[4]=z; if (z>bbox[5]) bbox[5]=z;
+        }
+    }
+    if (!any) return false;
+
+    out[0]=0.5f*(bbox[0]+bbox[1]);
+    out[1]=0.5f*(bbox[2]+bbox[3]);
+    out[2]=0.5f*(bbox[4]+bbox[5]);
+    return true;
+}
+
+/** View-space z of model*local (column-major mat4). */
+static float render_view_depth(mat4x4 view, mat4x4 model, vec3 local) {
+    float wx=model[0]*local[0] + model[4]*local[1] + model[8]*local[2]  + model[12];
+    float wy=model[1]*local[0] + model[5]*local[1] + model[9]*local[2]  + model[13];
+    float wz=model[2]*local[0] + model[6]*local[1] + model[10]*local[2] + model[14];
+    return view[2]*wx + view[6]*wy + view[10]*wz + view[14];
+}
+
+static int render_tdraw_cmp(const void *a, const void *b) {
+    float da=((const rendertdraw *)a)->depth;
+    float db=((const rendertdraw *)b)->depth;
+    return (da<db) ? -1 : (da>db) ? 1 : 0;
+}
+
+/** Apply baked packet state and issue the draw.
+ *  Closed translucent meshes: back faces then front (avoids mesh-order striping). */
+static void render_draw_tdraw(renderer *r, rendertdraw *d) {
+    render_setmodel(r, d->model);
+    glUniform4fv(r->uniforms.uColor, 1, d->rgba);
+    glUniform1i(r->uniforms.uUseUniform, d->use_uniform);
+    glUniform1i(r->uniforms.uFlat, d->uflat);
+    glUniform1f(r->uniforms.ka, d->ka);
+    glUniform1f(r->uniforms.kd, d->kd);
+    glUniform1f(r->uniforms.ks, d->ks);
+    glUniform1f(r->uniforms.shininess, d->shininess);
+    glBindVertexArray(d->vao);
+    if (d->mode==GL_TRIANGLES) {
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_FRONT);
+        glDrawElements(GL_TRIANGLES, d->length, GL_UNSIGNED_INT, d->offset);
+        glCullFace(GL_BACK);
+        glDrawElements(GL_TRIANGLES, d->length, GL_UNSIGNED_INT, d->offset);
+        glDisable(GL_CULL_FACE);
+    } else {
+        glDrawElements(d->mode, d->length, GL_UNSIGNED_INT, d->offset);
+    }
 }
 
 void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s) {
@@ -828,74 +923,162 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     float ucolor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     int use_uniform=0;
     int uflat=0;
+    GLuint curvao=0;
 
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    /* Geometry: opaque pass then transparent (depth write off for transparent). */
-    for (int pass=0; pass<2; pass++) {
-        bool transparent_pass = (pass==1);
-        glDepthMask(transparent_pass ? GL_FALSE : GL_TRUE);
+    /* --- Opaque pass: display-list order, depth write on --- */
+    glDepthMask(GL_TRUE);
+    shade_mode=SCENE_SHADE_SHADED;
+    ka=SCENE_MATERIAL_KA_DEFAULT;
+    kd=SCENE_MATERIAL_KD_DEFAULT;
+    ks=SCENE_MATERIAL_KS_DEFAULT;
+    shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
+    ucolor[0]=ucolor[1]=ucolor[2]=ucolor[3]=1.0f;
+    use_uniform=0;
+    uflat=0;
+    curvao=0;
+    mat3d_identity4x4(model);
+    render_setgeometryuniforms(r, view, proj, model, lightcolor, lightposn, viewposn,
+                               ucolor, use_uniform, uflat, ka, kd, ks, shininess);
 
-        shade_mode=SCENE_SHADE_SHADED;
-        ka=SCENE_MATERIAL_KA_DEFAULT;
-        kd=SCENE_MATERIAL_KD_DEFAULT;
-        ks=SCENE_MATERIAL_KS_DEFAULT;
-        shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
-        ucolor[0]=ucolor[1]=ucolor[2]=ucolor[3]=1.0f;
-        use_uniform=0;
-        uflat=0;
-        mat3d_identity4x4(model);
-        render_setgeometryuniforms(r, view, proj, model, lightcolor, lightposn, viewposn,
-                                   ucolor, use_uniform, uflat, ka, kd, ks, shininess);
-
-        for (unsigned i=0; i<r->renderlist.count; i++) {
-            renderinstruction *ins=&r->renderlist.data[i];
-            switch (ins->instruction) {
-                case RNOP: break;
-                case RSHADE:
-                    shade_mode=ins->data.shade.mode;
-                    ka=ins->data.shade.ka;
-                    kd=ins->data.shade.kd;
-                    ks=ins->data.shade.ks;
-                    shininess=ins->data.shade.shininess;
-                    uflat = (shade_mode==SCENE_SHADE_FLAT) ? 1 : 0;
-                    render_setgeometryuniforms(r, view, proj, model, lightcolor, lightposn, viewposn,
-                                               ucolor, use_uniform, uflat, ka, kd, ks, shininess);
-                    break;
-                case RCOLOR:
-                    ucolor[0]=ins->data.color.rgba[0];
-                    ucolor[1]=ins->data.color.rgba[1];
-                    ucolor[2]=ins->data.color.rgba[2];
-                    ucolor[3]=ins->data.color.rgba[3];
-                    use_uniform=ins->data.color.use_uniform;
-                    glUniform4fv(r->uniforms.uColor, 1, ucolor);
-                    glUniform1i(r->uniforms.uUseUniform, use_uniform);
-                    break;
-                case RMODEL:
-                    memcpy(model, ins->data.model.model, sizeof(mat4x4));
-                    render_setmodel(r, model);
-                    break;
-                case RARRAY:
-                    glBindVertexArray(ins->data.array.handle);
-                    break;
-                case RTRIANGLES:
-                    if (render_draw_for_pass(use_uniform, ucolor[3], transparent_pass))
-                        glDrawElements(GL_TRIANGLES, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
-                    break;
-                case RLINES:
-                    if (render_draw_for_pass(use_uniform, ucolor[3], transparent_pass))
-                        glDrawElements(GL_LINES, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
-                    break;
-                case RPOINTS:
-                    if (render_draw_for_pass(use_uniform, ucolor[3], transparent_pass))
-                        glDrawElements(GL_POINTS, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
-                    break;
-                case RTEXT:
-                    break;
-            }
+    for (unsigned i=0; i<r->renderlist.count; i++) {
+        renderinstruction *ins=&r->renderlist.data[i];
+        switch (ins->instruction) {
+            case RNOP: break;
+            case RSHADE:
+                shade_mode=ins->data.shade.mode;
+                ka=ins->data.shade.ka;
+                kd=ins->data.shade.kd;
+                ks=ins->data.shade.ks;
+                shininess=ins->data.shade.shininess;
+                uflat = (shade_mode==SCENE_SHADE_FLAT) ? 1 : 0;
+                render_setgeometryuniforms(r, view, proj, model, lightcolor, lightposn, viewposn,
+                                           ucolor, use_uniform, uflat, ka, kd, ks, shininess);
+                break;
+            case RCOLOR:
+                ucolor[0]=ins->data.color.rgba[0];
+                ucolor[1]=ins->data.color.rgba[1];
+                ucolor[2]=ins->data.color.rgba[2];
+                ucolor[3]=ins->data.color.rgba[3];
+                use_uniform=ins->data.color.use_uniform;
+                glUniform4fv(r->uniforms.uColor, 1, ucolor);
+                glUniform1i(r->uniforms.uUseUniform, use_uniform);
+                break;
+            case RMODEL:
+                memcpy(model, ins->data.model.model, sizeof(mat4x4));
+                render_setmodel(r, model);
+                break;
+            case RARRAY:
+                curvao=ins->data.array.handle;
+                glBindVertexArray(curvao);
+                break;
+            case RTRIANGLES:
+                if (!render_is_transparent(use_uniform, ucolor[3]))
+                    glDrawElements(GL_TRIANGLES, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
+                break;
+            case RLINES:
+                if (!render_is_transparent(use_uniform, ucolor[3]))
+                    glDrawElements(GL_LINES, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
+                break;
+            case RPOINTS:
+                if (!render_is_transparent(use_uniform, ucolor[3]))
+                    glDrawElements(GL_POINTS, ins->data.triangles.length, GL_UNSIGNED_INT, ins->data.triangles.offset);
+                break;
+            case RTEXT:
+                break;
         }
     }
+
+    /* --- Transparent pass: collect, sort far→near by centroid view-z, draw --- */
+    glDepthMask(GL_FALSE);
+
+    shade_mode=SCENE_SHADE_SHADED;
+    ka=SCENE_MATERIAL_KA_DEFAULT;
+    kd=SCENE_MATERIAL_KD_DEFAULT;
+    ks=SCENE_MATERIAL_KS_DEFAULT;
+    shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
+    ucolor[0]=ucolor[1]=ucolor[2]=ucolor[3]=1.0f;
+    use_uniform=0;
+    uflat=0;
+    curvao=0;
+    mat3d_identity4x4(model);
+
+    unsigned ntrans=0;
+    unsigned ntrans_cap=0;
+    rendertdraw *tdraws=NULL;
+    bool collect_ok=true;
+
+    for (unsigned i=0; i<r->renderlist.count && collect_ok; i++) {
+        renderinstruction *ins=&r->renderlist.data[i];
+        switch (ins->instruction) {
+            case RSHADE:
+                shade_mode=ins->data.shade.mode;
+                ka=ins->data.shade.ka;
+                kd=ins->data.shade.kd;
+                ks=ins->data.shade.ks;
+                shininess=ins->data.shade.shininess;
+                uflat = (shade_mode==SCENE_SHADE_FLAT) ? 1 : 0;
+                break;
+            case RCOLOR:
+                ucolor[0]=ins->data.color.rgba[0];
+                ucolor[1]=ins->data.color.rgba[1];
+                ucolor[2]=ins->data.color.rgba[2];
+                ucolor[3]=ins->data.color.rgba[3];
+                use_uniform=ins->data.color.use_uniform;
+                break;
+            case RMODEL:
+                memcpy(model, ins->data.model.model, sizeof(mat4x4));
+                break;
+            case RARRAY:
+                curvao=ins->data.array.handle;
+                break;
+            case RTRIANGLES:
+            case RLINES:
+            case RPOINTS:
+                if (render_is_transparent(use_uniform, ucolor[3])) {
+                    if (ntrans>=ntrans_cap) {
+                        unsigned cap = ntrans_cap ? ntrans_cap*2 : 8;
+                        rendertdraw *grown=realloc(tdraws, sizeof(rendertdraw)*cap);
+                        if (!grown) {
+                            collect_ok=false;
+                            break;
+                        }
+                        tdraws=grown;
+                        ntrans_cap=cap;
+                    }
+                    rendertdraw *d=&tdraws[ntrans++];
+                    d->mode=(ins->instruction==RTRIANGLES) ? GL_TRIANGLES :
+                            (ins->instruction==RLINES) ? GL_LINES : GL_POINTS;
+                    d->length=ins->data.triangles.length;
+                    d->offset=ins->data.triangles.offset;
+                    d->vao=curvao;
+                    memcpy(d->model, model, sizeof(mat4x4));
+                    memcpy(d->rgba, ucolor, sizeof(d->rgba));
+                    d->use_uniform=use_uniform;
+                    d->uflat=uflat;
+                    d->ka=ka; d->kd=kd; d->ks=ks; d->shininess=shininess;
+                    d->depth=0.0f;
+                    if (s && ins->obj && ins->obj->obj) {
+                        vec3 local={0,0,0};
+                        if (render_object_centroid(s, ins->obj->obj, local))
+                            d->depth=render_view_depth(view, model, local);
+                    }
+                }
+                break;
+            default:
+                break;
+        }
+    }
+
+    if (collect_ok && ntrans>0 && tdraws) {
+        qsort(tdraws, ntrans, sizeof(rendertdraw), render_tdraw_cmp);
+        render_setgeometryuniforms(r, view, proj, model, lightcolor, lightposn, viewposn,
+                                   ucolor, use_uniform, uflat, ka, kd, ks, shininess);
+        for (unsigned i=0; i<ntrans; i++) render_draw_tdraw(r, &tdraws[i]);
+    }
+    free(tdraws);
 
     glDepthMask(GL_TRUE);
     

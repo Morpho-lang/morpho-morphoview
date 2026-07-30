@@ -102,7 +102,7 @@ I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V
 - **`M flat`** — unlit albedo (diagrams / categorical color).
 - **Uniform color:** `c` / `C` then `v "xn"` — `C` sets albedo (and optional alpha) for subsequent draws.
 - **Vertex color:** `v "xnc"` without a preceding `C` — per-vertex RGB is the albedo (opaque).
-- **Opacity:** `c <id> <r g b a>` — alpha on the selected color. Opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off and standard alpha blending. Display-list order for transparent (no OIT).
+- **Opacity:** `c <id> <r g b a>` — alpha on the selected color. Opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off and standard alpha blending. Transparent objects are sorted **far → near** by object centroid (view-space z). Closed translucent meshes draw back faces then front to avoid mesh-order striping. Not triangle-level / OIT — intersecting translucents can still artifact.
 
 Lighting and eye position are in model space (stable under camera rotation). By default the light is placed outside the scene AABB. `L <x> <y> <z>` sets an explicit position (color unchanged; default white); optional `<r g b>` sets light color; `L a` clears the override and resumes AABB auto placement.
 
@@ -137,7 +137,7 @@ i
 d 1
 ```
 
-See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, `test/command/largebbox` (auto-fit), `test/command/flatshade`, `test/command/uniformphong`, `test/command/materials` (flat | Lambert | Phong spheres), `test/command/opacity` (semi-transparent over opaque), and `test/command/light` (two windows: AABB auto vs explicit `L`).
+See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, `test/command/largebbox` (auto-fit), `test/command/flatshade`, `test/command/uniformphong`, `test/command/materials` (flat | Lambert | Phong spheres), `test/command/opacity` (semi-transparent over opaque), `test/command/depthsort` (overlapping translucents, far→near), `test/command/transparentspheres` (overlapping Phong spheres), and `test/command/light` (two windows: AABB auto vs explicit `L`).
 
 ## ZeroMQ transport
 

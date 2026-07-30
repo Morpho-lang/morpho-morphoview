@@ -35,7 +35,7 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 - [x] Material model: `M shaded|flat` + OpenGL/VTK Phong (\(k_a,k_d,k_s,n\)); uniform `C` for meshes
 - [x] RGBA / opacity (blend + opaque/transparent passes)
 - [x] Phase 2c: consolidate geometry shaders (one program + `uFlat`, cached uniforms, CPU normal matrix)
-- [ ] Phase 2c: transparent depth sort (object centroid, far→near)
+- [x] Phase 2c: transparent depth sort (object centroid, far→near)
 - [ ] Object update/delete (`U O` / `X O`) + persistent apply context
 - [ ] Binary / byte-buffer vertex transport
 - [ ] Pick / view / click events
@@ -74,7 +74,7 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 | `C` on meshes | Done | Uniform albedo for subsequent geometry |
 | RGBA / opacity | Done | `c … a`, blend, opaque then transparent pass |
 | Shader consolidate | Done | Phase 2c: one geometry program + `uFlat`; cached uniforms; CPU normal matrix |
-| Transparent depth sort | Later | Phase 2c: far→near by object centroid |
+| Transparent depth sort | Done | Phase 2c: far→near by object centroid (intersecting translucents can still artifact) |
 
 ### Delete / quit
 
@@ -117,6 +117,8 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 - [x] Phong torus: [`test/command/torus`](test/command/torus)
 - [x] Opacity (RGBA blend): [`test/command/opacity`](test/command/opacity)
 - [x] Explicit light (auto vs `L`): [`test/command/light`](test/command/light)
+- [x] Transparent depth sort: [`test/command/depthsort`](test/command/depthsort) (near listed before far; sort still composites near on top)
+- [x] Transparent spheres: [`test/command/transparentspheres`](test/command/transparentspheres) (overlapping Phong spheres + depth sort)
 
 ## Notes
 
