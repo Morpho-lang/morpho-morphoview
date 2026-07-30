@@ -122,6 +122,7 @@ typedef struct sscene {
 
 scene *scene_new(int id, int dim);
 scene *scene_find(int id);
+void scene_clear(scene *s); /**< Free contents; keep id/dim and list link */
 void scene_free(scene *s);
 
 gobject *scene_addobject(scene *s, int id);

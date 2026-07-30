@@ -1,0 +1,60 @@
+// Smoke-test `U S` scene replace over ZMQ.
+// Sends an initial scene, then a U S replacement; expects ok for both.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+//
+//   cd test && morpho6 testupdate.morpho
+
+import zeromq
+
+var frame0 =
+  "S 0 3\n" +
+  "W \"U S test\"\n" +
+  "c 0 1 0 0\n" +
+  "o 1\n" +
+  "v \"xnc\"\n" +
+  "-0.5 -0.5 0  0 0 1  1 0 0\n" +
+  " 0.5 -0.5 0  0 0 1  1 0 0\n" +
+  " 0.0  0.5 0  0 0 1  1 0 0\n" +
+  "l\n" +
+  "0 1 1 2 2 0\n" +
+  "i\n" +
+  "C 0\n" +
+  "d 1\n"
+
+var frame1 =
+  "U S 0\n" +
+  "c 0 0 1 0\n" +
+  "o 1\n" +
+  "v \"xnc\"\n" +
+  "-0.5  0.0 0  0 0 1  0 1 0\n" +
+  " 0.5  0.0 0  0 0 1  0 1 0\n" +
+  " 0.0  0.7 0  0 0 1  0 1 0\n" +
+  "l\n" +
+  "0 1 1 2 2 0\n" +
+  "i\n" +
+  "C 0\n" +
+  "d 1\n"
+
+var sock = ZMQPair()
+sock.bind("tcp://127.0.0.1:!")
+var ep = sock.endpoint()
+
+system("morphoview -c \"${ep}\" > /dev/null 2>&1 &")
+
+sock.send(frame0)
+var poller = ZMQPoller(sock)
+var ready = poller.wait(5000)
+if (!ready) {
+  print "timeout on first ok"
+  system("pkill -f \"morphoview -c ${ep}\" > /dev/null 2>&1")
+} else {
+  print "first=${sock.receive()}"
+  sock.send(frame1)
+  ready = poller.wait(5000)
+  if (!ready) {
+    print "timeout on second ok"
+  } else {
+    print "second=${sock.receive()}"
+  }
+  system("pkill -f \"morphoview -c ${ep}\" > /dev/null 2>&1")
+}

@@ -46,6 +46,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | Type | ASCII | Payload |
 |------|-------|---------|
 | `MVCMD_SCENE_CREATE` | `S <id> <dim>` | Scene id, dimension (2 or 3) |
+| `MVCMD_UPDATE_SCENE` | `U S <id>` | Clear existing scene in place; select as current |
 | `MVCMD_WINDOW_TITLE` | `W "<title>"` | Owned title string |
 | `MVCMD_OBJECT` | `o <id>` | Object id |
 | `MVCMD_VERTICES` | `v ["format"] <floats...>` | Optional format; float blob |
@@ -57,7 +58,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_TEXT` | `T <fontid> "<string>"` | Font id, string; optional matrix |
 | `MVCMD_PREPARE` | *(none — appended by parse)* | Upload every open display’s scene to GL |
 
-`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current. `MVCMD_PREPARE` calls `display_prepareall()`.
+`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `MVCMD_PREPARE` calls `display_prepareall()`.
 
 ## ASCII language
 
@@ -67,7 +68,8 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 
 | Letter | Arguments | Notes |
 |--------|-----------|-------|
-| `S` | `<id> <dim>` | Create or select scene; open window if needed |
+| `S` | `<id> <dim>` | Create or select scene; open window if needed (does not clear) |
+| `U` | `S <id>` | Clear scene `id` in place and select it (window kept); see also `TODO.md` for `U O` / `U V` |
 | `W` | `"<title>"` | Set current window title |
 | `o` | `<id>` | Current object (requires a scene) |
 | `v` | `["format"] <floats...>` | Vertex data for current object |

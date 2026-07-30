@@ -38,12 +38,16 @@
 #define COMMAND_EXPECTSTRING              "ExpctStr"
 #define COMMAND_EXPECTSTRING_MSG          "Expected a string."
 
+#define COMMAND_INVLDUPDATE                 "InvldUpd"
+#define COMMAND_INVLDUPDATE_MSG             "Unrecognized update target (expected S)."
+
 /* -------------------------------------------------------
  * Command IR — header + typed payloads
  * ------------------------------------------------------- */
 
 typedef enum {
     MVCMD_SCENE_CREATE,   /**< Create scene + open window (`S`) */
+    MVCMD_UPDATE_SCENE,   /**< Clear + select existing scene (`U S`) */
     MVCMD_WINDOW_TITLE,   /**< Set window title (`W`) */
     MVCMD_OBJECT,         /**< Select/create current object (`o`) */
     MVCMD_VERTICES,       /**< Append vertex data (`v`) */
@@ -70,6 +74,14 @@ typedef struct {
     int id;
     int dim;
 } mv_cmd_scene;
+
+/** Clear an existing scene in place and select it as current (keep window).
+ *  Language: `U S <id>`
+ *  @param id  Scene identifier (must already exist) */
+typedef struct {
+    mv_command cmd;
+    int id;
+} mv_cmd_update_scene;
 
 /** Set the current display window title.
  *  Language: `W "<title>"`
@@ -170,6 +182,7 @@ typedef struct {
 } mv_cmd_text;
 
 #define MVCMD_AS_SCENE(c)         ((mv_cmd_scene *) (c))
+#define MVCMD_AS_UPDATE_SCENE(c)  ((mv_cmd_update_scene *) (c))
 #define MVCMD_AS_WINDOW(c)        ((mv_cmd_window *) (c))
 #define MVCMD_AS_OBJECT(c)        ((mv_cmd_object *) (c))
 #define MVCMD_AS_VERTICES(c)      ((mv_cmd_vertices *) (c))

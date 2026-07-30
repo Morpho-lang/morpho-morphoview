@@ -205,25 +205,50 @@ bool render_init(renderer *r) {
     varray_renderfontinit(&r->fonts);
     varray_renderglbuffersinit(&r->glbuffers);
     varray_renderinstructioninit(&r->renderlist);
-    
+    r->fontvao=0;
+    r->fontvbo=0;
+
     return true;
 }
 
-void render_clear(renderer *r) {
+/** Free uploaded geometry/fonts; leave shader programs intact for reuse. */
+void render_reset(renderer *r) {
     for (unsigned int i=0; i<r->glbuffers.count; i++) {
         renderglbuffers *b=&r->glbuffers.data[i];
-        
+
         glDeleteVertexArrays(1, &b->array);
         glDeleteBuffers(1, &b->buffer);
         glDeleteBuffers(1, &b->element);
     }
-    
+
+    for (unsigned int i=0; i<r->fonts.count; i++) {
+        glDeleteTextures(1, &r->fonts.data[i].texture);
+    }
+
+    if (r->fontvao) {
+        glDeleteVertexArrays(1, &r->fontvao);
+        r->fontvao=0;
+    }
+    if (r->fontvbo) {
+        glDeleteBuffers(1, &r->fontvbo);
+        r->fontvbo=0;
+    }
+
     varray_renderglbuffersclear(&r->glbuffers);
     varray_renderfontclear(&r->fonts);
     varray_renderobjectclear(&r->objects);
     varray_renderinstructionclear(&r->renderlist);
-    
+
+    varray_renderglbuffersinit(&r->glbuffers);
+    varray_renderfontinit(&r->fonts);
+    varray_renderobjectinit(&r->objects);
+    varray_renderinstructioninit(&r->renderlist);
+}
+
+void render_clear(renderer *r) {
+    render_reset(r);
     glDeleteProgram(r->shader);
+    glDeleteProgram(r->textshader);
 }
 
 

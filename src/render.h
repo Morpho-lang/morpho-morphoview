@@ -110,6 +110,7 @@ typedef struct {
 } renderer;
 
 bool render_init(renderer *r);
+void render_reset(renderer *r); /**< Drop GL geometry; keep shaders */
 void render_clear(renderer *r);
 
 void render_preparescene(renderer *r, scene *s);

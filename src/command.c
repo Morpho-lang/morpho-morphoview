@@ -157,6 +157,27 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             return true;
         }
 
+        case MVCMD_UPDATE_SCENE: {
+            mv_cmd_update_scene *c = MVCMD_AS_UPDATE_SCENE(cmd);
+            scene *s = scene_find(c->id);
+            if (!s) {
+                fprintf(stderr, "morphoview: No scene with id '%i'.\n", c->id);
+                return false;
+            }
+
+            scene_clear(s);
+
+            ctx->display = display_findforscene(s);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
+            }
+
+            ctx->scene = s;
+            ctx->cobject = NULL;
+            return true;
+        }
+
         case MVCMD_WINDOW_TITLE: {
             mv_cmd_window *c = MVCMD_AS_WINDOW(cmd);
             if (ctx->display && c->title) {
@@ -323,6 +344,7 @@ enum {
     MVTOKEN_ROTATE,
     MVTOKEN_SCALE,
     MVTOKEN_SCENE,
+    MVTOKEN_UPDATE,
     MVTOKEN_TRANSLATE,
     MVTOKEN_WINDOW,
     MVTOKEN_FONT,
@@ -351,6 +373,7 @@ tokendefn mvtokens[] = {
     { "r",          MVTOKEN_ROTATE                , NULL },
     { "s",          MVTOKEN_SCALE                 , NULL },
     { "S",          MVTOKEN_SCENE                 , NULL },
+    { "U",          MVTOKEN_UPDATE                , NULL },
     { "t",          MVTOKEN_TRANSLATE             , NULL },
     { "T",          MVTOKEN_TEXT                  , NULL },
     { "v",          MVTOKEN_VERTICES              , NULL },
@@ -818,6 +841,30 @@ bool command_parsescene(parser *p, void *out) {
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
+/** `U S <id>` — clear and select an existing scene. */
+bool command_parseupdate(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    int id;
+
+    if (!parse_checktokenadvance(p, MVTOKEN_SCENE)) {
+        parse_error(p, true, COMMAND_INVLDUPDATE);
+        return false;
+    }
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+
+    mv_cmd_update_scene *cmd = command_new(MVCMD_UPDATE_SCENE, sizeof(mv_cmd_update_scene));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    ctx->has_scene=true;
+    ctx->has_object=false;
+
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
 bool command_parsewindow(parser *p, void *out) {
     (void) out;
     char *name=NULL;
@@ -917,6 +964,7 @@ parserule mv_parserules[] = {
     PARSERULE_PREFIX(MVTOKEN_ROTATE, command_parserotate),
     PARSERULE_PREFIX(MVTOKEN_SCALE, command_parsescale),
     PARSERULE_PREFIX(MVTOKEN_SCENE, command_parsescene),
+    PARSERULE_PREFIX(MVTOKEN_UPDATE, command_parseupdate),
     PARSERULE_PREFIX(MVTOKEN_TRANSLATE, command_parsetranslate),
     PARSERULE_PREFIX(MVTOKEN_WINDOW, command_parsewindow),
     PARSERULE_PREFIX(MVTOKEN_FONT, command_parsefont),
@@ -1045,6 +1093,7 @@ void command_initialize(void) {
     morpho_defineerror(COMMAND_EXPECTINTEGER, ERROR_PARSE, COMMAND_EXPECTINTEGER_MSG);
     morpho_defineerror(COMMAND_EXPECTNUMBER, ERROR_PARSE, COMMAND_EXPECTNUMBER_MSG);
     morpho_defineerror(COMMAND_EXPECTSTRING, ERROR_PARSE, COMMAND_EXPECTSTRING_MSG);
+    morpho_defineerror(COMMAND_INVLDUPDATE, ERROR_PARSE, COMMAND_INVLDUPDATE_MSG);
 }
 
 void command_finalize(void) {

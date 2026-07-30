@@ -58,24 +58,46 @@ scene *scene_new(int id, int dim) {
     return new;
 }
 
-/** Free a scene and associated data structures */
-void scene_free(scene *s) {
-    scene_remove(s);
+/** Free scene contents but keep the scene struct, id, dim, and list link. */
+void scene_clear(scene *s) {
+    if (!s) return;
 
     for (unsigned int i=0; i<s->objectlist.count; i++) {
         gobject *obj = &s->objectlist.data[i];
         if (obj->vertexdata.format) free(obj->vertexdata.format);
         varray_gelementclear(&obj->elements);
     }
-    
+
     for (unsigned int i=0; i<s->fontlist.count; i++) {
         text_fontclear(&s->fontlist.data[i].font);
     }
-    
+
     for (unsigned int i=0; i<s->textlist.count; i++) {
         free(s->textlist.data[i].text);
     }
-    
+
+    varray_gobjectclear(&s->objectlist);
+    varray_gdrawclear(&s->displaylist);
+    varray_gcolorclear(&s->colorlist);
+    varray_gfontclear(&s->fontlist);
+    varray_gtextclear(&s->textlist);
+    varray_floatclear(&s->data);
+    varray_intclear(&s->indx);
+
+    varray_gobjectinit(&s->objectlist);
+    varray_gdrawinit(&s->displaylist);
+    varray_gcolorinit(&s->colorlist);
+    varray_gfontinit(&s->fontlist);
+    varray_gtextinit(&s->textlist);
+    varray_floatinit(&s->data);
+    varray_intinit(&s->indx);
+}
+
+/** Free a scene and associated data structures */
+void scene_free(scene *s) {
+    scene_remove(s);
+    scene_clear(s);
+
     varray_gobjectclear(&s->objectlist);
     varray_gdrawclear(&s->displaylist);
     varray_gcolorclear(&s->colorlist);
