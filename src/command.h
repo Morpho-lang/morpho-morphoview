@@ -189,12 +189,13 @@ void command_free(mv_command *cmd);
  * Command queue
  * ------------------------------------------------------- */
 
-/* Mutex + glfwPostEmptyEvent land with the I/O thread. */
+/* Mutex lands with the I/O thread; command_wake posts glfwPostEmptyEvent now. */
 
 void command_queue_init(void);
 void command_queue_clear(void);
 bool command_enqueue(mv_command *cmd); /* takes ownership of cmd */
-int command_drain(void);
+void command_wake(void);
+int command_process(void);
 
 /* -------------------------------------------------------
  * Prototypes

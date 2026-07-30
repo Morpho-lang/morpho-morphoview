@@ -8,6 +8,7 @@
 #include "display.h"
 #include "scene.h"
 #include "render.h"
+#include "command.h"
 
 /* -------------------------------------------------------
  * Global variables
@@ -285,6 +286,7 @@ void display_prepareall(void) {
 void display_loop(void) {
     while (opendisplays!=NULL) {
         glfwWaitEvents();
+        command_process();
         for (display *d=opendisplays; d!=NULL; d=d->next) {
             if (glfwWindowShouldClose(d->window)) {
                 /* Free GL resources while this window's context is still current */

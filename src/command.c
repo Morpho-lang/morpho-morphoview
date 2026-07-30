@@ -108,8 +108,15 @@ void command_queue_clear(void) {
     varray_mv_commandptrclear(&command_queue);
 }
 
+void command_wake(void) {
+    glfwPostEmptyEvent();
+}
+
 bool command_enqueue(mv_command *cmd) {
-    return varray_mv_commandptradd(&command_queue, &cmd, 1);
+    bool wasempty = (command_queue.count == 0);
+    if (!varray_mv_commandptradd(&command_queue, &cmd, 1)) return false;
+    if (wasempty) command_wake();
+    return true;
 }
 
 /* **********************************************************************
@@ -256,7 +263,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
     return false;
 }
 
-int command_drain(void) {
+int command_process(void) {
     command_applyctx ctx;
     command_applyctx_init(&ctx);
 

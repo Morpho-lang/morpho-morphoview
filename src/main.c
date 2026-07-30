@@ -36,7 +36,7 @@ int main(int argc, const char * argv[]) {
         }
     }
 
-    // Parse a command file if provided (enqueue only; apply on drain)
+    // Parse a command file if provided (enqueue only; apply on process)
     if (file) {
         char *buffer = NULL;
         printf("Loading %s\n", file);
@@ -49,7 +49,7 @@ int main(int argc, const char * argv[]) {
     }
 
     if (parsed) {
-        command_drain();
+        command_process();
         display_loop();
     }
 
