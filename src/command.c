@@ -15,26 +15,252 @@
 #include "command.h"
 #include "scene.h"
 #include "display.h"
+#include "render.h"
 #include "matrix3d.h"
 
+DEFINE_VARRAY(mv_commandptr, mv_command *);
+
 /* -------------------------------------------------------
- * Parse context
+ * Parse / apply contexts
  * ------------------------------------------------------- */
+
+typedef struct {
+    mat4x4 model;
+    bool modelchanged;
+    bool has_scene;
+    bool has_object;
+} command_parsectx;
 
 typedef struct {
     scene *scene;
     display *display;
-    mat4x4 model;
-    bool modelchanged;
     gobject *cobject;
-} commandcontext;
+} command_applyctx;
 
-void commandcontext_init(commandcontext *ctx) {
-    ctx->scene=NULL;
-    ctx->display=NULL;
+void command_parsectx_init(command_parsectx *ctx) {
     mat3d_identity4x4(ctx->model);
     ctx->modelchanged=false;
+    ctx->has_scene=false;
+    ctx->has_object=false;
+}
+
+void command_applyctx_init(command_applyctx *ctx) {
+    ctx->scene=NULL;
+    ctx->display=NULL;
     ctx->cobject=NULL;
+}
+
+/* -------------------------------------------------------
+ * Allocation / free
+ * ------------------------------------------------------- */
+
+/** Allocate a typed command and set its header type. */
+void *command_new(mv_command_type type, size_t size) {
+    mv_command *cmd = calloc(1, size);
+    if (cmd) cmd->type=type;
+    return cmd;
+}
+
+void command_free(mv_command *cmd) {
+    if (!cmd) return;
+
+    switch (cmd->type) {
+        case MVCMD_WINDOW_TITLE:
+            free(MVCMD_AS_WINDOW(cmd)->title);
+            break;
+        case MVCMD_VERTICES:
+            free(MVCMD_AS_VERTICES(cmd)->format);
+            free(MVCMD_AS_VERTICES(cmd)->data);
+            break;
+        case MVCMD_ELEMENT:
+            free(MVCMD_AS_ELEMENT(cmd)->indices);
+            break;
+        case MVCMD_COLOR:
+            free(MVCMD_AS_COLOR(cmd)->rgb);
+            break;
+        case MVCMD_FONT:
+            free(MVCMD_AS_FONT(cmd)->path);
+            break;
+        case MVCMD_TEXT:
+            free(MVCMD_AS_TEXT(cmd)->string);
+            break;
+        default:
+            break;
+    }
+
+    free(cmd);
+}
+
+/* -------------------------------------------------------
+ * Command queue
+ * ------------------------------------------------------- */
+
+static varray_mv_commandptr command_queue;
+
+void command_queue_init(void) {
+    varray_mv_commandptrinit(&command_queue);
+}
+
+void command_queue_clear(void) {
+    for (unsigned int i=0; i<command_queue.count; i++) {
+        command_free(command_queue.data[i]);
+    }
+    varray_mv_commandptrclear(&command_queue);
+}
+
+bool command_enqueue(mv_command *cmd) {
+    return varray_mv_commandptradd(&command_queue, &cmd, 1);
+}
+
+/* **********************************************************************
+ * Apply
+ * ********************************************************************** */
+
+bool command_apply(mv_command *cmd, command_applyctx *ctx) {
+    switch (cmd->type) {
+        case MVCMD_SCENE_CREATE: {
+            mv_cmd_scene *c = MVCMD_AS_SCENE(cmd);
+            ctx->scene = scene_new(c->id, c->dim);
+            if (ctx->scene) ctx->display=display_open(ctx->scene);
+            ctx->cobject=NULL;
+            return (ctx->scene!=NULL);
+        }
+
+        case MVCMD_WINDOW_TITLE: {
+            mv_cmd_window *c = MVCMD_AS_WINDOW(cmd);
+            if (ctx->display && c->title) {
+                display_setwindowtitle(ctx->display, c->title);
+            }
+            return true;
+        }
+
+        case MVCMD_OBJECT:
+            if (!ctx->scene) return false;
+            ctx->cobject=scene_addobject(ctx->scene, MVCMD_AS_OBJECT(cmd)->id);
+            return (ctx->cobject!=NULL);
+
+        case MVCMD_VERTICES: {
+            mv_cmd_vertices *c = MVCMD_AS_VERTICES(cmd);
+            if (!ctx->scene || !ctx->cobject) return false;
+
+            if (c->format) {
+                ctx->cobject->vertexdata.format=c->format;
+                c->format=NULL; /* transferred */
+            }
+
+            if (c->length>0 && c->data) {
+                int ret=scene_adddata(ctx->scene, c->data, c->length);
+                if (ctx->cobject->vertexdata.indx==SCENE_EMPTY) {
+                    ctx->cobject->vertexdata.indx=ret;
+                    ctx->cobject->vertexdata.length=0;
+                }
+                ctx->cobject->vertexdata.length += c->length;
+            }
+            return true;
+        }
+
+        case MVCMD_ELEMENT: {
+            mv_cmd_element *c = MVCMD_AS_ELEMENT(cmd);
+            if (!ctx->scene || !ctx->cobject) return false;
+
+            gelement el = {
+                .type = c->type,
+                .indx = SCENE_EMPTY,
+                .length = 0
+            };
+
+            if (c->length>0 && c->indices) {
+                int ret=scene_addindex(ctx->scene, c->indices, c->length);
+                el.indx=ret;
+                el.length=c->length;
+            }
+
+            scene_addelement(ctx->cobject, &el);
+            return true;
+        }
+
+        case MVCMD_COLOR: {
+            mv_cmd_color *c = MVCMD_AS_COLOR(cmd);
+            if (!ctx->scene) return false;
+
+            if (c->length>0 && c->rgb) {
+                int indx=scene_adddata(ctx->scene, c->rgb, c->length*3);
+                scene_addcolor(ctx->scene, c->id, c->length, indx);
+            }
+            return true;
+        }
+
+        case MVCMD_SELECT_COLOR:
+            if (!ctx->scene) return false;
+            scene_adddraw(ctx->scene, COLOR, MVCMD_AS_SELECT_COLOR(cmd)->id, -1);
+            return true;
+
+        case MVCMD_DRAW: {
+            mv_cmd_draw *c = MVCMD_AS_DRAW(cmd);
+            if (!ctx->scene) return false;
+            int matindx = SCENE_EMPTY;
+            if (c->has_matrix) {
+                matindx=scene_adddata(ctx->scene, c->matrix, 16);
+            }
+            scene_adddraw(ctx->scene, OBJECT, c->id, matindx);
+            return true;
+        }
+
+        case MVCMD_FONT: {
+            mv_cmd_font *c = MVCMD_AS_FONT(cmd);
+            if (!ctx->scene) return false;
+            return scene_addfont(ctx->scene, c->id, c->path, c->size, NULL);
+        }
+
+        case MVCMD_TEXT: {
+            mv_cmd_text *c = MVCMD_AS_TEXT(cmd);
+            if (!ctx->scene) return false;
+            if (!scene_getfontfromid(ctx->scene, c->fontid)) {
+                fprintf(stderr, "Font id '%i' not found.\n", c->fontid);
+                return false;
+            }
+
+            int tid=scene_addtext(ctx->scene, c->fontid, c->string);
+            c->string=NULL; /* transferred to scene */
+
+            int matindx=SCENE_EMPTY;
+            if (c->has_matrix) {
+                matindx=scene_adddata(ctx->scene, c->matrix, 16);
+            }
+            scene_adddraw(ctx->scene, TEXT, tid, matindx);
+            return true;
+        }
+
+        case MVCMD_PREPARE:
+            if (ctx->scene && ctx->display) {
+                render_preparescene(&ctx->display->render, ctx->scene);
+            }
+            return true;
+    }
+
+    return false;
+}
+
+int command_drain(void) {
+    command_applyctx ctx;
+    command_applyctx_init(&ctx);
+
+    int applied=0;
+    for (unsigned int i=0; i<command_queue.count; i++) {
+        mv_command *cmd = command_queue.data[i];
+        if (!command_apply(cmd, &ctx)) {
+            for (unsigned int j=i; j<command_queue.count; j++) {
+                command_free(command_queue.data[j]);
+            }
+            command_queue.count=0;
+            return applied;
+        }
+        command_free(cmd);
+        applied++;
+    }
+
+    command_queue.count=0;
+    return applied;
 }
 
 /* **********************************************************************
@@ -247,136 +473,244 @@ bool command_parsestring(parser *p, char **out) {
     return true;
 }
 
+bool command_enqueue_owned(parser *p, mv_command *cmd) {
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    if (command_enqueue(cmd)) return true;
+    command_free(cmd);
+    parse_error(p, true, ERROR_ALLOCATIONFAILED);
+    return false;
+}
+
 /* **********************************************************************
- * Command handlers
+ * Parse handlers (emit only)
  * ********************************************************************** */
 
 bool command_parsecolor(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
-    int id, indx=-1;
-    int length=0;
+    (void) out;
+    int id;
+    varray_float rgb;
 
     PARSE_CHECK(command_parseinteger(p, &id));
 
+    varray_floatinit(&rgb);
     while (command_isnumerical(p)) {
         float r[3];
-        for (int i=0; i<3; i++) PARSE_CHECK(command_parsefloat(p, &r[i]));
-
-        int ret=scene_adddata(ctx->scene, r, 3);
-        if (indx<0) indx=ret;
-        length++;
+        for (int i=0; i<3; i++) {
+            if (!command_parsefloat(p, &r[i])) {
+                varray_floatclear(&rgb);
+                return false;
+            }
+        }
+        if (!varray_floatadd(&rgb, r, 3)) {
+            varray_floatclear(&rgb);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
     }
 
-    if (length>0) scene_addcolor(ctx->scene, id, length, indx);
-    return true;
+    mv_cmd_color *cmd = command_new(MVCMD_COLOR, sizeof(mv_cmd_color));
+    if (!cmd) {
+        varray_floatclear(&rgb);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    cmd->length=rgb.count/3;
+
+    if (rgb.count>0) {
+        cmd->rgb=malloc(sizeof(float)*rgb.count);
+        if (!cmd->rgb) {
+            varray_floatclear(&rgb);
+            command_free(&cmd->cmd);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        memcpy(cmd->rgb, rgb.data, sizeof(float)*rgb.count);
+    }
+    varray_floatclear(&rgb);
+
+    return command_enqueue_owned(p, &cmd->cmd);
 }
 
 bool command_parseselectcolor(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    (void) out;
     int id;
 
     PARSE_CHECK(command_parseinteger(p, &id));
-    scene_adddraw(ctx->scene, COLOR, id, -1);
-    return true;
+
+    mv_cmd_select_color *cmd = command_new(MVCMD_SELECT_COLOR, sizeof(mv_cmd_select_color));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    return command_enqueue_owned(p, &cmd->cmd);
 }
 
 bool command_parsedraw(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
-    int id, indx = SCENE_EMPTY;
-
-    PARSE_CHECK(command_parseinteger(p, &id));
-
-    if (ctx->modelchanged) {
-        indx=scene_adddata(ctx->scene, ctx->model, 16);
-        ctx->modelchanged=false;
-    }
-
-    scene_adddraw(ctx->scene, OBJECT, id, indx);
-    return true;
-}
-
-bool command_parseobject(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    command_parsectx *ctx = (command_parsectx *) out;
     int id;
 
     PARSE_CHECK(command_parseinteger(p, &id));
 
-    if (!ctx->scene) {
+    mv_cmd_draw *cmd = command_new(MVCMD_DRAW, sizeof(mv_cmd_draw));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    cmd->has_matrix=ctx->modelchanged;
+    if (ctx->modelchanged) {
+        memcpy(cmd->matrix, ctx->model, sizeof(float)*16);
+        ctx->modelchanged=false;
+    }
+
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parseobject(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    int id;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+
+    if (!ctx->has_scene) {
         parse_error(p, true, COMMAND_NOSCENE);
         return false;
     }
 
-    ctx->cobject=scene_addobject(ctx->scene, id);
-    return true;
+    mv_cmd_object *cmd = command_new(MVCMD_OBJECT, sizeof(mv_cmd_object));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    ctx->has_object=true;
+    return command_enqueue_owned(p, &cmd->cmd);
 }
 
 bool command_parsevertices(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    command_parsectx *ctx = (command_parsectx *) out;
+    char *format=NULL;
+    varray_float data;
 
-    if (!ctx->scene || !ctx->cobject) {
+    if (!ctx->has_scene || !ctx->has_object) {
         parse_error(p, true, COMMAND_NOOBJECT);
         return false;
     }
 
     if (parse_checktoken(p, MVTOKEN_STRING)) {
-        char *format=NULL;
         PARSE_CHECK(command_parsestring(p, &format));
-        ctx->cobject->vertexdata.format=format;
     }
 
+    varray_floatinit(&data);
     while (command_isnumerical(p)) {
         float f;
-        PARSE_CHECK(command_parsefloat(p, &f));
-
-        int ret=scene_adddata(ctx->scene, &f, 1);
-        if (ctx->cobject->vertexdata.indx==SCENE_EMPTY) {
-            ctx->cobject->vertexdata.indx=ret;
-            ctx->cobject->vertexdata.length=0;
+        if (!command_parsefloat(p, &f)) {
+            free(format);
+            varray_floatclear(&data);
+            return false;
         }
-        ctx->cobject->vertexdata.length++;
+        if (!varray_floatadd(&data, &f, 1)) {
+            free(format);
+            varray_floatclear(&data);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
     }
 
-    return true;
+    mv_cmd_vertices *cmd = command_new(MVCMD_VERTICES, sizeof(mv_cmd_vertices));
+    if (!cmd) {
+        free(format);
+        varray_floatclear(&data);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->format=format;
+    cmd->length=data.count;
+
+    if (data.count>0) {
+        cmd->data=malloc(sizeof(float)*data.count);
+        if (!cmd->data) {
+            varray_floatclear(&data);
+            command_free(&cmd->cmd);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        memcpy(cmd->data, data.data, sizeof(float)*data.count);
+    }
+    varray_floatclear(&data);
+
+    return command_enqueue_owned(p, &cmd->cmd);
 }
 
 bool command_parseindex(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    command_parsectx *ctx = (command_parsectx *) out;
+    varray_int indices;
 
-    if (!ctx->scene || !ctx->cobject) {
+    if (!ctx->has_scene || !ctx->has_object) {
         parse_error(p, true, COMMAND_NOOBJECT);
         return false;
     }
 
-    gelement el = { .type = POINTS, .indx = SCENE_EMPTY, .length = 0 };
-
+    gelementtype etype = POINTS;
     if (p->previous.type==MVTOKEN_LINES) {
-        el.type=LINES;
+        etype=LINES;
     } else if (p->previous.type==MVTOKEN_FACETS) {
-        el.type=FACETS;
+        etype=FACETS;
     }
 
+    varray_intinit(&indices);
     while (parse_checktoken(p, MVTOKEN_INTEGER)) {
         int i;
-        PARSE_CHECK(command_parseinteger(p, &i));
-
-        int ret=scene_addindex(ctx->scene, &i, 1);
-        if (el.indx==SCENE_EMPTY) el.indx=ret;
-        el.length++;
+        if (!command_parseinteger(p, &i)) {
+            varray_intclear(&indices);
+            return false;
+        }
+        if (!varray_intadd(&indices, &i, 1)) {
+            varray_intclear(&indices);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
     }
 
-    scene_addelement(ctx->cobject, &el);
-    return true;
+    mv_cmd_element *cmd = command_new(MVCMD_ELEMENT, sizeof(mv_cmd_element));
+    if (!cmd) {
+        varray_intclear(&indices);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->type=etype;
+    cmd->length=indices.count;
+
+    if (indices.count>0) {
+        cmd->indices=malloc(sizeof(int)*indices.count);
+        if (!cmd->indices) {
+            varray_intclear(&indices);
+            command_free(&cmd->cmd);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        memcpy(cmd->indices, indices.data, sizeof(int)*indices.count);
+    }
+    varray_intclear(&indices);
+
+    return command_enqueue_owned(p, &cmd->cmd);
 }
 
 bool command_parseidentity(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    (void) p;
+    command_parsectx *ctx = (command_parsectx *) out;
     mat3d_identity4x4(ctx->model);
     ctx->modelchanged=true;
     return true;
 }
 
 bool command_parsematrix(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    command_parsectx *ctx = (command_parsectx *) out;
     mat4x4 x, m;
 
     for (int i=0; i<16; i++) {
@@ -390,7 +724,7 @@ bool command_parsematrix(parser *p, void *out) {
 }
 
 bool command_parserotate(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    command_parsectx *ctx = (command_parsectx *) out;
     float phi, x[3];
 
     PARSE_CHECK(command_parsefloat(p, &phi));
@@ -404,7 +738,7 @@ bool command_parserotate(parser *p, void *out) {
 }
 
 bool command_parsescale(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    command_parsectx *ctx = (command_parsectx *) out;
     float s;
 
     PARSE_CHECK(command_parsefloat(p, &s));
@@ -414,7 +748,7 @@ bool command_parsescale(parser *p, void *out) {
 }
 
 bool command_parsetranslate(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    command_parsectx *ctx = (command_parsectx *) out;
     float x[3];
 
     for (int i=0; i<3; i++) {
@@ -427,61 +761,89 @@ bool command_parsetranslate(parser *p, void *out) {
 }
 
 bool command_parsescene(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    command_parsectx *ctx = (command_parsectx *) out;
     int id, dim;
 
     PARSE_CHECK(command_parseinteger(p, &id));
     PARSE_CHECK(command_parseinteger(p, &dim));
 
-    ctx->scene = scene_new(id, dim);
-    if (ctx->scene) ctx->display=display_open(ctx->scene);
+    mv_cmd_scene *cmd = command_new(MVCMD_SCENE_CREATE, sizeof(mv_cmd_scene));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    cmd->dim=dim;
+    ctx->has_scene=true;
+    ctx->has_object=false;
 
-    return (ctx->scene!=NULL);
+    return command_enqueue_owned(p, &cmd->cmd);
 }
 
 bool command_parsewindow(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    (void) out;
     char *name=NULL;
 
     PARSE_CHECK(command_parsestring(p, &name));
-    if (name) {
-        display_setwindowtitle(ctx->display, name);
+
+    mv_cmd_window *cmd = command_new(MVCMD_WINDOW_TITLE, sizeof(mv_cmd_window));
+    if (!cmd) {
         free(name);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
     }
-    return true;
+    cmd->title=name;
+    return command_enqueue_owned(p, &cmd->cmd);
 }
 
 bool command_parsefont(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    (void) out;
     int id;
     char *file=NULL;
     float size;
 
     PARSE_CHECK(command_parseinteger(p, &id));
     PARSE_CHECK(command_parsestring(p, &file));
-    PARSE_CHECK(command_parsefloat(p, &size));
+    if (!command_parsefloat(p, &size)) {
+        free(file);
+        return false;
+    }
 
-    return scene_addfont(ctx->scene, id, file, size, NULL);
+    mv_cmd_font *cmd = command_new(MVCMD_FONT, sizeof(mv_cmd_font));
+    if (!cmd) {
+        free(file);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    cmd->path=file;
+    cmd->size=size;
+    return command_enqueue_owned(p, &cmd->cmd);
 }
 
 bool command_parsetext(parser *p, void *out) {
-    commandcontext *ctx = (commandcontext *) out;
+    command_parsectx *ctx = (command_parsectx *) out;
     int fontid;
     char *string=NULL;
 
     PARSE_CHECK(command_parseinteger(p, &fontid));
     PARSE_CHECK(command_parsestring(p, &string));
 
-    int matindx=SCENE_EMPTY;
-    int tid=scene_addtext(ctx->scene, fontid, string);
-
+    mv_cmd_text *cmd = command_new(MVCMD_TEXT, sizeof(mv_cmd_text));
+    if (!cmd) {
+        free(string);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->fontid=fontid;
+    cmd->string=string;
+    cmd->has_matrix=ctx->modelchanged;
     if (ctx->modelchanged) {
-        matindx=scene_adddata(ctx->scene, ctx->model, 16);
+        memcpy(cmd->matrix, ctx->model, sizeof(float)*16);
         ctx->modelchanged=false;
     }
 
-    scene_adddraw(ctx->scene, TEXT, tid, matindx);
-    return true;
+    return command_enqueue_owned(p, &cmd->cmd);
 }
 
 /* **********************************************************************
@@ -531,10 +893,10 @@ void command_initializeparser(parser *p, lexer *l, error *err, void *out) {
     parse_setskipnewline(p, false, TOKEN_NONE);
 }
 
-/** @brief Parses a command sequence */
+/** @brief Parses a command sequence into the shared queue (does not apply). */
 bool command_parse(char *in) {
-    commandcontext ctx;
-    commandcontext_init(&ctx);
+    command_parsectx ctx;
+    command_parsectx_init(&ctx);
 
     error err;
     error_init(&err);
@@ -553,11 +915,15 @@ bool command_parse(char *in) {
     if (!success || ERROR_FAILED(err)) {
         fprintf(stderr, "morphoview: Error [%s] at line %i: %s\n",
                 err.id, err.line, err.msg);
+        command_queue_clear();
         return false;
     }
 
-    if (ctx.scene && ctx.display) {
-        render_preparescene(&ctx.display->render, ctx.scene);
+    mv_command *prep = command_new(MVCMD_PREPARE, sizeof(mv_command));
+    if (!prep || !command_enqueue(prep)) {
+        command_free(prep);
+        command_queue_clear();
+        return false;
     }
 
     return true;
@@ -643,6 +1009,8 @@ loadinput_cleanup:
  * ********************************************************************** */
 
 void command_initialize(void) {
+    command_queue_init();
+
     morpho_defineerror(COMMAND_UNRCGNZDCMND, ERROR_PARSE, COMMAND_UNRCGNZDCMND_MSG);
     morpho_defineerror(COMMAND_INVLDNMBR, ERROR_LEX, COMMAND_INVLDNMBR_MSG);
     morpho_defineerror(COMMAND_NOSCENE, ERROR_PARSE, COMMAND_NOSCENE_MSG);
@@ -653,4 +1021,5 @@ void command_initialize(void) {
 }
 
 void command_finalize(void) {
+    command_queue_clear();
 }

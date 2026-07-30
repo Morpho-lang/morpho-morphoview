@@ -36,7 +36,7 @@ int main(int argc, const char * argv[]) {
         }
     }
 
-    // Parse a command file if provided
+    // Parse a command file if provided (enqueue only; apply on drain)
     if (file) {
         char *buffer = NULL;
         printf("Loading %s\n", file);
@@ -48,7 +48,10 @@ int main(int argc, const char * argv[]) {
         if (buffer) MORPHO_FREE(buffer);
     }
 
-    if (parsed) display_loop();
+    if (parsed) {
+        command_drain();
+        display_loop();
+    }
 
     text_finalize();
     display_finalize();
