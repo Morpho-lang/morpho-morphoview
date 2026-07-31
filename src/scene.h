@@ -160,6 +160,10 @@ void scene_clearlight(scene *s);
 gobject *scene_addobject(scene *s, int id);
 int scene_adddata(scene *s, float *data, int count);
 int scene_addindex(scene *s, int *data, int count);
+/** Take ownership of *datap (malloc/realloc); nulls *datap. Adopts without
+ *  copy when the scene pool is empty; otherwise appends then frees. */
+int scene_adddata_take(scene *s, float **datap, int count);
+int scene_addindex_take(scene *s, int **datap, int count);
 int scene_addelement(gobject *obj, gelement *el);
 bool scene_addfont(scene *s, int id, char *file, float size, int *fontindx);
 textfont *scene_getfontfromid(scene *s, int fontid);

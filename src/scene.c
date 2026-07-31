@@ -292,6 +292,67 @@ int scene_addindex(scene *s, int *data, int count) {
     return ret;
 }
 
+/** Adopt *datap into the float pool, or append+free. Always nulls *datap. */
+int scene_adddata_take(scene *s, float **datap, int count) {
+    if (!datap || !*datap || count<=0) {
+        if (datap && *datap) {
+            free(*datap);
+            *datap=NULL;
+        }
+        return s ? (int) s->data.count : 0;
+    }
+
+    int ret = (int) s->data.count;
+    if (ret==0) {
+        /* Pool empty: adopt the buffer (compatible with morpho realloc/free). */
+        if (s->data.data) morpho_allocate(s->data.data, 0, 0);
+        s->data.data = *datap;
+        s->data.count = (unsigned int) count;
+        s->data.capacity = (unsigned int) count;
+        *datap = NULL;
+        return 0;
+    }
+
+    if (!varray_floatadd(&s->data, *datap, count)) {
+        free(*datap);
+        *datap = NULL;
+        return -1;
+    }
+    free(*datap);
+    *datap = NULL;
+    return ret;
+}
+
+/** Adopt *datap into the index pool, or append+free. Always nulls *datap. */
+int scene_addindex_take(scene *s, int **datap, int count) {
+    if (!datap || !*datap || count<=0) {
+        if (datap && *datap) {
+            free(*datap);
+            *datap=NULL;
+        }
+        return s ? (int) s->indx.count : 0;
+    }
+
+    int ret = (int) s->indx.count;
+    if (ret==0) {
+        if (s->indx.data) morpho_allocate(s->indx.data, 0, 0);
+        s->indx.data = *datap;
+        s->indx.count = (unsigned int) count;
+        s->indx.capacity = (unsigned int) count;
+        *datap = NULL;
+        return 0;
+    }
+
+    if (!varray_intadd(&s->indx, *datap, count)) {
+        free(*datap);
+        *datap = NULL;
+        return -1;
+    }
+    free(*datap);
+    *datap = NULL;
+    return ret;
+}
+
 /** Adds element data to an object */
 int scene_addelement(gobject *obj, gelement *el) {
     varray_gelementadd(&obj->elements, el, 1);

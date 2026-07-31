@@ -267,7 +267,8 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             }
 
             if (c->length>0 && c->data) {
-                int ret=scene_adddata(ctx->scene, c->data, c->length);
+                int ret=scene_adddata_take(ctx->scene, &c->data, c->length);
+                if (ret<0) return false;
                 if (ctx->cobject->vertexdata.indx==SCENE_EMPTY) {
                     ctx->cobject->vertexdata.indx=ret;
                     ctx->cobject->vertexdata.length=0;
@@ -289,7 +290,8 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             };
 
             if (c->length>0 && c->indices) {
-                int ret=scene_addindex(ctx->scene, c->indices, c->length);
+                int ret=scene_addindex_take(ctx->scene, &c->indices, c->length);
+                if (ret<0) return false;
                 el.indx=ret;
                 el.length=c->length;
             }
@@ -305,7 +307,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
             if (c->length>0 && c->rgb) {
                 int ncomp = (c->components==4) ? 4 : 3;
-                int indx=scene_adddata(ctx->scene, c->rgb, c->length*ncomp);
+                int nfloats = c->length*ncomp;
+                int indx=scene_adddata_take(ctx->scene, &c->rgb, nfloats);
+                if (indx<0) return false;
                 scene_addcolor(ctx->scene, c->id, c->length, ncomp, indx);
             }
             command_touchscene(ctx);

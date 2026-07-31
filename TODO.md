@@ -138,7 +138,7 @@ Prioritize work that pays off **without** Morpho core / `graphics.morpho` change
 
 - [x] Changed-only prepare — `display_prepareall` uploads only scenes marked changed by the batch (skips untouched displays; light/title-only chunks need no rebuild)
 - [x] Parse alloc — count numbers ahead, one `malloc`, parse into the command blob (no grow-by-1 varray + second copy for `v`/`f`/`c`)
-- [ ] Fewer CPU copies on the ASCII path — parse → command blob → `scene_adddata` → GPU; drop an intermediate where safe
+- [x] Fewer CPU copies on the ASCII path — `scene_adddata_take` / `scene_addindex_take` adopt parse buffers into the scene pool when empty (no memcpy); append+free otherwise
 - [ ] Transparent centroid cache — recompute object AABB centroid only when geometry changes, not every frame
 - [ ] Draw-list hygiene — merge adjacent draws that share VAO/material when packing the renderlist (matters at larger object counts)
 
