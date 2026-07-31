@@ -1,0 +1,21 @@
+# Proposed follow-up chunk (Phase C): clear displaylist, rebuild draws.
+# Requires viewer command `D` — not implemented yet. See docs/definedraw.md.
+#
+# After sticky context + D land, Morpho would send this via View.redraw(...):
+D
+M shaded
+C 0
+i
+s 3
+d 1
+C 1
+i
+s 0.8
+t -0.5 0.02 0.6
+d 3
+C 0
+i
+s 0.55
+r 0.4 0 1 0
+t -0.5 1.2 0.6
+d 2

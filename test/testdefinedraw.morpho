@@ -1,0 +1,21 @@
+// Smoke: open the define/draw command fixture via View.
+// Expect: prints "ok" then exits.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+//
+//   cd test && morpho6 testdefinedraw.morpho
+//
+// See docs/definedraw.md. A redraw half waits on Phase C (`D`).
+
+import morphoview
+
+var f = File("command/definedraw-once", "read")
+var commands = f.readall()
+f.close()
+
+var v = View()
+if (!v.open(commands)) {
+  print "open failed"
+} else {
+  v.wait(sessionTimeOut=1500)
+  print "ok"
+}

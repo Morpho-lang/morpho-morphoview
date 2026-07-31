@@ -8,9 +8,9 @@ Work in this order. Later tracks depend on decisions from earlier ones.
 
 | # | Track | Why now |
 |---|--------|---------|
-| **1** | **Graphics prototype** (package `Show` / local Graphics model → upstream) | Unlocks stable ids, define vs display, instancing; spells out which viewer animation ops Morpho actually needs |
+| **1** | **Graphics prototype** (package `Show` / local Graphics model → upstream) | Unlocks stable ids, define vs draw, instancing; spells out which viewer animation ops Morpho actually needs |
 | **2** | **Animation-friendly viewer + View API** | Sticky context, display/move, then `U O` / `U V` / `X O` — guided by the Graphics model, not guessed ahead of it |
-| **3** | **Binary / byte-buffer transport** | Viewer can accept blobs sooner; real gain needs Morpho-side serialize + framing. Biggest on fat `v` / `U V` paths; display-move often avoids blobs entirely |
+| **3** | **Binary / byte-buffer transport** | Viewer can accept blobs sooner; real gain needs Morpho-side serialize + framing. Biggest on fat `v` / `U V` paths; redraw often avoids blobs entirely |
 
 Tried and deferred: making `View.update` async / drop-under-pressure. Did not help [`examples/amigaball.morpho`](examples/amigaball.morpho) — bottleneck is full `U S` reserialize, not waiting on `ok`.
 
@@ -21,7 +21,7 @@ Tried and deferred: making `View.update` async / drop-under-pressure. Did not he
 | Use case | Supported path | Expectation |
 |----------|----------------|-------------|
 | Occasional refresh | `View.open(Graphics)` / `update(Graphics)` → `U S` + full reserialize | Intentional. Fine for “recompute viz every N steps / on demand.” |
-| Efficient animation | After Graphics + animation tracks: stable ids, static once + dynamic updates, display-move / `U O` / `U V` | Do **not** expect `update(Graphics)` to be cheap for large static+dynamic scenes. |
+| Efficient animation | After Graphics + animation tracks: stable ids, static once + dynamic updates, redraw / `U O` / `U V` | Do **not** expect `update(Graphics)` to be cheap for large static+dynamic scenes. |
 
 Do **not** make `update(Graphics)` automatically incremental or diff the previous displaylist in an ad-hoc way. Keep `U S` as the high-level snapshot path; efficiency comes from a deliberate Graphics model + targeted viewer ops.
 
@@ -30,7 +30,7 @@ Do **not** make `update(Graphics)` automatically incremental or diff the previou
 Local prototype in this package ([`xgraphics.morpho`](share/modules/xgraphics.morpho) `Show`); identify what to push to upstream `graphics.morpho`. Goals:
 
 - Stable object ids (not ephemeral `uid()` per write)
-- Distinguish **define mesh** (`o` / `v` / `f`) vs **place / display** (`d` + transforms)
+- Distinguish **define** (`o` / `v` / `f`) vs **draw** (`d` + transforms)
 - Dedup / instance identical primitives (generalize opaque-sphere instancing in `Show`)
 - Clarify multi-Graphics composition (static once + dynamic subset) without changing the meaning of full `update(Graphics)`
 - Produce a concrete feature list for track 2 (which View / command ops Morpho will call)
@@ -49,9 +49,9 @@ The command language already separates object definition from display. Order onc
 
 ### 3. Binary transport (later)
 
-Viewer IR already accepts float/index blobs; Morpho needs a binary serialize path and ZMQ framing. Prioritize after animation ops are sketched — binary speeds bulk `v` traffic; it does not replace define-once / move-display.
+Viewer IR already accepts float/index blobs; Morpho needs a binary serialize path and ZMQ framing. Prioritize after animation ops are sketched — binary speeds bulk `v` traffic; it does not replace define-once / redraw.
 
-Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](examples/amigaball.morpho). End-to-end load test of serialize → ZMQ → parse → replace → GL. Yardstick for track 2: rewrite to open floor once, display-move / `U V` for ball and shadow.
+Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](examples/amigaball.morpho). End-to-end load test of serialize → ZMQ → parse → replace → GL. Yardstick for track 2: rewrite to open floor once, redraw / `U V` for ball and shadow.
 
 ## View session API (Morpho)
 
@@ -77,9 +77,11 @@ Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](ex
 - [x] `write(g, out)` — any `out.write(line)` delegate (File, `View`, …)
 - [x] `replace` / `sceneId` — preamble emits `U S` vs `S` for live updates
 - [x] Merged into `xgraphics` as `Show` (Phase 1); `View` uses it
-- [ ] Graphics prototype: stable ids; define mesh vs place/display; dedup identical primitives → instance `d`s
+- [ ] Graphics prototype: stable ids; define vs draw; dedup identical primitives → instance `d`s
 - [x] PointCloud / LineSet (Phase 2)
 - [ ] Push settled pieces to morpho `graphics.morpho`
+
+Design sketch: [`docs/definedraw.md`](docs/definedraw.md) — Graphics as live model + View as listener; viewer define/draw protocol; proposed `D`. Implementation plan: [`docs/plan-graphics-view-listener.md`](docs/plan-graphics-view-listener.md). Fixtures: [`test/command/definedraw-once`](test/command/definedraw-once), [`test/command/definedraw-redraw`](test/command/definedraw-redraw), [`test/testdefinedraw.morpho`](test/testdefinedraw.morpho).
 
 ## Framing / camera
 
@@ -179,13 +181,14 @@ Small viewer-only polish can land anytime; the strategic sequence is still Graph
 
 **Strategic projects** (ordered):
 
-- [ ] **Track 1** — Graphics prototype (stable ids; define vs display; instancing)
+- [ ] **Track 1** — Graphics prototype (stable ids; define vs draw; instancing)
 - [ ] **Track 2** — Sticky apply context + display/move + `U O` / `U V` / `X O` + View helpers
 - [ ] **Track 3** — Binary / byte-buffer vertex transport (viewer IR already accepts blobs; Morpho needs serialize + ZMQ framing)
 
 ## Demos / tests
 
 - [x] High-level `View` smoke: [`test/testview.morpho`](test/testview.morpho) (`open` + `wait`)
+- [x] Define/draw fixture via `View`: [`test/testdefinedraw.morpho`](test/testdefinedraw.morpho) (`command/definedraw-once`)
 - [x] Animation demo: [`test/testviewanim.morpho`](test/testviewanim.morpho) (`U S` + `update` / `poll`)
 - [x] Graphics → View: [`test/testviewgraphics.morpho`](test/testviewgraphics.morpho) (`open`/`update` + `Show`)
 - [x] Quit via `Q`: [`test/testquit.morpho`](test/testquit.morpho) (`close` → `window.closed`)
@@ -207,6 +210,6 @@ Small viewer-only polish can land anytime; the strategic sequence is still Graph
 
 ## Notes
 
-- Each `command_process` batch currently starts with an empty apply context, so every chunk that draws must establish a scene (`S` or `U S`) before `o`/`v`/…. Sticky context (track 2) is required before display-move / `U O` / `U V` chunks can omit a leading `S` / `U S`.
+- Each `command_process` batch currently starts with an empty apply context, so every chunk that draws must establish a scene (`S` or `U S`) before `o`/`v`/…. Sticky context (track 2) is required before redraw / `U O` / `U V` chunks can omit a leading `S` / `U S`.
 - Package `Show` prototypes the upstream split: fire-and-forget (`Show(g)` / `-t`) vs serialize-to-delegate (`Show().write(g, out)`). `View` is the live duplex path and a `write` sink. Track 1 extends this prototype toward a Graphics model morphoview can grow into.
 - ASCII float emission uses 3 significant figures (`Show.fmt` / `%0.3g`) to keep the string path smaller until binary vertex transport (track 3) exists.
