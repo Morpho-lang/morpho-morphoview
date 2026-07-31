@@ -161,3 +161,11 @@ An I/O thread owns the socket. Each received string is an ASCII command chunk (`
 Morpho helper: `import morphoview` then `View()` / `open` / `update` / `poll` / `wait` / `close` in [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho). `View.close()` sends `Q` and waits for `window.closed` (falls back to `pkill` only if the peer hangs).
 
 `open` / `update` accept either an ASCII string or a `Graphics` object. Graphics is serialized by the package’s prototype `Show` (same visitor as graphics.morpho) into this command language; `View.write` is the File-compatible sink, so the serializer never knows about ZMQ. `Show(g)` remains fire-and-forget (temp file + `-t`). Live scene replace uses `U S <id>` (also what `update(Graphics)` emits).
+
+### Occasional update vs efficient animation
+
+Morpho `Graphics` is a displaylist container, not a scene graph. Serializer object ids are ephemeral per write.
+
+- **Occasional refresh** — `View.open(Graphics)` / `update(Graphics)` → full `U S` reserialize. This is the supported high-level path for “new snapshot” / update-on-demand. Do not expect it to be cheap when most of the scene is static.
+- **Efficient animation / composition** — not solved by making `update(Graphics)` incremental alone. The command language already splits object definition (`o`/`v`/`f`) from display (`d` + transforms). Likely pieces: stable object ids (possibly reflected in `Graphics`), a View API to move/re-display defined objects, sticky apply context, and `U O` / `U V` / `X O` (see [`TODO.md`](../TODO.md)). Identical primitives should instance (one `o`, many `d`) rather than re-send geometry — already sketched for opaque spheres in package `Show`.
+- **Stress demo** — `examples/amigaball.morpho` exercises full replace under animation load on purpose.

@@ -2,6 +2,32 @@
 
 Near-term and later work. Command-language details also live in [`docs/commandapi.md`](docs/commandapi.md); this file is the checklist.
 
+## Occasional update vs efficient animation
+
+`Graphics` is a displaylist **container**, not a scene graph. Primitives have no stable viewer ids; `Show`/`XShow` invent ephemeral `o` ids via `uid()` each write. That matches fire-and-forget `Show(g)` and **occasional** live refresh — not frame-rate animation (Graphics was never designed for that).
+
+| Use case | Supported path | Expectation |
+|----------|----------------|-------------|
+| Occasional refresh | `View.open(Graphics)` / `update(Graphics)` → `U S` + full reserialize | Intentional. Fine for “recompute viz every N steps / on demand.” |
+| Efficient animation | Later: stable object ids, multi-Graphics (static once + dynamic chunks), viewer `U O` / `U V` / sticky apply context | Do **not** expect `update(Graphics)` to be cheap for large static+dynamic scenes. |
+
+Do **not** make `update(Graphics)` automatically incremental or diff the previous displaylist in an ad-hoc way. A **deliberate Graphics review** is likely soon (see below); until then keep `U S` as the high-level snapshot path.
+
+**Animation / composition infra** (viewer first, then Morpho helpers):
+
+1. Persistent apply context across `command_process` batches
+2. `U O <id>` (redefine one object) + `X O <id>`
+3. `U V <id>` (same-length vertex replace + `glBufferSubData` where possible)
+4. Morpho helpers for **id-bearing** objects / a dynamic Graphics subset — without changing the meaning of full `update(Graphics)`
+
+The command language already separates **object definition** (`o` / `v` / `f` / …) from **display** (`d`, plus `i` / `s` / `t` / `m`). A natural View API is to *move* or re-issue display/transform commands for an already-defined object (without resending vertex blobs). That may want a mirror in `Graphics` itself (stable ids on items; distinguish “define mesh” vs “place instance”).
+
+**Identical objects (regular viz, not just animation):** scripts often `display` many copies of the same geometry. Today each typically expands to its own `o`/`v`/`f` payload. Instancing (one definition, many `d` + transforms) already exists for uncolored opaque spheres in `XShow`; a Graphics review should generalize that pattern so identical meshes are not re-sent as full geometry.
+
+**Near-term design work:** detailed look at upstream `graphics.morpho` + package `XShow` — ids, define vs display, dedup/instance of identical primitives — coordinated with View APIs that emit display/move updates against the existing command language.
+
+Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](examples/amigaball.morpho). Good end-to-end load test of serialize → ZMQ → parse → replace → GL. Optional later rewrite: open floor once, `U V` / display-move for ball and shadow — after those viewer ops exist. Not a reason to force a half-baked Graphics redesign, but a useful yardstick once the model is clearer.
+
 ## View session API (Morpho)
 
 [`share/modules/morphoview.morpho`](share/modules/morphoview.morpho) — duplex session (Morpho has no async runtime; scripts drive `poll` / `System.sleep`):
@@ -10,12 +36,13 @@ Near-term and later work. Command-language details also live in [`docs/commandap
 - [x] `open(commands)` — bind, spawn, send, wait for `ok`
 - [x] `open(Graphics)` — serialize via prototype `Show`, then open
 - [x] `update(commands)` — send another chunk, wait for `ok`
-- [x] `update(Graphics)` — serialize with `U S` replace, then update
+- [x] `update(Graphics)` — serialize with `U S` replace, then update (occasional refresh; see above)
 - [x] `write(line)` — File-compatible sink for `Show.write(g, out)`
 - [x] `poll(timeoutMs)` — non-blocking / short wait; return event or `nil`
 - [x] `wait(sessionTimeOut=0)` — convenience loop until closed / timeout
 - [x] `close()` — idempotent cleanup
 - [x] Private helpers prefixed with `_`
+- [ ] Display/move API — re-issue `d` (+ transforms) for an already-defined object without resending `v`/`f` (pairs with Graphics define-vs-display review)
 
 ### Show serializer prototype (upstream candidate)
 
@@ -25,6 +52,7 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 - [x] `write(g, out)` — any `out.write(line)` delegate (File, `View`, …)
 - [x] `replace` / `sceneId` — preamble emits `U S` vs `S` for live updates
 - [ ] Push to morpho `graphics.morpho` once API feels right
+- [ ] Graphics review (soon): stable ids; define mesh vs place/display; dedup identical primitives → instance `d`s
 
 ## Framing / camera
 
@@ -37,7 +65,8 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 - [x] Phase 2c: consolidate geometry shaders (one program + `uFlat`, cached uniforms, CPU normal matrix)
 - [x] Phase 2c: transparent depth sort (object centroid, far→near)
 - [x] Graphics `transmit`/`filter` → View uniform alpha (POVRay-style; Color API later)
-- [ ] Object update/delete (`U O` / `X O`) + persistent apply context
+- [ ] Object update/delete (`U O` / `X O`) + persistent apply context — **animation track** (order above)
+- [ ] `U V` vertex replace — **animation track**
 - [ ] Binary / byte-buffer vertex transport
 - [ ] Pick / view / click events
 
@@ -48,10 +77,10 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 | Command | Status | Intent |
 |---------|--------|--------|
 | `U S <id>` | Done | Clear scene `id` in place (keep window); select as current; following `o`/`v`/`l`/`d` refill |
-| `U O <id>` | Later | Clear/redefine one object in the current scene |
-| `U V <objid>` | Later | Replace vertex blob only (morph targets / pointwise edits) |
+| `U O <id>` | Later | Clear/redefine one object in the current scene (animation track) |
+| `U V <objid>` | Later | Replace vertex blob only (morph targets / pointwise edits; animation track) |
 
-`S` stays find-or-create/select. Replace is always explicit via `U`, so re-selecting a scene cannot wipe it by accident.
+`S` stays find-or-create/select. Replace is always explicit via `U`, so re-selecting a scene cannot wipe it by accident. Full-scene `U S` remains the supported high-level path for occasional `update(Graphics)` snapshots.
 
 ### Bounds
 
@@ -123,8 +152,10 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 - [x] Transparent spheres: [`test/command/transparentspheres`](test/command/transparentspheres) (overlapping Phong spheres + depth sort)
 - [x] Graphics `transmit`/`filter` → RGBA: [`test/testshowtransmit.morpho`](test/testshowtransmit.morpho)
 - [x] Translucent Graphics spheres: [`test/testviewtransmit.morpho`](test/testviewtransmit.morpho)
+- [x] Full-replace stress (not efficient animation): [`examples/amigaball.morpho`](examples/amigaball.morpho)
 
 ## Notes
 
-- Each `command_process` batch currently starts with an empty apply context, so every chunk that draws must establish a scene (`S` or `U S`) before `o`/`v`/….
+- Each `command_process` batch currently starts with an empty apply context, so every chunk that draws must establish a scene (`S` or `U S`) before `o`/`v`/…. Sticky context is required before `U O` / `U V` chunks can omit a leading `S` / `U S`.
 - Package `Show` prototypes the upstream split: fire-and-forget (`Show(g)` / `-t`) vs serialize-to-delegate (`Show().write(g, out)`). `View` is the live duplex path and a `write` sink.
+- ASCII float emission uses 3 significant figures (`XShow.fmt` / `%0.3g`) to keep the string path smaller until binary vertex transport exists.
