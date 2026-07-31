@@ -105,6 +105,11 @@ typedef enum {
 #define SCENE_MATERIAL_KS_DEFAULT  0.0f
 #define SCENE_MATERIAL_SHININESS_DEFAULT 32.0f
 
+/** Default clear color (dark bluish gray) when no `G` command is given. */
+#define SCENE_BACKGROUND_R_DEFAULT  0.160784f
+#define SCENE_BACKGROUND_G_DEFAULT  0.164706f
+#define SCENE_BACKGROUND_B_DEFAULT  0.188235f
+
 typedef struct {
     gdrawtype type;
     int id;       /**< Object/color/text id, or SCENE_SHADE_* for SHADE */
@@ -131,6 +136,8 @@ typedef struct sscene {
     bool light_explicit; /** true if light_pos was set by a command */
     float light_pos[3];
     float light_color[3];
+
+    float background[3]; /** Clear color RGB (glClearColor) */
     
     varray_float data;
     varray_int indx;
@@ -156,6 +163,8 @@ bool scene_computebbox(scene *s);
 void scene_setlight(scene *s, float x, float y, float z, float r, float g, float b);
 void scene_setlightpos(scene *s, float x, float y, float z);
 void scene_clearlight(scene *s);
+
+void scene_setbackground(scene *s, float r, float g, float b);
 
 gobject *scene_addobject(scene *s, int id);
 int scene_adddata(scene *s, float *data, int count);

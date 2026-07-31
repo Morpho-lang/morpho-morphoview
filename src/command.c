@@ -248,6 +248,14 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             return true;
         }
 
+        case MVCMD_BACKGROUND: {
+            /* Background is sampled each frame from the scene; no GL rebuild. */
+            mv_cmd_background *c = MVCMD_AS_BACKGROUND(cmd);
+            if (!ctx->scene) return false;
+            scene_setbackground(ctx->scene, c->rgb[0], c->rgb[1], c->rgb[2]);
+            return true;
+        }
+
         case MVCMD_OBJECT:
             if (!ctx->scene) return false;
             ctx->cobject=scene_addobject(ctx->scene, MVCMD_AS_OBJECT(cmd)->id);
@@ -440,6 +448,7 @@ enum {
     MVTOKEN_WINDOW,
     MVTOKEN_BOUNDS,
     MVTOKEN_LIGHT,
+    MVTOKEN_BACKGROUND,
     MVTOKEN_AUTO,
     MVTOKEN_FONT,
     MVTOKEN_TEXT,
@@ -479,6 +488,7 @@ tokendefn mvtokens[] = {
     { "W",          MVTOKEN_WINDOW                , NULL },
     { "B",          MVTOKEN_BOUNDS                , NULL },
     { "L",          MVTOKEN_LIGHT                 , NULL },
+    { "G",          MVTOKEN_BACKGROUND            , NULL },
     { "a",          MVTOKEN_AUTO                  , NULL },
     { "M",          MVTOKEN_MATERIAL              , NULL },
     { "shaded",     MVTOKEN_SHADED                , NULL },
@@ -1214,6 +1224,29 @@ bool command_parselight(parser *p, void *out) {
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
+/** `G <r> <g> <b>` — scene clear / background color. */
+bool command_parsebackground(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    float rgb[3];
+
+    for (int i=0; i<3; i++) {
+        PARSE_CHECK(command_parsefloat(p, &rgb[i]));
+    }
+
+    if (!ctx->has_scene) {
+        parse_error(p, true, COMMAND_NOSCENE);
+        return false;
+    }
+
+    mv_cmd_background *cmd = command_new(MVCMD_BACKGROUND, sizeof(mv_cmd_background));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    for (int i=0; i<3; i++) cmd->rgb[i]=rgb[i];
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
 bool command_parsefont(parser *p, void *out) {
     (void) out;
     int id;
@@ -1304,6 +1337,7 @@ parserule mv_parserules[] = {
     PARSERULE_PREFIX(MVTOKEN_WINDOW, command_parsewindow),
     PARSERULE_PREFIX(MVTOKEN_BOUNDS, command_parsebounds),
     PARSERULE_PREFIX(MVTOKEN_LIGHT, command_parselight),
+    PARSERULE_PREFIX(MVTOKEN_BACKGROUND, command_parsebackground),
     PARSERULE_PREFIX(MVTOKEN_FONT, command_parsefont),
     PARSERULE_PREFIX(MVTOKEN_TEXT, command_parsetext),
     PARSERULE_PREFIX(MVTOKEN_MATERIAL, command_parsematerial),

@@ -52,6 +52,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_WINDOW_TITLE` | `W "<title>"` | Owned title string |
 | `MVCMD_BOUNDS` | `B <xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; requests camera refit |
 | `MVCMD_LIGHT` | `L <x y z [r g b]>` / `L a` | Explicit model-space light, or clear for AABB auto |
+| `MVCMD_BACKGROUND` | `G <r g b>` | Scene clear / background color |
 | `MVCMD_OBJECT` | `o <id>` | Object id |
 | `MVCMD_VERTICES` | `v ["format"] <floats...>` | Optional format; float blob |
 | `MVCMD_ELEMENT` | `p` / `l` / `f` `<indices...>` | Points, lines, or facets |
@@ -63,7 +64,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_TEXT` | `T <fontid> "<string>"` | Font id, string; optional matrix |
 | `MVCMD_PREPARE` | *(none — appended by parse)* | Upload **changed** scenes to GL (scenes touched by this batch) |
 
-`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `X S` marks that scene’s window for close (loop tears it down). `Q` marks every window for close; if none are open and the listener is active, emits `window.closed` and stops. `MVCMD_PREPARE` calls `display_prepareall()`, which uploads only scenes marked changed (geometry, materials, draws, bounds, etc. — not title-only or light-only changes). It auto-computes the scene AABB when no explicit `B` was given and fits the camera on first prepare (or after `B`) unless the user has already moved the view. Untouched open displays are left alone (avoids redundant GL rebuilds when several windows are open).
+`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `X S` marks that scene’s window for close (loop tears it down). `Q` marks every window for close; if none are open and the listener is active, emits `window.closed` and stops. `MVCMD_PREPARE` calls `display_prepareall()`, which uploads only scenes marked changed (geometry, materials, draws, bounds, etc. — not title-only, light-only, or background-only changes). It auto-computes the scene AABB when no explicit `B` was given and fits the camera on first prepare (or after `B`) unless the user has already moved the view. Untouched open displays are left alone (avoids redundant GL rebuilds when several windows are open).
 
 ## ASCII language
 
@@ -80,6 +81,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `W` | `"<title>"` | Set current window title |
 | `B` | `<xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; next prepare refits unless the user moved the camera |
 | `L` | `<x> <y> <z> [<r> <g> <b>]` \| `a` | Explicit model-space light (optional color), or `a` to resume AABB auto placement |
+| `G` | `<r> <g> <b>` | Scene clear / background color (default dark gray if omitted) |
 | `o` | `<id>` | Current object (requires a scene) |
 | `v` | `["format"] <floats...>` | Vertex data for current object |
 | `p` / `l` / `f` | `<indices...>` | Points / lines / facets |
@@ -108,6 +110,8 @@ I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V
 
 Lighting and eye position are in model space (stable under camera rotation). By default the light is placed outside the scene AABB. `L <x> <y> <z>` sets an explicit position (color unchanged; default white); optional `<r g b>` sets light color; `L a` clears the override and resumes AABB auto placement.
 
+`G <r> <g> <b>` sets the clear color. If omitted, the viewer uses a dark bluish gray. Package `Show` emits `G` from `Graphics.background` (default `Black`).
+
 ### Transforms (parse-only)
 
 These update a parse-local model matrix and are **not** enqueued. On the next `d` or `T`, if the matrix changed, it is baked into that command and the dirty flag is cleared (the matrix itself is kept until `i`).
@@ -125,6 +129,7 @@ These update a parse-local model matrix and are **not** enqueued. On the next `d
 ```
 S 0 3
 W "Example"
+G 0 0 0
 M shaded
 c 0 1 0 0
 C 0
@@ -139,7 +144,7 @@ i
 d 1
 ```
 
-See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, `test/command/largebbox` (auto-fit), `test/command/flatshade`, `test/command/uniformphong`, `test/command/materials` (flat | Lambert | Phong spheres), `test/command/opacity` (semi-transparent over opaque), `test/command/depthsort` (overlapping translucents, far→near), `test/command/transparentspheres` (overlapping Phong spheres), and `test/command/light` (two windows: AABB auto vs explicit `L`).
+See also `test/command/linespts`, `test/command/polyhedra`, `test/command/twoscenes`, `test/command/largebbox` (auto-fit), `test/command/flatshade`, `test/command/uniformphong`, `test/command/materials` (flat | Lambert | Phong spheres), `test/command/opacity` (semi-transparent over opaque), `test/command/depthsort` (overlapping translucents, far→near), `test/command/transparentspheres` (overlapping Phong spheres), `test/command/light` (two windows: AABB auto vs explicit `L`), and `test/command/background` (`G` clear color).
 
 ## ZeroMQ transport
 

@@ -1042,7 +1042,12 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
 
 void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s) {
     /* Clear the display */
-    glClearColor(0.160784f, 0.164706f, 0.188235f, 1.0f);
+    if (s) {
+        glClearColor(s->background[0], s->background[1], s->background[2], 1.0f);
+    } else {
+        glClearColor(SCENE_BACKGROUND_R_DEFAULT, SCENE_BACKGROUND_G_DEFAULT,
+                     SCENE_BACKGROUND_B_DEFAULT, 1.0f);
+    }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     /* Default vertex color/normal when format lacks those attributes */

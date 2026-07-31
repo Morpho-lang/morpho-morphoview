@@ -783,6 +783,8 @@ class Show {
       out.write("S ${self.sceneId} 3")
       out.write("W \"${graphic.title}\"")
     }
+    var bg = graphic.background.rgb(0)
+    out.write("G ${self.fmt(bg[0])} ${self.fmt(bg[1])} ${self.fmt(bg[2])}")
   }
 
   // 3 significant figures — enough for display; keeps ASCII small vs full doubles.

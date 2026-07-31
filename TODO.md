@@ -87,6 +87,7 @@ Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](ex
 - [x] Auto-fit on first `PREPARE` (and after `B`) unless the user moved the camera; Tab restores fitted home view
 - [x] Default light / viewPos placed outside scene AABB (unless an explicit light is set later)
 - [x] Explicit light command: `L <x y z [r g b]>` / `L a` (auto)
+- [x] Background color: `G <r g b>` (sampled each frame; `Show` emits `Graphics.background`)
 - [x] Material model: `M shaded|flat` + OpenGL/VTK Phong (\(k_a,k_d,k_s,n\)); uniform `C` for meshes
 - [x] RGBA / opacity (blend + opaque/transparent passes)
 - [x] Phase 2c: consolidate geometry shaders (one program + `uFlat`, cached uniforms, CPU normal matrix)
@@ -122,6 +123,12 @@ Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](ex
 |---------|--------|--------|
 | `L <x> <y> <z> [r g b]` | Done | Explicit model-space light (optional color); sets `light_explicit` |
 | `L a` | Done | Clear explicit light; resume AABB auto placement |
+
+### Background
+
+| Command | Status | Intent |
+|---------|--------|--------|
+| `G <r> <g> <b>` | Done | Scene clear color; sampled each frame (no GL rebuild). Default dark gray; `Show` emits from `Graphics.background` |
 
 ### Materials
 

@@ -55,6 +55,13 @@ static void scene_resetlight(scene *s) {
     s->light_color[0]=1.0f; s->light_color[1]=1.0f; s->light_color[2]=1.0f;
 }
 
+/** Reset clear color to the default dark gray (used by scene_new / scene_clear). */
+static void scene_resetbackground(scene *s) {
+    s->background[0]=SCENE_BACKGROUND_R_DEFAULT;
+    s->background[1]=SCENE_BACKGROUND_G_DEFAULT;
+    s->background[2]=SCENE_BACKGROUND_B_DEFAULT;
+}
+
 /** Create a new scene */
 scene *scene_new(int id, int dim) {
     scene *new = malloc(sizeof(scene));
@@ -64,6 +71,7 @@ scene *scene_new(int id, int dim) {
         new->dim=dim;
         scene_resetbbox(new);
         scene_resetlight(new);
+        scene_resetbackground(new);
         varray_gobjectinit(&new->objectlist);
         varray_gdrawinit(&new->displaylist);
         varray_gcolorinit(&new->colorlist);
@@ -121,6 +129,7 @@ void scene_clear(scene *s) {
 
     scene_resetbbox(s);
     scene_resetlight(s);
+    scene_resetbackground(s);
 }
 
 /** Set an explicit scene AABB and request a camera refit. */
@@ -153,6 +162,14 @@ void scene_setlightpos(scene *s, float x, float y, float z) {
 void scene_clearlight(scene *s) {
     if (!s) return;
     scene_resetlight(s);
+}
+
+/** Set the scene clear / background color. */
+void scene_setbackground(scene *s, float r, float g, float b) {
+    if (!s) return;
+    s->background[0]=r;
+    s->background[1]=g;
+    s->background[2]=b;
 }
 
 /** Vertex float stride from a format string (same rules as render_entrysizefromformat). */

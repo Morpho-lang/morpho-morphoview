@@ -65,6 +65,7 @@ typedef enum {
     MVCMD_WINDOW_TITLE,   /**< Set window title (`W`) */
     MVCMD_BOUNDS,         /**< Set scene AABB (`B`) */
     MVCMD_LIGHT,          /**< Explicit light or auto (`L`) */
+    MVCMD_BACKGROUND,     /**< Set clear / background color (`G`) */
     MVCMD_OBJECT,         /**< Select/create current object (`o`) */
     MVCMD_VERTICES,       /**< Append vertex data (`v`) */
     MVCMD_ELEMENT,        /**< Append points/lines/facets (`p`/`l`/`f`) */
@@ -137,6 +138,14 @@ typedef struct {
     float pos[3];
     float color[3];
 } mv_cmd_light;
+
+/** Set the scene clear / background color.
+ *  Language: `G <r> <g> <b>`
+ *  @param rgb  Clear color RGB */
+typedef struct {
+    mv_command cmd;
+    float rgb[3];
+} mv_cmd_background;
 
 /** Select/create the current geometry object in the active scene.
  *  Language: `o <id>`
@@ -249,6 +258,7 @@ typedef struct {
 #define MVCMD_AS_WINDOW(c)        ((mv_cmd_window *) (c))
 #define MVCMD_AS_BOUNDS(c)        ((mv_cmd_bounds *) (c))
 #define MVCMD_AS_LIGHT(c)         ((mv_cmd_light *) (c))
+#define MVCMD_AS_BACKGROUND(c)    ((mv_cmd_background *) (c))
 #define MVCMD_AS_OBJECT(c)        ((mv_cmd_object *) (c))
 #define MVCMD_AS_VERTICES(c)      ((mv_cmd_vertices *) (c))
 #define MVCMD_AS_ELEMENT(c)       ((mv_cmd_element *) (c))
