@@ -5,6 +5,7 @@
  * 1/2/26 Windows compatibility
  * 7/31/26 Show: serializer vs launch split (from morphoview XShow prototype)
  * 7/31/26 PointCloud / LineSet primitives (viewer p / l)
+ * 7/31/26 Graphics entries + display pose (unit Sphere + entry SRT)
  */
 
 import constants
@@ -63,6 +64,13 @@ fn _orthogonalize(m) {
     x/=nrm
     m.setcolumn(i, x)
   }
+}
+
+/** Coerce list or Matrix to a stored position Matrix (3-vector). nil → origin. */
+fn _asposition(p) {
+  if (isnil(p)) return Matrix([0, 0, 0])
+  if (ismatrix(p)) return p.clone()
+  return Matrix(p)
 }
 
 /* **************************************
@@ -659,23 +667,80 @@ class LineSet {
  * Graphics class
  **************************************** */
 
+/** One placed item in a Graphics: stable id + item + presentation SRT. */
+class GraphicsEntry {
+  init(id, item, position=nil, scale=nil, rotate=nil) {
+    self.id = id
+    self.item = item
+    self.position = _asposition(position)
+    self.scale = isnil(scale) ? 1 : scale
+    self.rotate = rotate
+  }
+}
+
 class Graphics {
   init(title = nil, background = nil) {
-    self.displaylist = [] // A collection of primitives to display
+    self.displaylist = [] // GraphicsEntry list
+    self._nextid = 1
     self.title = title
     if (!self.title) self.title="Morpho" // Title to show
     self.background = background
     if (!self.background) self.background = Black
   }
 
+  /** Allocate id and append a GraphicsEntry; returns the id. */
+  _append(item, position=nil, scale=nil, rotate=nil) {
+    var id = self._nextid
+    self._nextid += 1
+    self.displaylist.append(GraphicsEntry(id, item, position=position, scale=scale, rotate=rotate))
+    return id
+  }
+
+  /** Unit Sphere copy (pose lives on the entry). */
+  _unitsphere(item) {
+    return Sphere([0, 0, 0], 1,
+                  color=item.color,
+                  maxrefine=item.maxrefine,
+                  filter=item.filter,
+                  transmit=item.transmit)
+  }
+
+  /** Append a non-Sphere item (identity SRT). Returns Graphics-owned id.
+   *  Morpho: defaults are keyword-only, so pose uses the 2-arg overload below. */
   display(item) {
-    if (isobject(item)) self.displaylist.append(item)
+    if (!isobject(item)) return nil
+    return self._append(item)
+  }
+
+  /** Non-Sphere with pose: 2nd positional position (list/Matrix/nil) + scale=/rotate=. */
+  display(item, position, scale=nil, rotate=nil) {
+    if (!isobject(item)) return nil
+    return self._append(item, position=position, scale=scale, rotate=rotate)
+  }
+
+  /** Sphere, no pose args: center→position, r→scale; store unit mesh. */
+  display(Sphere item) {
+    return self._append(self._unitsphere(item),
+                        position=item.center,
+                        scale=item.r)
+  }
+
+  /** Sphere with pose: store unit mesh; SRT from args (omitted scale→1, rotate→nil). */
+  display(Sphere item, position, scale=nil, rotate=nil) {
+    return self._append(self._unitsphere(item),
+                        position=position,
+                        scale=scale,
+                        rotate=rotate)
   }
 
   add(right) { // Create a union of two graphics objects
     var g = Graphics()
+    g.title = self.title
+    g.background = self.background
+    g._nextid = self._nextid
     for (el in self.displaylist) g.displaylist.append(el)
     for (el in right.displaylist) g.displaylist.append(el)
+    // Id remap of right-hand entries is Phase 1 follow-on (step 4).
     return g
   }
 }
@@ -1158,6 +1223,23 @@ class Show {
   write(graphic, out) {
     self.preamble(graphic, out)
 
-    for (item in graphic.displaylist) self.visit(item, out)
+    // Temporary bridge until Show emits entry SRT directly: visit stored items,
+    // reconstructing Sphere center/r from the entry so unit storage still draws.
+    for (entry in graphic.displaylist) {
+      var item = entry.item
+      self.visitEntry(entry, item, out)
+    }
+  }
+
+  visitEntry(entry, item, out) {
+    self.visit(item, out)
+  }
+
+  visitEntry(entry, Sphere item, out) {
+    self.visit(Sphere(entry.position, entry.scale,
+                      color=item.color,
+                      maxrefine=item.maxrefine,
+                      filter=item.filter,
+                      transmit=item.transmit), out)
   }
 }

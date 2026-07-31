@@ -11,14 +11,14 @@ Design source of truth: [`definedraw.md`](definedraw.md).
 ### Entry shape (SRT)
 
 ```
-{ id, item, transform: { position, scale, rotate } }
+{ id, item, position, scale, rotate }
 ```
 
-- `position`: **Matrix** 3-vector, default origin — absolute placement of the object origin (set, not a relative delta). API accepts list or Matrix; coerce to Matrix on store.
+- `position`: **Matrix** 3-vector, default origin — absolute placement of the object origin (set, not a relative delta). API accepts list or Matrix; coerce to Matrix on store (`GraphicsEntry` does this).
 - `scale`: Float default `1`
 - `rotate`: `[angle, ax, ay, az]` or `nil`
 
-API and entry both use **`position`**. Keep SRT components (not a single 4×4) so `move` merge and `t`/`s`/`r` emit stay simple; a composite-matrix helper can come later. `Show` emits viewer command `t` from `transform.position` components.
+API and entry both use **`position`**. Keep SRT as fields on the entry (not a nested dict, not a single 4×4) so `move` merge and `t`/`s`/`r` emit stay simple; a composite-matrix helper can come later. `Show` emits viewer command `t` from `entry.position` components.
 
 `Show` always places from entry SRT.
 
@@ -27,10 +27,12 @@ API and entry both use **`position`**. Keep SRT components (not a single 4×4) s
 Both accept optional **2nd positional** `position` plus kwargs `scale=`, `rotate=`:
 
 ```
-display(item, position=nil, scale=nil, rotate=nil)
-move(id, position=nil, scale=nil, rotate=nil)
+display(item)                          // identity (Sphere: center→position, r→scale)
+display(item, position, scale=, rotate=)
+move(id, position, scale=, rotate=)    // Phase 3; same arity pattern
 ```
 
+Morpho treats `param=nil` defaults as keyword-only, so pose is a separate arity overload (not `position=nil` on the 1-arg form). `scale=` / `rotate=` remain kwargs on the posed form. `display(item, nil, scale=2)` works when position should stay default origin.
 - Pose args set on `display` → entry SRT from those args (omitted fields use defaults: position 0, scale 1, rotate nil); `Sphere` stored as **unit** mesh.
 - No pose args + `Sphere` → copy `center`→position, `r`→scale; store **unit** mesh.
 - No pose args + other primitives → identity SRT; geometry as authored.
@@ -38,7 +40,7 @@ move(id, position=nil, scale=nil, rotate=nil)
 
 ### `move` merge (Phase 3; lock now)
 
-- New `position` (2nd positional or kwarg) **always** sets `transform.position`.
+- New `position` (2nd positional or kwarg) **always** sets `entry.position`.
 - Omitted `scale` / `rotate` leave that entry component **unchanged**.
 
 ### Translucent `Sphere` (Phase 1)
@@ -85,7 +87,7 @@ g.end()
 
 **Steps:**
 
-1. `Graphics.display(item, position=, scale=, rotate=)` allocates id, stores entry `{ id, item, transform }`, returns id. No `id=` on mesh primitives. Coerce `position` to Matrix. Apply locked Sphere pose normalization.
+1. `Graphics.display(item, position=, scale=, rotate=)` allocates id, stores entry `{ id, item, position, scale, rotate }`, returns id. No `id=` on mesh primitives. `GraphicsEntry` coerces `position` to Matrix. Apply locked Sphere pose normalization.
 2. `Show` walks **entries**; emit define/draw from **entry SRT only**.
 3. Opaque spheres: fingerprint = refinement only + uniform `C`; translucent expand **unit** item + entry SRT (never re-bake center/r).
 4. `Graphics.add`: remap right-hand entry ids (unique within one Graphics).
