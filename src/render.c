@@ -225,6 +225,7 @@ bool render_init(renderer *r) {
     /* Enable OpenGL features */
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_MULTISAMPLE);
+    glPointSize(6.0f);
 
     varray_renderobjectinit(&r->objects);
     varray_renderfontinit(&r->fonts);
@@ -696,6 +697,12 @@ void render_prepareobject(renderer *r, scene *s, gdraw *drw, GLuint *carray) {
                 break;
             case LINES:
                 eins.instruction=RLINES;
+                eins.data.triangles.offset=(void *) (sizeof(GLuint)*offset);
+                eins.data.triangles.length=el->length;
+                offset+=el->length;
+                break;
+            case POINTS:
+                eins.instruction=RPOINTS;
                 eins.data.triangles.offset=(void *) (sizeof(GLuint)*offset);
                 eins.data.triangles.length=el->length;
                 offset+=el->length;

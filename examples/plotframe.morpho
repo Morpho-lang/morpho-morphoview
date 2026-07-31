@@ -1,0 +1,155 @@
+// Plot frame: wire box + axis labels/ticks + point cloud.
+// Shows LineSet / PointCloud / Text — a stand-in for mesh vertices in a domain.
+//
+//   morpho6 examples/plotframe.morpho
+//
+// Close the viewer window to exit.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+
+import morphoview
+import xgraphics
+import color
+
+/* ---- frame ---- */
+var lo = [-1.0, -1.0, -1.0]
+var hi = [ 1.0,  1.0,  1.0]
+
+/** Unit wireframe box as a LineSet (12 edges). */
+fn wirebox(lo, hi, color) {
+  var x0 = lo[0], x1 = hi[0]
+  var y0 = lo[1], y1 = hi[1]
+  var z0 = lo[2], z1 = hi[2]
+  // Corners: bottom square 0..3, top square 4..7
+  var pos = Matrix([
+    [x0, x1, x1, x0, x0, x1, x1, x0],
+    [y0, y0, y1, y1, y0, y0, y1, y1],
+    [z0, z0, z0, z0, z1, z1, z1, z1]
+  ])
+  var edges = [
+    [0, 1], [1, 2], [2, 3], [3, 0],
+    [4, 5], [5, 6], [6, 7], [7, 4],
+    [0, 4], [1, 5], [2, 6], [3, 7]
+  ]
+  return LineSet(pos, edges, color=color)
+}
+
+/** Evenly spaced tick values from a to b inclusive (n ≥ 2). */
+fn tickvalues(a, b, n) {
+  var out = []
+  if (n < 2) {
+    out.append(a)
+    return out
+  }
+  for (i in 0...n) out.append(a + (b - a) * Float(i) / Float(n - 1))
+  return out
+}
+
+/** Format a tick label without excess zeros. */
+fn ticklabel(t) {
+  var s = Float(t).format("%0.4g")
+  return s
+}
+
+/** RGB axes from the low corner, white names, numerical ticks with marks. */
+fn framelabels(lo, hi, size=18, ticksize=12, nticks=5) {
+  var g = Graphics()
+  var o = Matrix(lo)
+  var sx = hi[0] - lo[0]
+  var sy = hi[1] - lo[1]
+  var sz = hi[2] - lo[2]
+  var tip = 1.08 // axis name just past the far end
+  var ticklen = 0.06 * max(sx, max(sy, sz))
+  var labeloff = 1.8 * ticklen
+  var tickColor = Color(0.75, 0.75, 0.8)
+
+  // Axis spines
+  g.display(LineSet(Matrix([
+    [lo[0], lo[0]+sx], [lo[1], lo[1]], [lo[2], lo[2]]
+  ]), color=Red))
+  g.display(LineSet(Matrix([
+    [lo[0], lo[0]], [lo[1], lo[1]+sy], [lo[2], lo[2]]
+  ]), color=Green))
+  g.display(LineSet(Matrix([
+    [lo[0], lo[0]], [lo[1], lo[1]], [lo[2], lo[2]+sz]
+  ]), color=Blue))
+
+  // Axis names (white)
+  g.display(Text("x", o + Matrix([tip*sx, 0, 0]),
+                 dirn=[1, 0, 0], vertical=[0, 1, 0], size=size, color=White))
+  g.display(Text("y", o + Matrix([0, tip*sy, 0]),
+                 dirn=[1, 0, 0], vertical=[0, 1, 0], size=size, color=White))
+  g.display(Text("z", o + Matrix([0, 0, tip*sz]),
+                 dirn=[1, 0, 0], vertical=[0, 1, 0], size=size, color=White))
+
+  // Numerical ticks along each spine
+  var xt = tickvalues(lo[0], hi[0], nticks)
+  var yt = tickvalues(lo[1], hi[1], nticks)
+  var zt = tickvalues(lo[2], hi[2], nticks)
+
+  // x-axis ticks: marks in -y, labels further along -y
+  for (t in xt) {
+    var p0 = Matrix([t, lo[1], lo[2]])
+    var p1 = Matrix([t, lo[1] - ticklen, lo[2]])
+    g.display(LineSet(Matrix([[p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]]]),
+                      color=tickColor))
+    g.display(Text(ticklabel(t), Matrix([t, lo[1] - labeloff, lo[2]]),
+                   dirn=[1, 0, 0], vertical=[0, 1, 0], size=ticksize, color=White))
+  }
+
+  // y-axis ticks: marks in -x
+  for (t in yt) {
+    var p0 = Matrix([lo[0], t, lo[2]])
+    var p1 = Matrix([lo[0] - ticklen, t, lo[2]])
+    g.display(LineSet(Matrix([[p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]]]),
+                      color=tickColor))
+    g.display(Text(ticklabel(t), Matrix([lo[0] - labeloff, t, lo[2]]),
+                   dirn=[1, 0, 0], vertical=[0, 1, 0], size=ticksize, color=White))
+  }
+
+  // z-axis ticks: marks in -x
+  for (t in zt) {
+    var p0 = Matrix([lo[0], lo[1], t])
+    var p1 = Matrix([lo[0] - ticklen, lo[1], t])
+    g.display(LineSet(Matrix([[p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]]]),
+                      color=tickColor))
+    g.display(Text(ticklabel(t), Matrix([lo[0] - labeloff, lo[1], t]),
+                   dirn=[1, 0, 0], vertical=[0, 1, 0], size=ticksize, color=White))
+  }
+
+  return g
+}
+
+/** Point cloud colored by height (z), jittered inside the box. */
+fn heightcloud(n, lo, hi) {
+  var pos = Matrix(3, n)
+  var col = Matrix(3, n)
+  var dx = hi[0] - lo[0]
+  var dy = hi[1] - lo[1]
+  var dz = hi[2] - lo[2]
+
+  for (i in 0...n) {
+    var x = lo[0] + dx * random()
+    var y = lo[1] + dy * random()
+    var z = lo[2] + dz * random()
+    pos.setcolumn(i, Matrix([x, y, z]))
+    // Cool → warm with height
+    var t = (z - lo[2]) / dz
+    col.setcolumn(i, Matrix([0.2 + 0.8*t, 0.4 + 0.2*t, 1.0 - 0.7*t]))
+  }
+  return PointCloud(pos, color=col)
+}
+
+/* ---- scene ---- */
+var g = Graphics()
+g.title = "Plot frame"
+g.display(wirebox(lo, hi, Color(0.55, 0.55, 0.6)))
+g = g + framelabels(lo, hi)
+g.display(heightcloud(400, lo, hi))
+
+var v = View()
+if (!v.open(g)) {
+  print "open failed"
+} else {
+  v.wait()
+  v.close()
+}

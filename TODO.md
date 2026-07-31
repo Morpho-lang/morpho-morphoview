@@ -78,7 +78,7 @@ Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](ex
 - [x] `replace` / `sceneId` — preamble emits `U S` vs `S` for live updates
 - [x] Merged into `xgraphics` as `Show` (Phase 1); `View` uses it
 - [ ] Graphics prototype: stable ids; define mesh vs place/display; dedup identical primitives → instance `d`s
-- [ ] PointCloud / LineSet (Phase 2)
+- [x] PointCloud / LineSet (Phase 2)
 - [ ] Push settled pieces to morpho `graphics.morpho`
 
 ## Framing / camera

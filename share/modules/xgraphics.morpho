@@ -4,6 +4,7 @@
  * 1/7/25 Redirect error output to /dev/null to suppress errors on macOS
  * 1/2/26 Windows compatibility
  * 7/31/26 Show: serializer vs launch split (from morphoview XShow prototype)
+ * 7/31/26 PointCloud / LineSet primitives (viewer p / l)
  */
 
 import constants
@@ -566,6 +567,95 @@ class Font {
 }
 
 /* **************************************
+ * Point and line primitives (viewer `p` / `l`)
+ **************************************** */
+
+/** Normalize inputs to a dim×n vertex matrix (points as columns). */
+fn _asvertexmatrix(Matrix pts) { return pts }
+
+fn _asvertexmatrix(pts) { // list of points
+  return Matrix(pts).transpose()
+}
+
+/** Point cloud — positions as Matrix columns (or list of points).
+  Optional uniform or per-vertex `color`. Emits viewer points (`p`), not spheres. */
+class PointCloud {
+  init(position, color=nil, filter=nil, transmit=nil) {
+    self.position = _asvertexmatrix(position)
+    self.color = color
+    self.filter = filter
+    self.transmit = transmit
+  }
+}
+
+/** Line set — vertices plus segments.
+  @param position - Matrix columns (or list of points)
+  @param connectivity - Sparse/Matrix with two vertices per column, or list of [i,j] pairs.
+    Omit for a polyline through successive vertices (use `closed=true` to loop).
+  Color and flags are keyword args (Morpho optionals are not positional). */
+class LineSet {
+  // Polyline through successive vertices
+  init(position, color=nil, closed=false, filter=nil, transmit=nil) {
+    self.position = _asvertexmatrix(position)
+    self.connectivity = nil
+    self.color = color
+    self.closed = closed
+    self.filter = filter
+    self.transmit = transmit
+  }
+
+  // Explicit segments
+  init(position, connectivity, color=nil, closed=false, filter=nil, transmit=nil) {
+    self.position = _asvertexmatrix(position)
+    self.connectivity = connectivity
+    self.color = color
+    self.closed = closed
+    self.filter = filter
+    self.transmit = transmit
+  }
+
+  /** Flat index list for GL_LINES: i0 j0 i1 j1 ... */
+  segmentindices() {
+    var nv = self.position.dimensions()[1]
+    var conn = self.connectivity
+    var out = []
+
+    if (isnil(conn)) {
+      var nseg = self.closed ? nv : nv - 1
+      if (nseg < 1) return out
+      for (i in 0...nseg) {
+        out.append(i)
+        out.append(mod(i + 1, nv))
+      }
+      return out
+    }
+
+    if (islist(conn)) {
+      for (seg in conn) {
+        out.append(seg[0])
+        out.append(seg[1])
+      }
+      return out
+    }
+
+    // Sparse or dense incidence matrix: columns are segments
+    var nf = conn.dimensions()[1]
+    for (i in 0...nf) {
+      if (issparse(conn)) {
+        var indx = conn.rowindices(i)
+        for (j in 0...indx.count()) out.append(indx[j])
+      } else {
+        var nvf = conn.dimensions()[0]
+        for (j in 0...nvf) {
+          if (conn[j, i] != 0) out.append(j)
+        }
+      }
+    }
+    return out
+  }
+}
+
+/* **************************************
  * Graphics class
  **************************************** */
 
@@ -862,6 +952,111 @@ class Show {
     }
     out.write("i")
     out.write("d ${id}")
+  }
+
+  /** Uniform RGB for PointCloud / LineSet color field. */
+  pointLineRgb(item) {
+    var col = item.color
+    if (isnil(col)) return [0.5, 0.5, 0.5]
+    if (ismatrix(col)) return [col[0,0], col[1,0], col[2,0]]
+    if (islist(col)) return col
+    // Color (and similar): prefer .r/.g/.b; fall back to rgb(0) for ColorMaps.
+    if (isobject(col)) {
+      if (!isnil(col.r) && !isnil(col.g) && !isnil(col.b)) return [col.r, col.g, col.b]
+      return col.rgb(0)
+    }
+    return [0.5, 0.5, 0.5]
+  }
+
+  /** Emit vertex positions (+ optional per-vertex color) for points/lines. */
+  pointLineVertexData(item, out, includeColor=true) {
+    var x = item.position
+    var col = item.color
+    var localColor = false
+    var dimensions = x.dimensions()
+    var dim = dimensions[0]
+    var nv = dimensions[1]
+
+    if (includeColor) {
+      if (ismatrix(col)) {
+        if (col.dimensions()[1] > 1) localColor = true
+      } else if (isobject(col) && !islist(col)) {
+        if (!isnil(col.r) && !isnil(col.g) && !isnil(col.b)) col = [col.r, col.g, col.b]
+        else col = col.rgb(0)
+      }
+      out.write("v \"xc\"")
+    } else {
+      out.write("v \"x\"")
+    }
+
+    for (i in 0...nv) {
+      var line = ""
+      for (j in 0...dim) line += "${self.fmt(x[j,i])} "
+      if (includeColor) {
+        if (localColor) {
+          for (j in 0...3) line += "${self.fmt(col[j,i])} "
+        } else if (islist(col) || (isobject(col) && !ismatrix(col))) {
+          for (j in 0...col.count()) line += "${self.fmt(col[j])} "
+        } else if (ismatrix(col)) {
+          for (j in 0...3) line += "${self.fmt(col[j,0])} "
+        } else {
+          line += "0.5 0.5 0.5 "
+        }
+      }
+      out.write(line)
+    }
+  }
+
+  visit(PointCloud item, out) {
+    var id = self.uid()
+    var alpha = self.opacity(item)
+    var nv = item.position.dimensions()[1]
+    if (nv < 1) return
+
+    // Flat shade (no normals); bake RGB into vertices when opaque (like mesh xnc).
+    out.write("M flat")
+    if (alpha < 0.999) {
+      var cid = self.addRgb(self.pointLineRgb(item), alpha, out)
+      out.write("C ${cid}")
+      out.write("o ${id}")
+      self.pointLineVertexData(item, out, includeColor=false)
+    } else {
+      out.write("o ${id}")
+      self.pointLineVertexData(item, out, includeColor=true)
+    }
+
+    var pline = "p"
+    for (i in 0...nv) pline += " ${i}"
+    out.write(pline)
+    out.write("i")
+    out.write("d ${id}")
+    out.write("M shaded")
+  }
+
+  visit(LineSet item, out) {
+    var id = self.uid()
+    var alpha = self.opacity(item)
+    var nv = item.position.dimensions()[1]
+    var segs = item.segmentindices()
+    if (nv < 1 || segs.count() < 2) return
+
+    out.write("M flat")
+    if (alpha < 0.999) {
+      var cid = self.addRgb(self.pointLineRgb(item), alpha, out)
+      out.write("C ${cid}")
+      out.write("o ${id}")
+      self.pointLineVertexData(item, out, includeColor=false)
+    } else {
+      out.write("o ${id}")
+      self.pointLineVertexData(item, out, includeColor=true)
+    }
+
+    var lline = "l"
+    for (i in 0...segs.count()) lline += " ${segs[i]}"
+    out.write(lline)
+    out.write("i")
+    out.write("d ${id}")
+    out.write("M shaded")
   }
 
   fontPath() {

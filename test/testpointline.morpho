@@ -1,0 +1,71 @@
+// PointCloud / LineSet → viewer p / l (no display needed).
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testpointline.morpho
+
+import morphoview
+import xgraphics
+import color
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn anyExact(lines, want) {
+  for (line in lines) {
+    if (line == want) return true
+  }
+  return false
+}
+
+fn anyStarts(lines, prefix) {
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) return true
+    }
+  }
+  return false
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+var pos = Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]])
+
+var g = Graphics()
+g.title = "pointline"
+g.display(PointCloud(pos, color=Red))
+g.display(LineSet(pos, color=Blue))
+g.display(LineSet(pos, [[0, 2], [1, 2]], color=Green))
+
+var buf = Buf()
+var show = Show()
+show.write(g, buf)
+var lines = buf.lines
+
+expect(anyExact(lines, "v \"xc\""), "opaque points/lines should bake color into xc")
+expect(anyStarts(lines, "p "), "expected point element command")
+expect(anyExact(lines, "p 0 1 2") || anyStarts(lines, "p 0"), "expected point indices")
+expect(anyStarts(lines, "l "), "expected line element command")
+expect(anyExact(lines, "l 0 1 1 2"), "polyline should connect successive vertices")
+expect(anyExact(lines, "l 0 2 1 2"), "explicit segment pairs")
+expect(anyExact(lines, "M flat"), "points/lines should request flat shading")
+expect(!anyExact(lines, "v \"xnc\""), "should not emit triangle xnc for point/line prims")
+
+// Translucent points → alpha on color table
+var g2 = Graphics()
+g2.display(PointCloud(pos, color=Red, transmit=0.5))
+var buf2 = Buf()
+Show().write(g2, buf2)
+expect(anyStarts(buf2.lines, "c "), "expected color command for translucent points")
+
+print "ok"
