@@ -46,7 +46,7 @@ g.display(TriangleComplex(pos, nrm, Red, conn, transmit=0.4))
 g.display(TriangleComplex(pos, nrm, Blue, conn, filter=0.25))
 
 var buf = Buf()
-var show = XShow()
+var show = Show()
 show.write(g, buf)
 var lines = buf.lines
 

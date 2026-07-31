@@ -8,7 +8,7 @@ Work in this order. Later tracks depend on decisions from earlier ones.
 
 | # | Track | Why now |
 |---|--------|---------|
-| **1** | **Graphics prototype** (package `XShow` / local Graphics model → upstream) | Unlocks stable ids, define vs display, instancing; spells out which viewer animation ops Morpho actually needs |
+| **1** | **Graphics prototype** (package `Show` / local Graphics model → upstream) | Unlocks stable ids, define vs display, instancing; spells out which viewer animation ops Morpho actually needs |
 | **2** | **Animation-friendly viewer + View API** | Sticky context, display/move, then `U O` / `U V` / `X O` — guided by the Graphics model, not guessed ahead of it |
 | **3** | **Binary / byte-buffer transport** | Viewer can accept blobs sooner; real gain needs Morpho-side serialize + framing. Biggest on fat `v` / `U V` paths; display-move often avoids blobs entirely |
 
@@ -16,7 +16,7 @@ Tried and deferred: making `View.update` async / drop-under-pressure. Did not he
 
 ## Occasional update vs efficient animation
 
-`Graphics` is a displaylist **container**, not a scene graph. Primitives have no stable viewer ids; `Show`/`XShow` invent ephemeral `o` ids via `uid()` each write. That matches fire-and-forget `Show(g)` and **occasional** live refresh — not frame-rate animation (Graphics was never designed for that).
+`Graphics` is a displaylist **container**, not a scene graph. Primitives have no stable viewer ids; `Show` invents ephemeral `o` ids via `uid()` each write. That matches fire-and-forget `Show(g)` and **occasional** live refresh — not frame-rate animation (Graphics was never designed for that).
 
 | Use case | Supported path | Expectation |
 |----------|----------------|-------------|
@@ -27,11 +27,11 @@ Do **not** make `update(Graphics)` automatically incremental or diff the previou
 
 ### 1. Graphics prototype (next)
 
-Local prototype in this package (extend `XShow` / helpers); identify what to push to upstream `graphics.morpho`. Goals:
+Local prototype in this package ([`xgraphics.morpho`](share/modules/xgraphics.morpho) `Show`); identify what to push to upstream `graphics.morpho`. Goals:
 
 - Stable object ids (not ephemeral `uid()` per write)
 - Distinguish **define mesh** (`o` / `v` / `f`) vs **place / display** (`d` + transforms)
-- Dedup / instance identical primitives (generalize opaque-sphere instancing in `XShow`)
+- Dedup / instance identical primitives (generalize opaque-sphere instancing in `Show`)
 - Clarify multi-Graphics composition (static once + dynamic subset) without changing the meaning of full `update(Graphics)`
 - Produce a concrete feature list for track 2 (which View / command ops Morpho will call)
 
@@ -59,7 +59,7 @@ Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](ex
 
 - [x] `init` — defaults only (no spawn)
 - [x] `open(commands)` — bind, spawn, send, wait for `ok`
-- [x] `open(Graphics)` — serialize via prototype `Show`, then open
+- [x] `open(Graphics)` — serialize via `Show`, then open
 - [x] `update(commands)` — send another chunk, wait for `ok`
 - [x] `update(Graphics)` — serialize with `U S` replace, then update (occasional refresh; see above)
 - [x] `write(line)` — File-compatible sink for `Show.write(g, out)`
@@ -71,12 +71,14 @@ Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](ex
 
 ### Show / Graphics prototype (upstream candidate) — **track 1 (next)**
 
-Mild rewrite of graphics `Show`, living here until pushed back to morpho:
+`Show` lives in [`xgraphics.morpho`](share/modules/xgraphics.morpho) (former package `XShow`):
 
 - [x] `Show()` / `Show(g)` — two inits via multiple dispatch; fire-and-forget still `-t`
 - [x] `write(g, out)` — any `out.write(line)` delegate (File, `View`, …)
 - [x] `replace` / `sceneId` — preamble emits `U S` vs `S` for live updates
+- [x] Merged into `xgraphics` as `Show` (Phase 1); `View` uses it
 - [ ] Graphics prototype: stable ids; define mesh vs place/display; dedup identical primitives → instance `d`s
+- [ ] PointCloud / LineSet (Phase 2)
 - [ ] Push settled pieces to morpho `graphics.morpho`
 
 ## Framing / camera
@@ -158,7 +160,7 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 Small viewer-only polish can land anytime; the strategic sequence is still Graphics → animation ops → binary (see **Priority sequence**).
 
 **Done (package-only):**
-- [x] ASCII float emission at 3 sfs (`XShow.fmt` / `%0.3g`) — smaller strings, faster Morpho concat + C parse
+- [x] ASCII float emission at 3 sfs (`Show.fmt` / `%0.3g`) — smaller strings, faster Morpho concat + C parse
 
 **Viewer-only polish** (no Morpho cooperation required; opportunistic):
 
@@ -200,4 +202,4 @@ Small viewer-only polish can land anytime; the strategic sequence is still Graph
 
 - Each `command_process` batch currently starts with an empty apply context, so every chunk that draws must establish a scene (`S` or `U S`) before `o`/`v`/…. Sticky context (track 2) is required before display-move / `U O` / `U V` chunks can omit a leading `S` / `U S`.
 - Package `Show` prototypes the upstream split: fire-and-forget (`Show(g)` / `-t`) vs serialize-to-delegate (`Show().write(g, out)`). `View` is the live duplex path and a `write` sink. Track 1 extends this prototype toward a Graphics model morphoview can grow into.
-- ASCII float emission uses 3 significant figures (`XShow.fmt` / `%0.3g`) to keep the string path smaller until binary vertex transport (track 3) exists.
+- ASCII float emission uses 3 significant figures (`Show.fmt` / `%0.3g`) to keep the string path smaller until binary vertex transport (track 3) exists.
