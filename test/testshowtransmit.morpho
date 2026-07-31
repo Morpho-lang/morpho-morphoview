@@ -1,0 +1,59 @@
+// Show maps Graphics transmit/filter → uniform RGBA (no display needed).
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testshowtransmit.morpho
+
+import morphoview
+import graphics
+import color
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn anyExact(lines, want) {
+  for (line in lines) {
+    if (line == want) return true
+  }
+  return false
+}
+
+fn anyHasAlpha(lines, a) {
+  for (line in lines) {
+    // Color commands look like: c <id> r g b a
+    var parts = line.split(" ")
+    if (parts.count() == 6 && parts[0] == "c" && parts[5] == a) return true
+  }
+  return false
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+// Small mesh — avoid huge Sphere expansion for a serializer check.
+var pos = Matrix([[0, 1, 0.5], [0, 0, 0.8], [0, 0, 0]])
+var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
+var conn = Matrix([[1], [1], [1]])
+
+var g = Graphics()
+g.title = "transmit"
+g.display(TriangleComplex(pos, nrm, Red, conn, transmit=0.4))
+g.display(TriangleComplex(pos, nrm, Blue, conn, filter=0.25))
+
+var buf = Buf()
+var show = XShow()
+show.write(g, buf)
+var lines = buf.lines
+
+expect(anyExact(lines, "C 0"), "expected color select")
+expect(anyExact(lines, "v \"xn\""), "transparent meshes should use xn (uniform albedo)")
+expect(anyHasAlpha(lines, "0.6"), "transmit 0.4 → alpha 0.6")
+expect(anyHasAlpha(lines, "0.75"), "filter 0.25 → alpha 0.75")
+expect(!anyExact(lines, "v \"xnc\""), "should not bake vertex colors when translucent")
+
+print "ok"

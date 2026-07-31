@@ -1,0 +1,31 @@
+// Translucent spheres via Graphics transmit → View.
+// A few overlapping colored spheres; depth sort should keep nearer ones on top.
+// Expect: window opens; prints "ok" on close / timeout.
+// Requires: morphoview on PATH, morpho-zeromq, display, graphics, color.
+//
+//   cd test && morpho6 testviewtransmit.morpho
+
+import morphoview
+import graphics
+import color
+
+fn glassSpheres() {
+  var g = Graphics()
+  g.title = "transmit spheres"
+
+  // Separated enough not to touch; still close enough to see through neighbors.
+  g.display(Sphere([-0.38, 0.0, 0.0], 0.28, color=Red,    transmit=0.55, maxrefine=2))
+  g.display(Sphere([ 0.38, 0.0, 0.0], 0.28, color=Blue,   transmit=0.55, maxrefine=2))
+  g.display(Sphere([ 0.0,  0.38, 0.12], 0.24, color=Green,  transmit=0.45, maxrefine=2))
+  g.display(Sphere([ 0.0, -0.32, 0.22], 0.22, color=Yellow, transmit=0.5,  maxrefine=2))
+
+  return g
+}
+
+var v = View()
+if (!v.open(glassSpheres())) {
+  print "open failed"
+} else {
+  v.wait(sessionTimeOut=8000)
+  print "ok"
+}

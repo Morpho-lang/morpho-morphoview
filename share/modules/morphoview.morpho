@@ -143,18 +143,37 @@ class XShow {
   For example, the `visit` method for a `Sphere` object can call `self.visitGeneric(item, out)` to visit the `TriangleComplex` representation of the sphere, but calling `self.visit(item, out)` would result in an infinite loop.
   */
   visitGeneric(item, out) {
-    self.visit(item.totrianglecomplex(), out)
+    var tri = item.totrianglecomplex()
+    if (isnil(tri)) return // e.g. zero-length Cylinder/Arrow
+    // Most converters drop filter/transmit (Tube is the exception); copy from the source.
+    if (!isnil(item.filter)) tri.filter = item.filter
+    if (!isnil(item.transmit)) tri.transmit = item.transmit
+    self.visit(tri, out)
   }
 
-  // Will be used by Cylinder, Arrow and Tube
+  // Will be used by Tube (and other meshes with totrianglecomplex)
   visit(item, out) {
+    self.visitGeneric(item, out)
+  }
+
+  visit(Cylinder item, out) {
+    // Skip degenerate shafts (zero/NaN length). `!(len > eps)` rejects NaN too.
+    var len = (item.end - item.start).norm()
+    if (!(len > 1e-8)) return
+    self.visitGeneric(item, out)
+  }
+
+  visit(Arrow item, out) {
+    var len = (item.end - item.start).norm()
+    if (!(len > 1e-8)) return
     self.visitGeneric(item, out)
   }
 
   visit(Sphere item, out) {
     var n = item.refinementlevel()
 
-    if (item.color) {
+    // Colored or translucent: expand to a TriangleComplex (instance path is opaque-only).
+    if (item.color || !isnil(item.transmit) || !isnil(item.filter)) {
       self.visitGeneric(item, out)
       return
     } else if (!self.spheres.contains(n)) { // Check if we already have a sphere object at this refinement level
@@ -171,7 +190,38 @@ class XShow {
     out.write("d ${self.spheres[n].id}")
   }
 
-  triangleComplexObjectData(item, out) {
+  /** POVRay transmit/filter → OpenGL alpha: a = 1 - clamp(transmit + filter, 0, 1). */
+  opacity(item) {
+    var t = isnil(item.transmit) ? 0 : item.transmit
+    var f = isnil(item.filter) ? 0 : item.filter
+    var a = 1 - (t + f)
+    return (a < 0) ? 0 : ((a > 1) ? 1 : a)
+  }
+
+  /** Uniform RGB for a TriangleComplex (first vertex if per-vertex colors).
+   *  Type cascade is fine here — colors may be Matrix, list, or Color. */
+  uniformRgb(item) {
+    var col = item.colors
+    if (isnil(col)) return [0.5, 0.5, 0.5]
+    if (ismatrix(col)) return [col[0,0], col[1,0], col[2,0]]
+    if (islist(col)) return col
+    if (isobject(col)) return col.rgb(0)
+    return [0.5, 0.5, 0.5]
+  }
+
+  /** Emit `c` for rgb[+alpha]; returns color id. Alpha < ~1 → RGBA. */
+  addRgb(rgb, alpha, out) {
+    var key = "${rgb[0]} ${rgb[1]} ${rgb[2]} ${alpha}"
+    if (!self.colors.contains(key)) {
+      var id = self.colors[key] = self.colors.count()
+      out.write(alpha < 0.999 ?
+                "c ${id} ${rgb[0]} ${rgb[1]} ${rgb[2]} ${alpha}" :
+                "c ${id} ${rgb[0]} ${rgb[1]} ${rgb[2]}")
+    }
+    return self.colors[key]
+  }
+
+  triangleComplexObjectData(item, out, includeColor=true) {
     var x = item.position
     var n = item.normals
     var col = item.colors
@@ -180,11 +230,15 @@ class XShow {
     var dim = dimensions[0]
     var nv = dimensions[1]
 
-    if (ismatrix(col)) {
-      if (col.dimensions()[1]>1) localColor = true
-    } else if (isobject(col) && !islist(col)) col = col.rgb(0)
+    if (includeColor) {
+      if (ismatrix(col)) {
+        if (col.dimensions()[1]>1) localColor = true
+      } else if (isobject(col) && !islist(col)) col = col.rgb(0)
+      out.write("v \"xnc\"")
+    } else {
+      out.write("v \"xn\"")
+    }
 
-    out.write("v \"xnc\"")
     for (i in 0...nv) {
       var line = ""
       for (j in 0...dim) {
@@ -193,23 +247,32 @@ class XShow {
       for (j in 0...dim) {
         line+="${n[j,i]} "
       }
-      if (localColor) {
-        for (j in 0...3) line+="${col[j,i]} "
-      } else {
-        for (j in 0...item.colors.count()) line+="${col[j]} "
+      if (includeColor) {
+        if (localColor) {
+          for (j in 0...3) line+="${col[j,i]} "
+        } else {
+          for (j in 0...item.colors.count()) line+="${col[j]} "
+        }
       }
       out.write(line)
     }
 
     out.write("f")
     var f=item.connectivity
-    nv=f.dimensions()[0]
     var nf=f.dimensions()[1]
 
     for (i in 0...nf) {
       var line = ""
-      for (j in 0...nv) {
-        if (f[j,i]!=0) line+="${j} "
+      // Sparse connectivity preserves face winding via rowindices (cf. povray Show).
+      // Dense Matrix incidence only stores membership — fall back to ascending ids.
+      if (issparse(f)) {
+        var indx = f.rowindices(i)
+        for (j in 0...indx.count()) line+="${indx[j]} "
+      } else {
+        var nvf=f.dimensions()[0]
+        for (j in 0...nvf) {
+          if (f[j,i]!=0) line+="${j} "
+        }
       }
       out.write(line)
     }
@@ -217,8 +280,17 @@ class XShow {
 
   visit(TriangleComplex item, out) {
     var id = self.uid()
-    out.write("o ${id}")
-    self.triangleComplexObjectData(item, out)
+    var alpha = self.opacity(item)
+    if (alpha < 0.999) {
+      // Uniform albedo + alpha (viewer transparent pass); vertex colors deferred.
+      var cid = self.addRgb(self.uniformRgb(item), alpha, out)
+      out.write("C ${cid}")
+      out.write("o ${id}")
+      self.triangleComplexObjectData(item, out, includeColor=false)
+    } else {
+      out.write("o ${id}")
+      self.triangleComplexObjectData(item, out)
+    }
     out.write("i")
     out.write("d ${id}")
   }
@@ -273,11 +345,7 @@ class XShow {
   addColor(color, out) {
     if (!self.colors.contains(color)) {
       var id = self.colors[color] = self.colors.count()
-      if (isdefined(color.a) && color.a < 1) {
-        out.write("c ${id} ${color.r} ${color.g} ${color.b} ${color.a}")
-      } else {
-        out.write("c ${id} ${color.r} ${color.g} ${color.b}")
-      }
+      out.write("c ${id} ${color.r} ${color.g} ${color.b}")
     }
     return self.colors[color]
   }

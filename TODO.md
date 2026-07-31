@@ -36,6 +36,7 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 - [x] RGBA / opacity (blend + opaque/transparent passes)
 - [x] Phase 2c: consolidate geometry shaders (one program + `uFlat`, cached uniforms, CPU normal matrix)
 - [x] Phase 2c: transparent depth sort (object centroid, far→near)
+- [x] Graphics `transmit`/`filter` → View uniform alpha (POVRay-style; Color API later)
 - [ ] Object update/delete (`U O` / `X O`) + persistent apply context
 - [ ] Binary / byte-buffer vertex transport
 - [ ] Pick / view / click events
@@ -73,6 +74,7 @@ Mild rewrite of graphics `Show`, living here until pushed back to morpho:
 | `M flat` | Done | Unlit albedo |
 | `C` on meshes | Done | Uniform albedo for subsequent geometry |
 | RGBA / opacity | Done | `c … a`, blend, opaque then transparent pass |
+| Graphics transmit/filter | Done | Package `Show`: `alpha = 1 - clamp(transmit+filter)`; uniform `C` + `v "xn"` |
 | Shader consolidate | Done | Phase 2c: one geometry program + `uFlat`; cached uniforms; CPU normal matrix |
 | Transparent depth sort | Done | Phase 2c: far→near by object centroid (intersecting translucents can still artifact) |
 
@@ -119,6 +121,8 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 - [x] Explicit light (auto vs `L`): [`test/command/light`](test/command/light)
 - [x] Transparent depth sort: [`test/command/depthsort`](test/command/depthsort) (near listed before far; sort still composites near on top)
 - [x] Transparent spheres: [`test/command/transparentspheres`](test/command/transparentspheres) (overlapping Phong spheres + depth sort)
+- [x] Graphics `transmit`/`filter` → RGBA: [`test/testshowtransmit.morpho`](test/testshowtransmit.morpho)
+- [x] Translucent Graphics spheres: [`test/testviewtransmit.morpho`](test/testviewtransmit.morpho)
 
 ## Notes
 

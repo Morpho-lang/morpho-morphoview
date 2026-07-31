@@ -521,6 +521,48 @@ int render_entrysizefromformat(scene *s, char *format) {
     return size;
 }
 
+/** Flip facet windings so geometric normal agrees with averaged vertex normals.
+ *  Dense Matrix connectivity (and bad serializers) can lose winding; transparent
+ *  back/front passes need consistent orientation. */
+static void render_orient_facets(scene *s, gobject *obj, gelement *el) {
+    char *fmt;
+    int stride, xpos=-1, npos=-1, pos=0;
+    if (!s || !obj || !el || el->type!=FACETS || el->length<3) return;
+    if (!(fmt=obj->vertexdata.format) || obj->vertexdata.indx==SCENE_EMPTY) return;
+    if (!strchr(fmt, 'x') || !strchr(fmt, 'n')) return;
+    if ((stride=render_entrysizefromformat(s, fmt))<=0) return;
+
+    for (; *fmt; fmt++) {
+        if (*fmt=='x') { xpos=pos; pos+=s->dim; }
+        else if (*fmt=='n') { npos=pos; pos+=s->dim; }
+        else if (*fmt=='c') pos+=3;
+    }
+    if (xpos<0 || npos<0) return;
+
+    float *vbase=&s->data.data[obj->vertexdata.indx];
+    int *idx=&s->indx.data[el->indx];
+    int dim=s->dim;
+
+    for (int t=0; t+2<el->length; t+=3) {
+        int i0=idx[t], i1=idx[t+1], i2=idx[t+2];
+        float *p0=vbase+i0*stride+xpos, *p1=vbase+i1*stride+xpos, *p2=vbase+i2*stride+xpos;
+        float *n0=vbase+i0*stride+npos, *n1=vbase+i1*stride+npos, *n2=vbase+i2*stride+npos;
+
+        vec3 e1={ p1[0]-p0[0], p1[1]-p0[1], dim>2 ? p1[2]-p0[2] : 0 };
+        vec3 e2={ p2[0]-p0[0], p2[1]-p0[1], dim>2 ? p2[2]-p0[2] : 0 };
+        vec3 geom={ e1[1]*e2[2]-e1[2]*e2[1],
+                    e1[2]*e2[0]-e1[0]*e2[2],
+                    e1[0]*e2[1]-e1[1]*e2[0] };
+        vec3 nsum={ n0[0]+n1[0]+n2[0], n0[1]+n1[1]+n2[1],
+                    dim>2 ? n0[2]+n1[2]+n2[2] : 0 };
+
+        if (geom[0]*nsum[0] + geom[1]*nsum[1] + geom[2]*nsum[2] < 0) {
+            idx[t+1]=i2;
+            idx[t+2]=i1;
+        }
+    }
+}
+
 /** Draws an object to  newly allocated OpenGL buffers */
 void render_drawobject(renderer *r, scene *s, unsigned int i) {
     renderglbuffers *b = &r->glbuffers.data[i];
@@ -576,29 +618,31 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
         renderobject *obj = &r->objects.data[j];
         
         if (obj->buffer==b) {
-            int offset = obj->eoffset;
+            int eoff = obj->eoffset;
             
             /* Loop over elements */
-            for (unsigned int j=0; j<obj->obj->elements.count; j++) {
-                gelement *el=&obj->obj->elements.data[j];
+            for (unsigned int k=0; k<obj->obj->elements.count; k++) {
+                gelement *el=&obj->obj->elements.data[k];
+
+                if (el->type==FACETS) render_orient_facets(s, obj->obj, el);
                 
                 /* Offset the vertex indices by the vertex offset */
-                if (obj->voffset>0) for (unsigned int k=0; k<el->length; k++) {
-                    s->indx.data[el->indx+k] += obj->voffset/entrysize;
+                if (obj->voffset>0) for (unsigned int m=0; m<el->length; m++) {
+                    s->indx.data[el->indx+m] += obj->voffset/entrysize;
                 }
                 
                 /* Copy the vertex indices over */
                 glBufferSubData( GL_ELEMENT_ARRAY_BUFFER,
-                                sizeof(GLuint)*offset,
+                                sizeof(GLuint)*eoff,
                                 sizeof(GLuint)*el->length,
                                 s->indx.data+el->indx);
                 
                 /* Restore vertex indices */
-                if (obj->voffset>0) for (unsigned int k=0; k<el->length; k++) {
-                    s->indx.data[el->indx+k] -= obj->voffset/entrysize;
+                if (obj->voffset>0) for (unsigned int m=0; m<el->length; m++) {
+                    s->indx.data[el->indx+m] -= obj->voffset/entrysize;
                 }
                 
-                offset+=el->length;
+                eoff+=el->length;
             }
         }
     }

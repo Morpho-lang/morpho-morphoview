@@ -103,6 +103,8 @@ I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V
 - **Uniform color:** `c` / `C` then `v "xn"` — `C` sets albedo (and optional alpha) for subsequent draws.
 - **Vertex color:** `v "xnc"` without a preceding `C` — per-vertex RGB is the albedo (opaque).
 - **Opacity:** `c <id> <r g b a>` — alpha on the selected color. Opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off and standard alpha blending. Transparent objects are sorted **far → near** by object centroid (view-space z). Closed translucent meshes draw back faces then front to avoid mesh-order striping. Not triangle-level / OIT — intersecting translucents can still artifact.
+- **Facet winding:** Package `Show` emits sparse face indices via `rowindices` (preserves mesh order). At upload, the viewer also reorients triangles so geometric normals agree with averaged vertex normals — needed for the transparent back/front pass.
+- **Graphics `transmit` / `filter`:** Morpho mesh primitives carry POVRay-style transparency. Package `Show` maps `alpha = 1 − clamp(transmit + filter, 0, 1)` to uniform `c`/`C` + `v "xn"` (per-vertex color left for later). True filter-vs-transmit pigment behavior remains POVRay-only.
 
 Lighting and eye position are in model space (stable under camera rotation). By default the light is placed outside the scene AABB. `L <x> <y> <z>` sets an explicit position (color unchanged; default white); optional `<r g b>` sets light color; `L a` clears the override and resumes AABB auto placement.
 
