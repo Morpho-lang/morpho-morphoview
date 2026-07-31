@@ -6,6 +6,7 @@
  * 7/31/26 Show: serializer vs launch split (from morphoview XShow prototype)
  * 7/31/26 PointCloud / LineSet primitives (viewer p / l)
  * 7/31/26 Graphics entries + display pose (unit Sphere + entry SRT)
+ * 7/31/26 Show: entry SRT emit; Sphere → unit TriangleComplex (no Show instancing)
  */
 
 import constants
@@ -253,8 +254,8 @@ class Sphere {
     var x0=center
     if (islist(center)) x0=Matrix(center)
 
-    // Ignores the center and size and just produces the unit ball
-    if (!scale) { x0*=0; r=1; col = [0.5,0.5,0.5] } 
+    // Unit ball at the origin; keep authored color (pose lives on the Graphics entry).
+    if (!scale) { x0*=0; r=1 }
 
     for (i in 0...nv) { // Normalize, scale and translate
       var x = v.column(i)
@@ -263,7 +264,8 @@ class Sphere {
       v.setcolumn(i, x0 + r*nn)
     }
 
-    return TriangleComplex(v, normals, col, conn)
+    return TriangleComplex(v, normals, col, conn,
+                           filter=self.filter, transmit=self.transmit)
   }
 
 }
@@ -696,15 +698,6 @@ class Graphics {
     return id
   }
 
-  /** Unit Sphere copy (pose lives on the entry). */
-  _unitsphere(item) {
-    return Sphere([0, 0, 0], 1,
-                  color=item.color,
-                  maxrefine=item.maxrefine,
-                  filter=item.filter,
-                  transmit=item.transmit)
-  }
-
   /** Append a non-Sphere item (identity SRT). Returns Graphics-owned id.
    *  Morpho: defaults are keyword-only, so pose uses the 2-arg overload below. */
   display(item) {
@@ -718,19 +711,20 @@ class Graphics {
     return self._append(item, position=position, scale=scale, rotate=rotate)
   }
 
-  /** Sphere, no pose args: center→position, r→scale; store unit mesh. */
+  /** Sphere, no pose args: keep abstract Sphere; record center/r on the entry for later move. */
   display(Sphere item) {
-    return self._append(self._unitsphere(item),
-                        position=item.center,
-                        scale=item.r)
+    return self._append(item, position=item.center, scale=item.r)
   }
 
-  /** Sphere with pose: store unit mesh; SRT from args (omitted scale→1, rotate→nil). */
+  /** Sphere with pose: store a Sphere at that center/r (Show bakes via visitGeneric). */
   display(Sphere item, position, scale=nil, rotate=nil) {
-    return self._append(self._unitsphere(item),
-                        position=position,
-                        scale=scale,
-                        rotate=rotate)
+    var scl = isnil(scale) ? 1 : scale
+    var s = Sphere(isnil(position) ? [0, 0, 0] : position, scl,
+                   color=item.color,
+                   maxrefine=item.maxrefine,
+                   filter=item.filter,
+                   transmit=item.transmit)
+    return self._append(s, position=position, scale=scl, rotate=rotate)
   }
 
   add(right) { // Create a union of two graphics objects
@@ -782,7 +776,7 @@ fn _morphoviewbin() {
 /* **************************************
  * Show a graphics object
  *
- *  - `Show()`     — serializer only (uid / sphere / font / color state)
+ *  - `Show()`     — serializer only (uid / font / color state)
  *  - `Show(g)`    — fire-and-forget (temp file + morphoview -t)
  *  - `show.write(g, out)` — emit ASCII commands to any `out.write(...)` sink
  **************************************** */
@@ -791,7 +785,6 @@ class Show {
   // Serializer only — use write(g, out) with any write-able sink.
   init() {
     self.uidInit()
-    self.spheres = Dictionary()
     self.fonts = []
     self.colors = Dictionary()
     self.sceneId = 1
@@ -862,7 +855,7 @@ class Show {
   /* The visit method for a generic `item`.
 
   Here, we define this separate `visitGeneric` method that performs the intended generic task, and have the actual generic `visit` method call `visitGeneric`. This enables calls to the generic fallback from *within a specific implementation*.
-  For example, the `visit` method for a `Sphere` object can call `self.visitGeneric(item, out)` to visit the `TriangleComplex` representation of the sphere, but calling `self.visit(item, out)` would result in an infinite loop.
+  For example, `visit(Cylinder)` can call `self.visitGeneric(item, out)` after a degenerate check; calling `self.visit(item, out)` would recurse on the typed overload.
   */
   visitGeneric(item, out) {
     var tri = item.totrianglecomplex()
@@ -892,24 +885,22 @@ class Show {
   }
 
   visit(Sphere item, out) {
-    var n = item.refinementlevel()
+    self.visitGeneric(item, out)
+  }
 
-    // Colored or translucent: expand to a TriangleComplex (instance path is opaque-only).
-    if (item.color || !isnil(item.transmit) || !isnil(item.filter)) {
-      self.visitGeneric(item, out)
-      return
-    } else if (!self.spheres.contains(n)) { // Check if we already have a sphere object at this refinement level
-      var tri=item.totrianglecomplex(scale=false)
-      tri.id = self.uid()
-      out.write("o ${tri.id}")
-      self.triangleComplexObjectData(tri,out)
-      self.spheres[n]=tri
-    }
-
+  /** Emit i / s / r / t / d from an entry. */
+  emitEntryDraw(entry, id, out) {
     out.write("i")
-    out.write("s ${self.fmt(item.r)}")
-    out.write("t ${self.fmt(item.center[0])} ${self.fmt(item.center[1])} ${self.fmt(item.center[2])}")
-    out.write("d ${self.spheres[n].id}")
+    if (entry.scale != 1) out.write("s ${self.fmt(entry.scale)}")
+    if (!isnil(entry.rotate)) {
+      var r = entry.rotate
+      out.write("r ${self.fmt(r[0])} ${self.fmt(r[1])} ${self.fmt(r[2])} ${self.fmt(r[3])}")
+    }
+    var p = entry.position
+    if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
+      out.write("t ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}")
+    }
+    out.write("d ${id}")
   }
 
   /** POVRay transmit/filter → OpenGL alpha: a = 1 - clamp(transmit + filter, 0, 1). */
@@ -1004,7 +995,8 @@ class Show {
     }
   }
 
-  visit(TriangleComplex item, out) {
+  /** Define a TriangleComplex (`o`/`v`/`f`, optional `C`); returns viewer object id. */
+  defineTriangleComplex(item, out) {
     var id = self.uid()
     var alpha = self.opacity(item)
     if (alpha < 0.999) {
@@ -1017,8 +1009,11 @@ class Show {
       out.write("o ${id}")
       self.triangleComplexObjectData(item, out)
     }
-    out.write("i")
-    out.write("d ${id}")
+    return id
+  }
+
+  visit(TriangleComplex item, out) {
+    self.emitEntryDraw(GraphicsEntry(0, item), self.defineTriangleComplex(item, out), out)
   }
 
   /** Uniform RGB for PointCloud / LineSet color field. */
@@ -1223,23 +1218,18 @@ class Show {
   write(graphic, out) {
     self.preamble(graphic, out)
 
-    // Temporary bridge until Show emits entry SRT directly: visit stored items,
-    // reconstructing Sphere center/r from the entry so unit storage still draws.
     for (entry in graphic.displaylist) {
-      var item = entry.item
-      self.visitEntry(entry, item, out)
+      self.visitEntry(entry, entry.item, out)
     }
   }
 
+  /** Default: world-baked item, ignore entry pose (Cylinder/Arrow/Text/points/…). */
   visitEntry(entry, item, out) {
     self.visit(item, out)
   }
 
-  visitEntry(entry, Sphere item, out) {
-    self.visit(Sphere(entry.position, entry.scale,
-                      color=item.color,
-                      maxrefine=item.maxrefine,
-                      filter=item.filter,
-                      transmit=item.transmit), out)
+  /** TriangleComplex: define once for this write, draw with entry SRT. */
+  visitEntry(entry, TriangleComplex item, out) {
+    self.emitEntryDraw(entry, self.defineTriangleComplex(item, out), out)
   }
 }

@@ -31,7 +31,7 @@ g.move(id, ...)                   // Graphics state changes
 
 Simulation state may still live in script variables; the script applies it via `g.move` / similar so Graphics (and thus View) stay consistent.
 
-**Ergonomics:** small surface — `display` / `move` share pose args (`position` as 2nd positional + `scale=` / `rotate=` kwargs; Morpho arity overloads because `=nil` defaults are keyword-only), plus `begin`/`end`. API and entry both use `position` (absolute Matrix internally); `Show` emits viewer `t` from it. Scripts should not need viewer command strings for normal animation. Canonical session API: `View()` + `open(g)`. Put the first pose on `display` (or `move` before `open`) so the first paint is not identity.
+**Ergonomics:** small surface — `display` / `move` share pose args (`position` as 2nd positional + `scale=` / `rotate=` kwargs; Morpho arity overloads because `=nil` defaults are keyword-only), plus `begin`/`end`. Same unit item under two `display`s → two ids that `move` independently. API and entry both use `position` (absolute Matrix internally); `Show` emits viewer `t` from it. Scripts should not need viewer command strings for normal animation. Canonical session API: `View()` + `open(g)`. Put the first pose on `display` (or `move` before `open`) so the first paint is not identity.
 
 ## Graphics shape (evolving)
 
@@ -43,7 +43,7 @@ Not a full scene graph. Richer than today’s append-only displaylist:
 - **Listeners** + small event vocabulary; coalesce with `begin`/`end`
 - `open(g)` uses one `Show.write` then listens; `update(g)` full replace + rebind + clear batch
 
-`Show` walks Graphics **entries**. Opaque sphere mesh instancing keys by **refinement** only; color via `C`. Translucent spheres expand the stored **unit** item and apply entry SRT (never bake center/r again after normalization).
+`Show` walks Graphics **entries**. Abstract primitives (`Sphere`, `Cylinder`, …) convert in `visit` / `visitGeneric` like today — no Show-level sphere mesh cache. Prefer clients `display`ing one item at many poses. Entry SRT is recorded now; using it for draw (vs baking) comes with the later primitive emit review.
 
 ## Viewer protocol
 
@@ -65,8 +65,8 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 
 | Primitive | First define | Later draw (same Show / same id) |
 |-----------|--------------|----------------------------------|
-| Opaque `Sphere` | unit `o`/`v`/`f` (fingerprint = refinement; color via `C`) | entry SRT → `i`/`s`/`r`/`t`/`d` |
-| Translucent `Sphere` | expand **unit** item to mesh (no instance) | entry SRT (never re-bake center/r) |
+| Opaque `Sphere` | `visitGeneric` → `o`/`v`/`f` (bake center/r) | `i`/`d` (entry SRT later) |
+| Translucent `Sphere` | same + `C` if transmit | `i`/`d` (entry SRT later) |
 | `TriangleComplex` | `o`/`v`/`f` (+ register `c` if transmit) | entry SRT (often identity if world-baked) |
 | `PointCloud` / `LineSet` | `o`/`v`/`p|l` | entry SRT |
 

@@ -33,8 +33,8 @@ move(id, position, scale=, rotate=)    // Phase 3; same arity pattern
 ```
 
 Morpho treats `param=nil` defaults as keyword-only, so pose is a separate arity overload (not `position=nil` on the 1-arg form). `scale=` / `rotate=` remain kwargs on the posed form. `display(item, nil, scale=2)` works when position should stay default origin.
-- Pose args set on `display` → entry SRT from those args (omitted fields use defaults: position 0, scale 1, rotate nil); `Sphere` stored as **unit** mesh.
-- No pose args + `Sphere` → copy `center`→position, `r`→scale; store **unit** mesh.
+- Pose args set on `display` → entry SRT recorded; `Sphere` stored as abstract primitive with matching `center`/`r` (Show bakes via `visitGeneric`, like Cylinder/Arrow).
+- No pose args + `Sphere` → store the Sphere; copy `center`→entry position, `r`→scale.
 - No pose args + other primitives → identity SRT; geometry as authored.
 - Same item `display`’d twice → two ids / two entries.
 
@@ -45,11 +45,10 @@ Morpho treats `param=nil` defaults as keyword-only, so pose is a separate arity 
 
 ### Translucent `Sphere` (Phase 1)
 
-After normalization the stored item is unit. Expand that unit mesh and apply **entry SRT** for placement. Never call `totrianglecomplex(scale=true)` (or otherwise bake center/r) after normalization — that double-applies pose.
+Graphics stores the abstract `Sphere`; `Show` visits via `visitGeneric` → `totrianglecomplex()` (same pattern as Cylinder/Arrow). No Show-level sphere mesh cache — prefer clients `display`ing one unit item at many poses; a serializer cache can return later if needed. Entry SRT is recorded for later `move`; applying entry pose in Show (instead of baking `center`/`r`) is part of the later primitive emit review.
 
 ### Other
 
-- Sphere instancing fingerprint = **refinement only**; color via `C`.
 - `Graphics.add`: remap right-hand ids (unique within one Graphics).
 - Phase 3 batching: immediate outside `begin`/`end`; queue inside; no nested `begin`; `display` in batch queued; prefer batching for multi-object frames.
 - `open(g)`: one `Show.write`, then listen (no fake N `defined` on open).
@@ -89,10 +88,10 @@ g.end()
 
 1. `Graphics.display(item, position=, scale=, rotate=)` allocates id, stores entry `{ id, item, position, scale, rotate }`, returns id. No `id=` on mesh primitives. `GraphicsEntry` coerces `position` to Matrix. Apply locked Sphere pose normalization.
 2. `Show` walks **entries**; emit define/draw from **entry SRT only**.
-3. Opaque spheres: fingerprint = refinement only + uniform `C`; translucent expand **unit** item + entry SRT (never re-bake center/r).
+3. Spheres: store abstract `Sphere`; Show `visitGeneric` (no cache). Entry pose recorded; bake-vs-entry-SRT emit polish later.
 4. `Graphics.add`: remap right-hand entry ids (unique within one Graphics).
 5. Keep `replace=true` → full `U S`.
-6. Tests: distinct ids; same primitive twice → two ids; N colored opaque spheres → 1× `o`, N× `d`; translucent posed sphere no double scale; no-pose `Sphere(center,r)` still correct under `Show`.
+6. Tests: distinct ids; same primitive twice → two ids; Sphere unit + entry SRT (posed / translucent / no-pose `Sphere(center,r)`).
 
 **Done when:** `Show(g)` / `View.open(g)` emit correctly from entries; set-and-forget path unchanged in spirit; no C viewer changes.
 
@@ -145,3 +144,5 @@ Rewrite: define once on `Graphics`, pose on `display` (or `move` before `open`),
 - `U O` / `U V` / `X O`
 - Finer draw updates without full `D` every frame
 - Formal Morpho dependents framework
+- Review Show emit for all primitives (LOD / tessellation, Text pose, non-Sphere entry SRT, optional sphere mesh cache)
+- Optional: Show-level unit-sphere mesh cache if a single `Show.write` with many identical static spheres is hot — secondary to clients `display`ing one unit item at many poses
