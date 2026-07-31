@@ -1,27 +1,72 @@
 # Plan: Graphics live model + View listener
 
-Design source of truth: [`definedraw.md`](definedraw.md). Viewer transport stays define vs draw; Morpho API is Graphics mutations → listeners → View.
+Design source of truth: [`definedraw.md`](definedraw.md).
 
-**Working agreement:** one phase at a time; pause for review before starting the next. Start with Phase 1 only when approved.
+**Working agreement:** one phase at a time; pause for review before the next.
 
-**Ergonomics constraint:** the Graphics modification API stays small and concrete — especially a single pose verb `move` (not separate scale/rotate/translate). View listener and viewer commands are implementation detail. Target loop:
+**Canonical View API:** `View()` + `open(g)` (not `View(g)`).
+
+## Locked decisions (Phase 1 readiness)
+
+### Entry shape (SRT)
 
 ```
-var ball = g.display(unitBall)
-v.open(g)
+{ id, item, transform: { position, scale, rotate } }
+```
+
+- `position`: **Matrix** 3-vector, default origin — absolute placement of the object origin (set, not a relative delta). API accepts list or Matrix; coerce to Matrix on store.
+- `scale`: Float default `1`
+- `rotate`: `[angle, ax, ay, az]` or `nil`
+
+API and entry both use **`position`**. Keep SRT components (not a single 4×4) so `move` merge and `t`/`s`/`r` emit stay simple; a composite-matrix helper can come later. `Show` emits viewer command `t` from `transform.position` components.
+
+`Show` always places from entry SRT.
+
+### Dual pose + shared `display` / `move` signature
+
+Both accept optional **2nd positional** `position` plus kwargs `scale=`, `rotate=`:
+
+```
+display(item, position=nil, scale=nil, rotate=nil)
+move(id, position=nil, scale=nil, rotate=nil)
+```
+
+- Pose args set on `display` → entry SRT from those args (omitted fields use defaults: position 0, scale 1, rotate nil); `Sphere` stored as **unit** mesh.
+- No pose args + `Sphere` → copy `center`→position, `r`→scale; store **unit** mesh.
+- No pose args + other primitives → identity SRT; geometry as authored.
+- Same item `display`’d twice → two ids / two entries.
+
+### `move` merge (Phase 3; lock now)
+
+- New `position` (2nd positional or kwarg) **always** sets `transform.position`.
+- Omitted `scale` / `rotate` leave that entry component **unchanged**.
+
+### Translucent `Sphere` (Phase 1)
+
+After normalization the stored item is unit. Expand that unit mesh and apply **entry SRT** for placement. Never call `totrianglecomplex(scale=true)` (or otherwise bake center/r) after normalization — that double-applies pose.
+
+### Other
+
+- Sphere instancing fingerprint = **refinement only**; color via `C`.
+- `Graphics.add`: remap right-hand ids (unique within one Graphics).
+- Phase 3 batching: immediate outside `begin`/`end`; queue inside; no nested `begin`; `display` in batch queued; prefer batching for multi-object frames.
+- `open(g)`: one `Show.write`, then listen (no fake N `defined` on open).
+- `update(g)`: full `U S`; rebind listener; drop pending batch; reset Show/object maps.
+- Phase 3 v1: `D` + full pose redraw (known limit for large static+one mover).
+
+## Target loop
+
+Put the **first pose on `display`** (or `move` before `open`) so the first paint is not identity:
+
+```
+var ball = g.display(unitBall, [x0,y0,z0], scale=ballR)
+var shadow = g.display(unitShadow, [x0,0.02,z0], scale=shadowR)
+v = View()
+v.open(g)   # first paint already posed
 g.begin()
 g.move(ball, [x,y,z], scale=ballR, rotate=[angle,0,1,0])
 g.move(shadow, [x,0.02,z], scale=shadowR)
 g.end()
-```
-
-```mermaid
-flowchart LR
-  script[Script] -->|display_move| graphics[Graphics]
-  graphics -->|events| view[View_listener]
-  view -->|commands| viewer[morphoview]
-  script -->|Show_or_update| snapshot[U_S_snapshot]
-  snapshot --> viewer
 ```
 
 ## Non-goals
@@ -32,63 +77,69 @@ flowchart LR
 - Binary transport; pick events
 - `U O` / `U V` in the first cut (follow-on once redraw works)
 
-## Phase 1 — Graphics ids + Show define/draw foundation
+## Phases
+
+### Phase 1 — Entries + Show define/draw foundation
 
 **Files:** `share/modules/xgraphics.morpho`, `test/`
 
-1. `Graphics.display(item)` allocates id, stores entry `{ id, item, transform }`, returns id. No `id=` on mesh primitives.
-2. `Show` walks **entries**; emit define/draw with entry transforms.
-3. Opaque spheres: content fingerprint instancing + uniform `C`; translucent still expands.
-4. Keep `replace=true` → full `U S`.
-5. Tests: distinct ids from `display`; same primitive displayed twice → two ids; N colored opaque spheres → 1× `o`, N× `d`.
+**Steps:**
 
-No C viewer changes in this phase.
+1. `Graphics.display(item, position=, scale=, rotate=)` allocates id, stores entry `{ id, item, transform }`, returns id. No `id=` on mesh primitives. Coerce `position` to Matrix. Apply locked Sphere pose normalization.
+2. `Show` walks **entries**; emit define/draw from **entry SRT only**.
+3. Opaque spheres: fingerprint = refinement only + uniform `C`; translucent expand **unit** item + entry SRT (never re-bake center/r).
+4. `Graphics.add`: remap right-hand entry ids (unique within one Graphics).
+5. Keep `replace=true` → full `U S`.
+6. Tests: distinct ids; same primitive twice → two ids; N colored opaque spheres → 1× `o`, N× `d`; translucent posed sphere no double scale; no-pose `Sphere(center,r)` still correct under `Show`.
 
-## Phase 2 — Viewer redraw support
+**Done when:** `Show(g)` / `View.open(g)` emit correctly from entries; set-and-forget path unchanged in spirit; no C viewer changes.
 
-**Files:** `src/command.c` / `command.h`, `src/scene.c` / `scene.h`, `src/display.c`, docs, `morphoview.morpho`
+### Phase 2 — Viewer redraw support
 
-1. Sticky `command_applyctx` across `command_process` batches.
-2. Command `D` — clear displaylist only; mark changed.
+**Files:** `src/command.c` / `command.h`, `src/scene.c` / `scene.h`, `src/display.c`, docs, `share/modules/morphoview.morpho`
+
+**Steps:**
+
+1. Sticky `command_applyctx` across `command_process` batches (follow-up chunks may omit leading `S`).
+2. Command `D` — clear displaylist only; mark scene changed; keep objects / colors / fonts / pools.
 3. `display_prepareall`: `render_reset` before re-prepare after `D`.
-4. Parse: `D` must not require parse-time `has_scene` (ok-before-apply race).
+4. Parse: `D` must **not** require parse-time `has_scene` (ok-before-apply race).
 5. Docs + make `test/command/definedraw-redraw` runnable.
 6. `View.redraw(commands)` — low-level escape hatch (`D\n` + chunk).
 
-## Phase 3 — Graphics mutation API + View listener
+**Done when:** `definedraw-redraw` fixture runs; `View.redraw` can clear draws and re-issue poses without `U S`.
 
-**Files:** `xgraphics.morpho` (`Graphics`), `morphoview.morpho` (`View`)
+### Phase 3 — `move` + View listener
 
-### Graphics
+**Files:** `share/modules/xgraphics.morpho` (`Graphics`), `share/modules/morphoview.morpho` (`View`)
 
-Id-addressable displaylist with presentation:
+**Before coding, lock:**
 
-- `display(item)` assigns/returns Graphics-owned id; store `{ id, item, transform }`.
-- `move(id, …)` updates Graphics state, notifies listeners.
-- Events (minimal): `defined`, `moved` (add `removed` / `replaced` when needed).
-- `addListener` / `removeListener` — no global dependents framework.
-- **Batching:** `begin()` / `end()` coalesce N moves → one viewer chunk per frame.
+- Who owns `graphicsId → viewerObjectId` (View session state vs Show); `open` builds map from one `Show.write` (no fake N `defined`).
+- Mid-session `display` after `open` emits `defined` (define+draw); batched `display` queued.
+- Minimal events: `defined`, `moved` (`removed` / `replaced` later).
 
-### View as listener
+**Steps:**
 
-- `View(g)` / `open(Graphics g)`: register listener; initial define+draw.
-- On `defined`: emit define (+ draw if pose known).
-- On batched `moved`: `D` + redraw current poses (v1: full draw rebuild; optimize later).
-- `update(Graphics)` remains full `U S` (define meaning: replace live content).
-- Keep `redraw(ascii)` for tests.
+1. `move(id, position=, scale=, rotate=)` — locked merge rules; notify listeners.
+2. `begin` / `end` — immediate outside batch; queue inside; no nested `begin`.
+3. `addListener` / `removeListener` on Graphics (no global dependents framework).
+4. `open(g)`: one `Show.write`, then listen; `update(g)`: full `U S`, rebind, drop pending batch, reset Show/object maps.
+5. On batched `moved`: `D` + full pose redraw (v1; known limit for large static+one mover).
+6. Keep `View.redraw(ascii)` for tests.
 
-## Phase 4 — Yardstick
+**Done when:** script can `display` → `open` → `begin`/`move`/`end` and viewer updates without per-frame `U S`.
 
-Rewrite `examples/amigaball.morpho`: define once on `Graphics`, `View(g)`, physics via `g.move` — no per-frame `update(Graphics)`.
+### Phase 4 — Yardstick
 
-## Phase 5 — Follow-ons
+**Files:** `examples/amigaball.morpho`
+
+Rewrite: define once on `Graphics`, pose on `display` (or `move` before `open`), physics via `g.move` — no per-frame `update(Graphics)`. No first-paint flash.
+
+**Done when:** amigaball runs as a live Graphics session with define-once + move.
+
+### Phase 5 — Follow-ons
 
 - `U O` / `U V` / `X O`
 - Finer draw updates without full `D` every frame
 - Formal Morpho dependents framework
-
-## Risks
-
-- **Pose model:** unit mesh at origin + Graphics transform (amigaball pattern); avoid fighting baked vertices.
-- **Listener lifetime:** register/unregister on open/close.
-- **Snapshot vs live:** define `update(g)` after `View(g)` as full replace.
