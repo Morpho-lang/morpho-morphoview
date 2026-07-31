@@ -246,6 +246,8 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             if (!ctx->scene || !ctx->cobject) return false;
 
             if (c->format) {
+                if (ctx->cobject->vertexdata.format)
+                    free(ctx->cobject->vertexdata.format);
                 ctx->cobject->vertexdata.format=c->format;
                 c->format=NULL; /* transferred */
             }

@@ -82,7 +82,10 @@ void scene_clear(scene *s) {
 
     for (unsigned int i=0; i<s->objectlist.count; i++) {
         gobject *obj = &s->objectlist.data[i];
-        if (obj->vertexdata.format) free(obj->vertexdata.format);
+        if (obj->vertexdata.format) {
+            free(obj->vertexdata.format);
+            obj->vertexdata.format=NULL;
+        }
         varray_gelementclear(&obj->elements);
     }
 
@@ -260,10 +263,11 @@ scene *scene_find(int id) {
 gobject *scene_addobject(scene *s, int id) {
     gobject obj;
     obj.id=id;
+    obj.vertexdata.format=NULL;
     obj.vertexdata.indx=SCENE_EMPTY;
     obj.vertexdata.length=SCENE_EMPTY;
     varray_gelementinit(&obj.elements);
-    
+
     varray_gobjectadd(&s->objectlist, &obj, 1);
     return &s->objectlist.data[s->objectlist.count-1];
 }

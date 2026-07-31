@@ -653,44 +653,58 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
 /** Prepares an object for rendering, inserting appropriate instructions into the render list */
 void render_prepareobject(renderer *r, scene *s, gdraw *drw, GLuint *carray) {
     renderobject *obj = render_findrenderobjectwithid(&r->objects, drw->id);
-    
+    if (!obj || !obj->obj || !obj->buffer) return;
+
     /* Select the vertex array if necessary */
     renderinstruction ins = { .instruction = RARRAY, .data.array.handle = obj->buffer->array, .obj=obj };
     if (*carray!=obj->buffer->array) varray_renderinstructionadd(&r->renderlist, &ins, 1);
     *carray=obj->buffer->array;
-    
+
+    /* Vertex colors (format has 'c') must not inherit a prior uniform `C`
+     * (e.g. translucent mesh); otherwise uUseUniform stays set and albedo/alpha
+     * come from that uniform instead of fragColor. */
+    if (obj->obj->vertexdata.format && strchr(obj->obj->vertexdata.format, 'c')) {
+        renderinstruction cins = { .instruction = RCOLOR, .obj=obj };
+        cins.data.color.rgba[0]=1.0f;
+        cins.data.color.rgba[1]=1.0f;
+        cins.data.color.rgba[2]=1.0f;
+        cins.data.color.rgba[3]=1.0f;
+        cins.data.color.use_uniform=0;
+        varray_renderinstructionadd(&r->renderlist, &cins, 1);
+    }
+
     /* Change the model matrix if provided */
     if (drw->matindx!=SCENE_EMPTY) {
-        renderinstruction ins = { .instruction = RMODEL,
-                                  .data.model.model = &s->data.data[drw->matindx],
-                                  .obj=obj };
-        varray_renderinstructionadd(&r->renderlist, &ins, 1);
+        renderinstruction mins = { .instruction = RMODEL,
+                                   .data.model.model = &s->data.data[drw->matindx],
+                                   .obj=obj };
+        varray_renderinstructionadd(&r->renderlist, &mins, 1);
     }
-    
+
     /* Now loop over the elements in the object */
     int offset=obj->eoffset;
     for (unsigned int j=0; j<obj->obj->elements.count; j++) {
         gelement *el = &obj->obj->elements.data[j];
-        renderinstruction ins = { .instruction = RNOP, .obj=obj};
-        
+        renderinstruction eins = { .instruction = RNOP, .obj=obj};
+
         switch (el->type) {
             case FACETS:
-                ins.instruction=RTRIANGLES;
-                ins.data.triangles.offset=(void *) (sizeof(GLuint)*offset);
-                ins.data.triangles.length=el->length;
+                eins.instruction=RTRIANGLES;
+                eins.data.triangles.offset=(void *) (sizeof(GLuint)*offset);
+                eins.data.triangles.length=el->length;
                 offset+=el->length;
                 break;
             case LINES:
-                ins.instruction=RLINES;
-                ins.data.triangles.offset=(void *) (sizeof(GLuint)*offset);
-                ins.data.triangles.length=el->length;
+                eins.instruction=RLINES;
+                eins.data.triangles.offset=(void *) (sizeof(GLuint)*offset);
+                eins.data.triangles.length=el->length;
                 offset+=el->length;
                 break;
             default:
                 break;
         }
-        
-        if (ins.instruction!=RNOP) varray_renderinstructionadd(&r->renderlist, &ins, 1);
+
+        if (eins.instruction!=RNOP) varray_renderinstructionadd(&r->renderlist, &eins, 1);
     }
 }
 
