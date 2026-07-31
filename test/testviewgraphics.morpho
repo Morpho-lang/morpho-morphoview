@@ -1,11 +1,11 @@
 // Graphics → View via Show serializer (open + update).
 // Expect: prints "ok" then exits.
-// Requires: morphoview on PATH, morpho-zeromq, display, graphics.
+// Requires: morphoview on PATH, morpho-zeromq, display, xgraphics.
 //
 //   cd test && morpho6 testviewgraphics.morpho
 
 import morphoview
-import graphics
+import xgraphics
 
 fn triangle(angle) {
   var c = cos(angle)

@@ -7,7 +7,7 @@
 // Requires: morphoview on PATH, morpho-zeromq, display.
 
 import morphoview
-import graphics
+import xgraphics
 import color
 import constants
 

@@ -1,12 +1,12 @@
 // Translucent spheres via Graphics transmit → View.
 // A few overlapping colored spheres; depth sort should keep nearer ones on top.
 // Expect: window opens; prints "ok" on close / timeout.
-// Requires: morphoview on PATH, morpho-zeromq, display, graphics, color.
+// Requires: morphoview on PATH, morpho-zeromq, display, xgraphics, color.
 //
 //   cd test && morpho6 testviewtransmit.morpho
 
 import morphoview
-import graphics
+import xgraphics
 import color
 
 fn glassSpheres() {

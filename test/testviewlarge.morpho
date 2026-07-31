@@ -1,12 +1,12 @@
 // Large tetrahedron → View: exercises auto scene bounds / camera fit.
 // Geometry is deliberately far outside [-1,1]; without auto-fit it would
 // be clipped or tiny. Expect: tet fills the window; prints "ok" on close.
-// Requires: morphoview on PATH, morpho-zeromq, display, graphics.
+// Requires: morphoview on PATH, morpho-zeromq, display, xgraphics.
 //
 //   cd test && morpho6 testviewlarge.morpho
 
 import morphoview
-import graphics
+import xgraphics
 
 fn largeTetrahedron(scale) {
   // Regular tetrahedron: rows xyz, columns vertices (unnormalized).
