@@ -137,6 +137,13 @@ class XShow {
     }
   }
 
+  // 3 significant figures — enough for display; keeps ASCII small vs full doubles.
+  // Morpho requires a width field (`%.3g` is rejected); use 0 to avoid padding spaces.
+  // Coerce via Float: Matrix/Color often yield Ints, and Int.format rejects %g.
+  fmt(x) {
+    return Float(x).format("%0.3g")
+  }
+
   /* The visit method for a generic `item`.
 
   Here, we define this separate `visitGeneric` method that performs the intended generic task, and have the actual generic `visit` method call `visitGeneric`. This enables calls to the generic fallback from *within a specific implementation*.
@@ -185,8 +192,8 @@ class XShow {
     }
 
     out.write("i")
-    out.write("s ${item.r}")
-    out.write("t ${item.center[0]} ${item.center[1]} ${item.center[2]}")
+    out.write("s ${self.fmt(item.r)}")
+    out.write("t ${self.fmt(item.center[0])} ${self.fmt(item.center[1])} ${self.fmt(item.center[2])}")
     out.write("d ${self.spheres[n].id}")
   }
 
@@ -211,12 +218,16 @@ class XShow {
 
   /** Emit `c` for rgb[+alpha]; returns color id. Alpha < ~1 → RGBA. */
   addRgb(rgb, alpha, out) {
-    var key = "${rgb[0]} ${rgb[1]} ${rgb[2]} ${alpha}"
+    var r = self.fmt(rgb[0])
+    var g = self.fmt(rgb[1])
+    var b = self.fmt(rgb[2])
+    var a = self.fmt(alpha)
+    var key = "${r} ${g} ${b} ${a}"
     if (!self.colors.contains(key)) {
       var id = self.colors[key] = self.colors.count()
       out.write(alpha < 0.999 ?
-                "c ${id} ${rgb[0]} ${rgb[1]} ${rgb[2]} ${alpha}" :
-                "c ${id} ${rgb[0]} ${rgb[1]} ${rgb[2]}")
+                "c ${id} ${r} ${g} ${b} ${a}" :
+                "c ${id} ${r} ${g} ${b}")
     }
     return self.colors[key]
   }
@@ -242,16 +253,16 @@ class XShow {
     for (i in 0...nv) {
       var line = ""
       for (j in 0...dim) {
-        line+="${x[j,i]} "
+        line+="${self.fmt(x[j,i])} "
       }
       for (j in 0...dim) {
-        line+="${n[j,i]} "
+        line+="${self.fmt(n[j,i])} "
       }
       if (includeColor) {
         if (localColor) {
-          for (j in 0...3) line+="${col[j,i]} "
+          for (j in 0...3) line+="${self.fmt(col[j,i])} "
         } else {
-          for (j in 0...item.colors.count()) line+="${col[j]} "
+          for (j in 0...item.colors.count()) line+="${self.fmt(col[j])} "
         }
       }
       out.write(line)
@@ -345,7 +356,7 @@ class XShow {
   addColor(color, out) {
     if (!self.colors.contains(color)) {
       var id = self.colors[color] = self.colors.count()
-      out.write("c ${id} ${color.r} ${color.g} ${color.b}")
+      out.write("c ${id} ${self.fmt(color.r)} ${self.fmt(color.g)} ${self.fmt(color.b)}")
     }
     return self.colors[color]
   }
@@ -382,10 +393,10 @@ class XShow {
     var m = item.transformationmatrix()
     if (m) {
       var str = "m"
-      for (i in 0..3) for (j in 0..3) str+=" "+String(m[i,j])
+      for (i in 0..3) for (j in 0..3) str+=" "+self.fmt(m[i,j])
       out.write(str)
     }
-    out.write("t ${item.posn[0]} ${item.posn[1]} ${item.posn[2]}")
+    out.write("t ${self.fmt(item.posn[0])} ${self.fmt(item.posn[1])} ${self.fmt(item.posn[2])}")
     out.write("T ${id} \"${item.string}\"")
   }
 
