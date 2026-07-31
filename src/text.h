@@ -21,6 +21,9 @@
 #define TEXT_DEFAULTHEIGHT 960
 #define TEXTSKYLINE_EMPTY -1
 
+/** World-space scale from FreeType pixels (same as render_rendertext). */
+#define TEXT_WORLD_SCALE (1.0f/720.0f)
+
 /** Skyline data structure for rectangle packing */
 typedef struct slentry {
     int xpos, ypos, width;

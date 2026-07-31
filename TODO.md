@@ -83,7 +83,7 @@ Stress demo (full `U S` each frame on purpose): [`examples/amigaball.morpho`](ex
 
 ## Framing / camera
 
-- [x] Scene AABB: auto-compute from drawn geometry, or explicit `B xmin xmax ymin ymax zmin zmax`
+- [x] Scene AABB: auto-compute from drawn geometry **and text glyph extents**, or explicit `B xmin xmax ymin ymax zmin zmax`
 - [x] Auto-fit on first `PREPARE` (and after `B`) unless the user moved the camera; Tab restores fitted home view
 - [x] Default light / viewPos placed outside scene AABB (unless an explicit light is set later)
 - [x] Explicit light command: `L <x y z [r g b]>` / `L a` (auto)

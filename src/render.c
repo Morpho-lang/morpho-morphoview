@@ -372,7 +372,7 @@ void render_rendertext(renderer *r, int rfontid, char *text) {
     
     renderfont *font = &r->fonts.data[rfontid];
     
-    float scale = 1.0/720.0;
+    float scale = TEXT_WORLD_SCALE;
 
     glBindTexture(GL_TEXTURE_2D, font->texture);
     

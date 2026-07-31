@@ -183,7 +183,74 @@ static void scene_bbox_expand(float bbox[6], float x, float y, float z, bool *an
     }
 }
 
-/** Auto-compute AABB from drawn object positions (× draw matrix when present). */
+/** Expand AABB by a model-space point, optionally transformed by column-major M. */
+static void scene_bbox_expand_model(float bbox[6], float *M, float x, float y, float z, bool *any) {
+    if (M) {
+        float wx=M[0]*x + M[4]*y + M[8]*z  + M[12];
+        float wy=M[1]*x + M[5]*y + M[9]*z  + M[13];
+        float wz=M[2]*x + M[6]*y + M[10]*z + M[14];
+        x=wx; y=wy; z=wz;
+    }
+    scene_bbox_expand(bbox, x, y, z, any);
+}
+
+/** Local AABB of a string in the same layout as render_rendertext; false if no glyphs. */
+static bool scene_text_local_bbox(textfont *font, const char *text, float out[6]) {
+    float scale = TEXT_WORLD_SCALE;
+    float x=0.0f, y=0.0f, z=0.0f;
+    bool any=false;
+
+    for (char *c = (char *) text, *next; c && *c!='\0'; c=next) {
+        textglyph glyph;
+        if (!text_findglyph(font, c, &glyph, &next)) break;
+
+        float xpos = x + glyph.bearingx * scale;
+        float ypos = y - (glyph.height - glyph.bearingy) * scale;
+        float w = glyph.width * scale;
+        float h = glyph.height * scale;
+
+        scene_bbox_expand(out, xpos,     ypos,     z, &any);
+        scene_bbox_expand(out, xpos + w, ypos + h, z, &any);
+
+        x += (glyph.advance >> 6) * scale;
+        z += 1e-4f;
+    }
+    return any;
+}
+
+/** Expand scene bbox by glyph quads for a TEXT draw (origin alone if empty). */
+static void scene_bbox_expand_text(scene *s, gdraw *drw, float bbox[6], bool *any) {
+    if (drw->id<0 || (unsigned) drw->id>=s->textlist.count) return;
+    gtext *txt=&s->textlist.data[drw->id];
+    if (!txt->text) return;
+
+    textfont *font=scene_getfontfromid(s, txt->fontid);
+    if (!font) return;
+
+    float *M=NULL;
+    if (drw->matindx!=SCENE_EMPTY) M=&s->data.data[drw->matindx];
+
+    float local[6]={0};
+    if (!scene_text_local_bbox(font, txt->text, local)) {
+        /* No ink — still count the baseline origin. */
+        scene_bbox_expand_model(bbox, M, 0.0f, 0.0f, 0.0f, any);
+        return;
+    }
+
+    /* Transform the eight corners of the local text AABB. */
+    for (int i=0; i<2; i++) {
+        float x = (i==0) ? local[0] : local[1];
+        for (int j=0; j<2; j++) {
+            float y = (j==0) ? local[2] : local[3];
+            for (int k=0; k<2; k++) {
+                float z = (k==0) ? local[4] : local[5];
+                scene_bbox_expand_model(bbox, M, x, y, z, any);
+            }
+        }
+    }
+}
+
+/** Auto-compute AABB from drawn objects and text glyph extents (× draw matrix). */
 bool scene_computebbox(scene *s) {
     if (!s) return false;
 
@@ -192,6 +259,11 @@ bool scene_computebbox(scene *s) {
 
     for (unsigned int i=0; i<s->displaylist.count; i++) {
         gdraw *drw=&s->displaylist.data[i];
+
+        if (drw->type==TEXT) {
+            scene_bbox_expand_text(s, drw, bbox, &any);
+            continue;
+        }
         if (drw->type!=OBJECT) continue;
 
         gobject *obj=scene_getgobjectfromid(s, drw->id);
@@ -216,15 +288,7 @@ bool scene_computebbox(scene *s) {
             float x=base[0];
             float y=(s->dim>1) ? base[1] : 0.0f;
             float z=(s->dim>2) ? base[2] : 0.0f;
-
-            if (M) {
-                float wx=M[0]*x + M[4]*y + M[8]*z  + M[12];
-                float wy=M[1]*x + M[5]*y + M[9]*z  + M[13];
-                float wz=M[2]*x + M[6]*y + M[10]*z + M[14];
-                x=wx; y=wy; z=wz;
-            }
-
-            scene_bbox_expand(bbox, x, y, z, &any);
+            scene_bbox_expand_model(bbox, M, x, y, z, &any);
         }
     }
 
