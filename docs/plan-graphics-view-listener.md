@@ -91,7 +91,7 @@ g.end()
 3. Spheres: store abstract `Sphere`; Show `visitGeneric` (no cache). Entry pose recorded; bake-vs-entry-SRT emit polish later.
 4. `Graphics.add`: remap right-hand entry ids (unique within one Graphics).
 5. Keep `replace=true` → full `U S`.
-6. Tests: distinct ids; same primitive twice → two ids; Sphere unit + entry SRT (posed / translucent / no-pose `Sphere(center,r)`).
+6. Tests: distinct ids; same primitive twice → two ids; `add` remaps right-hand ids; Sphere entry pose recorded; `Show` / `replace` still work.
 
 **Done when:** `Show(g)` / `View.open(g)` emit correctly from entries; set-and-forget path unchanged in spirit; no C viewer changes.
 

@@ -1,0 +1,102 @@
+// Graphics entries: ids, pose recording, add remap, Show still works.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testgraphicsentries.morpho
+
+import morphoview
+import xgraphics
+import color
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+/* ---- ids ---- */
+var g = Graphics()
+var p0 = PointCloud(Matrix([[0], [0], [0]]))
+var id1 = g.display(p0)
+var id2 = g.display(p0)
+expect(id1 == 1, "first id is 1")
+expect(id2 == 2, "second id is 2")
+expect(id1 != id2, "same primitive displayed twice → two ids")
+expect(g.displaylist.count() == 2, "two entries")
+expect(g.displaylist[0].id == id1 && g.displaylist[1].id == id2, "entry ids match")
+
+/* ---- Sphere entry pose (no pose args) ---- */
+var gs = Graphics()
+var sid = gs.display(Sphere([1, 2, 3], 0.5, color=Red, maxrefine=1))
+expect(sid == 1, "sphere id")
+expect(ismatrix(gs.displaylist[0].position), "position is Matrix")
+expect(gs.displaylist[0].position[0] == 1, "center → entry.position")
+expect(gs.displaylist[0].scale == 0.5, "r → entry.scale")
+expect(isobject(gs.displaylist[0].item), "stores abstract Sphere")
+expect(gs.displaylist[0].item.r == 0.5, "Sphere.r unchanged")
+
+/* ---- Sphere with pose args ---- */
+var gp = Graphics()
+var unit = Sphere([0, 0, 0], 1, color=Blue, maxrefine=1)
+gp.display(unit, [4, 5, 6], scale=2.5, rotate=[0.1, 0, 1, 0])
+var e = gp.displaylist[0]
+expect(e.position[0] == 4 && e.position[1] == 5 && e.position[2] == 6, "posed position")
+expect(e.scale == 2.5, "posed scale")
+expect(!isnil(e.rotate), "posed rotate recorded")
+expect(e.item.r == 2.5, "posed Sphere stores r for Show bake")
+expect(e.item.center[0] == 4, "posed Sphere stores center for Show bake")
+
+/* ---- add remaps right-hand ids ---- */
+var a = Graphics()
+a.display(PointCloud(Matrix([[0], [0], [0]])))
+a.display(PointCloud(Matrix([[1], [0], [0]])))
+var b = Graphics()
+b.display(PointCloud(Matrix([[2], [0], [0]])))
+b.display(Sphere([0, 0, 0], 1, maxrefine=1))
+expect(b.displaylist[0].id == 1 && b.displaylist[1].id == 2, "right starts at 1")
+var u = a.add(b)
+expect(u.displaylist.count() == 4, "union has four entries")
+expect(u.displaylist[0].id == 1 && u.displaylist[1].id == 2, "left ids kept")
+expect(u.displaylist[2].id == 3 && u.displaylist[3].id == 4, "right ids remapped")
+expect(b.displaylist[0].id == 1, "right Graphics unchanged")
+expect(u.display(PointCloud(Matrix([[3], [0], [0]]))) == 5, "ids continue after add")
+
+/* ---- Show still works from entries ---- */
+var buf = Buf()
+Show().write(gs, buf)
+expect(countPrefix(buf.lines, "o ") == 1, "Show emits sphere object")
+expect(countPrefix(buf.lines, "d ") == 1, "Show emits sphere draw")
+
+var buf2 = Buf()
+Show().write(g, buf2)
+expect(countPrefix(buf2.lines, "o ") == 2, "Show emits two point clouds")
+expect(countPrefix(buf2.lines, "d ") == 2, "Show draws two point clouds")
+
+/* ---- replace / U S preamble still works ---- */
+var buf3 = Buf()
+var show = Show()
+show.replace = true
+show.write(gs, buf3)
+expect(buf3.lines.count() > 0 && buf3.lines[0].count() >= 3 && buf3.lines[0][0] == "U",
+       "replace path starts with U")
+
+print "ok"
