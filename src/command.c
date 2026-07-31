@@ -647,71 +647,150 @@ bool command_enqueue_owned(parser *p, mv_command *cmd) {
 }
 
 /* **********************************************************************
+ * Bulk number parse (count → one alloc → fill)
+ * ********************************************************************** */
+
+static const char *command_skipws(const char *s) {
+    while (*s==' ' || *s=='\t' || *s=='\r' || *s=='\n') s++;
+    return s;
+}
+
+/** Advance *sp past one number matching the morphoview lexer; return false if none. */
+static bool command_scannumber(const char **sp, bool integers_only) {
+    const char *p = *sp;
+
+    if (*p=='-') {
+        if (!isdigit((unsigned char) p[1])) return false;
+        p++;
+    }
+    if (!isdigit((unsigned char) *p)) return false;
+    while (isdigit((unsigned char) *p)) p++;
+
+    bool isfloat = false;
+    if (*p=='.') {
+        char next = p[1];
+        if (isdigit((unsigned char) next) || next==' ' || next=='\t' ||
+            next=='\r' || next=='\n' || next=='\0') {
+            isfloat = true;
+            p++;
+            while (isdigit((unsigned char) *p)) p++;
+        }
+    }
+
+    if (*p=='e' || *p=='E') {
+        const char *e = p + 1;
+        if (*e=='+' || *e=='-') e++;
+        if (!isdigit((unsigned char) *e)) {
+            /* Incomplete exponent — not a valid number token. */
+            return false;
+        }
+        isfloat = true;
+        p = e;
+        while (isdigit((unsigned char) *p)) p++;
+    }
+
+    if (integers_only && isfloat) return false;
+
+    *sp = p;
+    return true;
+}
+
+/** Count consecutive number tokens starting at the current (unconsumed) token. */
+static unsigned int command_countnumbersahead(parser *p, bool integers_only) {
+    if (integers_only) {
+        if (!parse_checktoken(p, MVTOKEN_INTEGER)) return 0;
+    } else if (!command_isnumerical(p)) {
+        return 0;
+    }
+
+    const char *s = p->current.start;
+    unsigned int n = 0;
+    for (;;) {
+        s = command_skipws(s);
+        if (!command_scannumber(&s, integers_only)) break;
+        n++;
+    }
+    return n;
+}
+
+/** Parse n floats into a pre-sized buffer (stops early if fewer numbers remain). */
+static bool command_parsefloatsinto(parser *p, float *out, unsigned int n, unsigned int *written) {
+    unsigned int i = 0;
+    while (i<n && command_isnumerical(p)) {
+        if (!command_parsefloat(p, &out[i])) return false;
+        i++;
+    }
+    *written = i;
+    return true;
+}
+
+/** Parse n integers into a pre-sized buffer. */
+static bool command_parseintsinto(parser *p, int *out, unsigned int n, unsigned int *written) {
+    unsigned int i = 0;
+    while (i<n && parse_checktoken(p, MVTOKEN_INTEGER)) {
+        if (!command_parseinteger(p, &out[i])) return false;
+        i++;
+    }
+    *written = i;
+    return true;
+}
+
+/* **********************************************************************
  * Parse handlers (emit only)
  * ********************************************************************** */
 
 bool command_parsecolor(parser *p, void *out) {
     (void) out;
     int id;
-    varray_float rgb;
 
     PARSE_CHECK(command_parseinteger(p, &id));
 
-    varray_floatinit(&rgb);
-    while (command_isnumerical(p)) {
-        float f;
-        if (!command_parsefloat(p, &f)) {
-            varray_floatclear(&rgb);
+    unsigned int n = command_countnumbersahead(p, false);
+    float *rgb = NULL;
+    unsigned int written = 0;
+
+    if (n>0) {
+        rgb = malloc(sizeof(float)*n);
+        if (!rgb) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
             return false;
         }
-        if (!varray_floatadd(&rgb, &f, 1)) {
-            varray_floatclear(&rgb);
-            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        if (!command_parsefloatsinto(p, rgb, n, &written)) {
+            free(rgb);
             return false;
         }
     }
 
     int components=3;
     int length=0;
-    if (rgb.count==0) {
+    if (written==0) {
         components=3;
         length=0;
-    } else if (rgb.count==4) {
+    } else if (written==4) {
         components=4;
         length=1;
-    } else if (rgb.count%3==0) {
+    } else if (written%3==0) {
         components=3;
-        length=rgb.count/3;
-    } else if (rgb.count%4==0) {
+        length=(int) (written/3);
+    } else if (written%4==0) {
         components=4;
-        length=rgb.count/4;
+        length=(int) (written/4);
     } else {
-        varray_floatclear(&rgb);
+        free(rgb);
         parse_error(p, false, COMMAND_INVLDCOLOR);
         return false;
     }
 
     mv_cmd_color *cmd = command_new(MVCMD_COLOR, sizeof(mv_cmd_color));
     if (!cmd) {
-        varray_floatclear(&rgb);
+        free(rgb);
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
         return false;
     }
     cmd->id=id;
     cmd->length=length;
     cmd->components=components;
-
-    if (rgb.count>0) {
-        cmd->rgb=malloc(sizeof(float)*rgb.count);
-        if (!cmd->rgb) {
-            varray_floatclear(&rgb);
-            command_free(&cmd->cmd);
-            parse_error(p, true, ERROR_ALLOCATIONFAILED);
-            return false;
-        }
-        memcpy(cmd->rgb, rgb.data, sizeof(float)*rgb.count);
-    }
-    varray_floatclear(&rgb);
+    cmd->rgb=rgb;
 
     return command_enqueue_owned(p, &cmd->cmd);
 }
@@ -822,7 +901,6 @@ bool command_parseobject(parser *p, void *out) {
 bool command_parsevertices(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
     char *format=NULL;
-    varray_float data;
 
     if (!ctx->has_scene || !ctx->has_object) {
         parse_error(p, true, COMMAND_NOOBJECT);
@@ -833,18 +911,20 @@ bool command_parsevertices(parser *p, void *out) {
         PARSE_CHECK(command_parsestring(p, &format));
     }
 
-    varray_floatinit(&data);
-    while (command_isnumerical(p)) {
-        float f;
-        if (!command_parsefloat(p, &f)) {
+    unsigned int n = command_countnumbersahead(p, false);
+    float *data = NULL;
+    unsigned int written = 0;
+
+    if (n>0) {
+        data = malloc(sizeof(float)*n);
+        if (!data) {
             free(format);
-            varray_floatclear(&data);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
             return false;
         }
-        if (!varray_floatadd(&data, &f, 1)) {
+        if (!command_parsefloatsinto(p, data, n, &written)) {
             free(format);
-            varray_floatclear(&data);
-            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            free(data);
             return false;
         }
     }
@@ -852,31 +932,19 @@ bool command_parsevertices(parser *p, void *out) {
     mv_cmd_vertices *cmd = command_new(MVCMD_VERTICES, sizeof(mv_cmd_vertices));
     if (!cmd) {
         free(format);
-        varray_floatclear(&data);
+        free(data);
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
         return false;
     }
     cmd->format=format;
-    cmd->length=data.count;
-
-    if (data.count>0) {
-        cmd->data=malloc(sizeof(float)*data.count);
-        if (!cmd->data) {
-            varray_floatclear(&data);
-            command_free(&cmd->cmd);
-            parse_error(p, true, ERROR_ALLOCATIONFAILED);
-            return false;
-        }
-        memcpy(cmd->data, data.data, sizeof(float)*data.count);
-    }
-    varray_floatclear(&data);
+    cmd->length=(int) written;
+    cmd->data=data;
 
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
 bool command_parseindex(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
-    varray_int indices;
 
     if (!ctx->has_scene || !ctx->has_object) {
         parse_error(p, true, COMMAND_NOOBJECT);
@@ -890,40 +958,31 @@ bool command_parseindex(parser *p, void *out) {
         etype=FACETS;
     }
 
-    varray_intinit(&indices);
-    while (parse_checktoken(p, MVTOKEN_INTEGER)) {
-        int i;
-        if (!command_parseinteger(p, &i)) {
-            varray_intclear(&indices);
+    unsigned int n = command_countnumbersahead(p, true);
+    int *indices = NULL;
+    unsigned int written = 0;
+
+    if (n>0) {
+        indices = malloc(sizeof(int)*n);
+        if (!indices) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
             return false;
         }
-        if (!varray_intadd(&indices, &i, 1)) {
-            varray_intclear(&indices);
-            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        if (!command_parseintsinto(p, indices, n, &written)) {
+            free(indices);
             return false;
         }
     }
 
     mv_cmd_element *cmd = command_new(MVCMD_ELEMENT, sizeof(mv_cmd_element));
     if (!cmd) {
-        varray_intclear(&indices);
+        free(indices);
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
         return false;
     }
     cmd->type=etype;
-    cmd->length=indices.count;
-
-    if (indices.count>0) {
-        cmd->indices=malloc(sizeof(int)*indices.count);
-        if (!cmd->indices) {
-            varray_intclear(&indices);
-            command_free(&cmd->cmd);
-            parse_error(p, true, ERROR_ALLOCATIONFAILED);
-            return false;
-        }
-        memcpy(cmd->indices, indices.data, sizeof(int)*indices.count);
-    }
-    varray_intclear(&indices);
+    cmd->length=(int) written;
+    cmd->indices=indices;
 
     return command_enqueue_owned(p, &cmd->cmd);
 }
