@@ -129,8 +129,24 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 
 ### Performance / bulk data
 
-- [ ] Binary / byte-buffer transport for large vertex payloads (ASCII remains fine for control)
-- [ ] Persistent apply context across `command_process` batches (needed for chunks that only do `U O` / `v` without a leading `S` / `U S`)
+Prioritize work that pays off **without** Morpho core / `graphics.morpho` changes. Graphics redesign (ids, define vs display, instancing) and binary vertex transport (needs a Morpho binary serialize path) are worthwhile but separate projects.
+
+**Done (package-only):**
+- [x] ASCII float emission at 3 sfs (`XShow.fmt` / `%0.3g`) — smaller strings, faster Morpho concat + C parse
+
+**Viewer-only speedups next** (no Morpho cooperation required):
+
+- [x] Changed-only prepare — `display_prepareall` uploads only scenes marked changed by the batch (skips untouched displays; light/title-only chunks need no rebuild)
+- [ ] Parse alloc — avoid per-float `varray_*add(..., 1)` growth; count/scan then one alloc (or grow geometrically)
+- [ ] Fewer CPU copies on the ASCII path — parse → command blob → `scene_adddata` → GPU; drop an intermediate where safe
+- [ ] Transparent centroid cache — recompute object AABB centroid only when geometry changes, not every frame
+- [ ] Draw-list hygiene — merge adjacent draws that share VAO/material when packing the renderlist (matters at larger object counts)
+
+**Later concrete projects** (need Morpho-side work or Graphics model):
+
+- [ ] Binary / byte-buffer vertex transport (viewer IR already accepts blobs; Morpho needs a binary serialize + ZMQ framing path)
+- [ ] Persistent apply context + `U O` / `U V` / display-move (animation track; pairs with Graphics review)
+- [ ] Graphics review — stable ids; define vs display; dedup identical primitives
 
 ## Demos / tests
 

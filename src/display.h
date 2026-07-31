@@ -67,7 +67,7 @@ void display_requestclose(display *d);
 void display_requestcloseall(void);
 bool display_anyopen(void);
 void display_fit(display *d);
-void display_prepareall(void);
+void display_prepareall(void); /**< Upload only scenes marked changed since last prepare */
 
 void display_loop(void);
 

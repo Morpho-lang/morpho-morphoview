@@ -71,9 +71,15 @@ scene *scene_new(int id, int dim) {
         varray_gtextinit(&new->textlist);
         varray_floatinit(&new->data);
         varray_intinit(&new->indx);
+        new->changed = false;
         scene_add(new);
     }
     return new;
+}
+
+/** Mark scene for GL upload / camera fit on next display_prepareall. */
+void scene_markchanged(scene *s) {
+    if (s) s->changed = true;
 }
 
 /** Free scene contents but keep the scene struct, id, dim, and list link. */

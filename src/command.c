@@ -131,6 +131,15 @@ bool command_enqueue(mv_command *cmd) {
  * Apply
  * ********************************************************************** */
 
+/* **********************************************************************
+ * Apply
+ * ********************************************************************** */
+
+/** Scene content / bounds changed — needs GL upload or camera fit. */
+static void command_touchscene(command_applyctx *ctx) {
+    if (ctx->scene) scene_markchanged(ctx->scene);
+}
+
 bool command_apply(mv_command *cmd, command_applyctx *ctx) {
     switch (cmd->type) {
         case MVCMD_SCENE_CREATE: {
@@ -167,6 +176,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             }
 
             scene_clear(s);
+            scene_markchanged(s);
 
             ctx->display = display_findforscene(s);
             if (ctx->display && ctx->display->window) {
@@ -219,10 +229,12 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             if (!ctx->scene) return false;
             scene_setbbox(ctx->scene, c->bbox[0], c->bbox[1], c->bbox[2],
                           c->bbox[3], c->bbox[4], c->bbox[5]);
+            command_touchscene(ctx);
             return true;
         }
 
         case MVCMD_LIGHT: {
+            /* Lighting is sampled each frame from the scene; no GL rebuild. */
             mv_cmd_light *c = MVCMD_AS_LIGHT(cmd);
             if (!ctx->scene) return false;
             if (c->auto_mode) {
@@ -239,7 +251,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
         case MVCMD_OBJECT:
             if (!ctx->scene) return false;
             ctx->cobject=scene_addobject(ctx->scene, MVCMD_AS_OBJECT(cmd)->id);
-            return (ctx->cobject!=NULL);
+            if (!ctx->cobject) return false;
+            command_touchscene(ctx);
+            return true;
 
         case MVCMD_VERTICES: {
             mv_cmd_vertices *c = MVCMD_AS_VERTICES(cmd);
@@ -260,6 +274,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 }
                 ctx->cobject->vertexdata.length += c->length;
             }
+            command_touchscene(ctx);
             return true;
         }
 
@@ -280,6 +295,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             }
 
             scene_addelement(ctx->cobject, &el);
+            command_touchscene(ctx);
             return true;
         }
 
@@ -292,12 +308,14 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 int indx=scene_adddata(ctx->scene, c->rgb, c->length*ncomp);
                 scene_addcolor(ctx->scene, c->id, c->length, ncomp, indx);
             }
+            command_touchscene(ctx);
             return true;
         }
 
         case MVCMD_SELECT_COLOR:
             if (!ctx->scene) return false;
             scene_adddraw(ctx->scene, COLOR, MVCMD_AS_SELECT_COLOR(cmd)->id, -1);
+            command_touchscene(ctx);
             return true;
 
         case MVCMD_MATERIAL: {
@@ -306,6 +324,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             float coeffs[4] = { c->ka, c->kd, c->ks, c->shininess };
             int matindx=scene_adddata(ctx->scene, coeffs, 4);
             scene_adddraw(ctx->scene, SHADE, c->mode, matindx);
+            command_touchscene(ctx);
             return true;
         }
 
@@ -317,13 +336,16 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 matindx=scene_adddata(ctx->scene, c->matrix, 16);
             }
             scene_adddraw(ctx->scene, OBJECT, c->id, matindx);
+            command_touchscene(ctx);
             return true;
         }
 
         case MVCMD_FONT: {
             mv_cmd_font *c = MVCMD_AS_FONT(cmd);
             if (!ctx->scene) return false;
-            return scene_addfont(ctx->scene, c->id, c->path, c->size, NULL);
+            if (!scene_addfont(ctx->scene, c->id, c->path, c->size, NULL)) return false;
+            command_touchscene(ctx);
+            return true;
         }
 
         case MVCMD_TEXT: {
@@ -342,6 +364,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 matindx=scene_adddata(ctx->scene, c->matrix, 16);
             }
             scene_adddraw(ctx->scene, TEXT, tid, matindx);
+            command_touchscene(ctx);
             return true;
         }
 

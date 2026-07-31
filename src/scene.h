@@ -140,12 +140,15 @@ typedef struct sscene {
     varray_gtext textlist;
     
     varray_gdraw displaylist;
+
+    bool changed; /** true if scene needs GL upload / camera fit on next prepare */
 } scene;
 
 scene *scene_new(int id, int dim);
 scene *scene_find(int id);
 void scene_clear(scene *s); /**< Free contents; keep id/dim and list link */
 void scene_free(scene *s);
+void scene_markchanged(scene *s);
 
 void scene_setbbox(scene *s, float xmin, float xmax, float ymin, float ymax, float zmin, float zmax);
 bool scene_computebbox(scene *s);

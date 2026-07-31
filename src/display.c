@@ -341,10 +341,10 @@ void display_fit(display *d) {
     d->s->bbox_fit_pending = false;
 }
 
-/** Upload every open display's scene to GL (each with its own context) */
+/** Upload changed scenes to GL (skip displays whose scene was not touched). */
 void display_prepareall(void) {
     for (display *d = opendisplays; d!=NULL; d=d->next) {
-        if (!d->window || !d->s) continue;
+        if (!d->window || !d->s || !d->s->changed) continue;
         glfwMakeContextCurrent(d->window);
 
         if (!d->s->bbox_explicit)
@@ -355,6 +355,8 @@ void display_prepareall(void) {
         if (d->s->bbox_valid && !d->view_user_modified &&
             (!d->view_fitted || d->s->bbox_fit_pending))
             display_fit(d);
+
+        d->s->changed = false;
     }
 }
 

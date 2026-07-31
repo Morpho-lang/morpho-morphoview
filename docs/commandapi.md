@@ -61,9 +61,9 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_DRAW` | `d <id>` | Object id; optional baked 4×4 matrix |
 | `MVCMD_FONT` | `F <id> "<path>" <size>` | Font id, path, size |
 | `MVCMD_TEXT` | `T <fontid> "<string>"` | Font id, string; optional matrix |
-| `MVCMD_PREPARE` | *(none — appended by parse)* | Upload every open display’s scene to GL |
+| `MVCMD_PREPARE` | *(none — appended by parse)* | Upload **changed** scenes to GL (scenes touched by this batch) |
 
-`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `X S` marks that scene’s window for close (loop tears it down). `Q` marks every window for close; if none are open and the listener is active, emits `window.closed` and stops. `MVCMD_PREPARE` calls `display_prepareall()`, which auto-computes the scene AABB when no explicit `B` was given and fits the camera on first prepare (or after `B`) unless the user has already moved the view.
+`S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `X S` marks that scene’s window for close (loop tears it down). `Q` marks every window for close; if none are open and the listener is active, emits `window.closed` and stops. `MVCMD_PREPARE` calls `display_prepareall()`, which uploads only scenes marked changed (geometry, materials, draws, bounds, etc. — not title-only or light-only changes). It auto-computes the scene AABB when no explicit `B` was given and fits the camera on first prepare (or after `B`) unless the user has already moved the view. Untouched open displays are left alone (avoids redundant GL rebuilds when several windows are open).
 
 ## ASCII language
 
