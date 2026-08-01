@@ -12,6 +12,7 @@
  *    v.open(g)                  // Graphics (via xgraphics Show serializer)
  *    v.update(morecommands)     // e.g. chunk starting with `U S <id>`
  *    v.update(g)                // Graphics replace via `U S`
+ *    v.redraw(posecommands)     // `D` + redraw draws (no geometry wipe)
  *    v.poll(timeoutMs=0)
  *    v.wait(sessionTimeOut=1500)
  *    v.close()
@@ -82,6 +83,20 @@ class View {
     show.replace = true
     show.write(g, self)
     return self.update(self.cmdBuf)
+  }
+
+  // Clear draws (`D`) and re-issue pose/draw ASCII without `U S`.
+  // Prepends `D` unless `commands` already starts with it.
+  redraw(commands) {
+    if (self.closed) return false
+    self.gotOk = false
+    var body = commands
+    if (isnil(body)) body = ""
+    if (body.count() == 0 || body[0] != "D") {
+      body = "D\n${body}"
+    }
+    self._send(body)
+    return self._waitOk()
   }
 
   // Wait briefly for one reply/event. Returns the message string, or nil.

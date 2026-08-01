@@ -54,7 +54,7 @@ Re-issuing `d` today only **appends**. To refresh draws without wiping geometry:
 
 | Command | Effect | Status |
 |---------|--------|--------|
-| `D` | Clear displaylist only (objects / colors / fonts / pools kept) | Proposed |
+| `D` | Clear displaylist only (objects / colors / fonts / pools kept) | Done |
 | then `C` / `M` / transforms / `d` | Rebuild draws | Existing |
 
 Sticky apply context lets follow-up chunks omit leading `S`. Per-object mesh edits later: `U O` / `U V`.
@@ -83,7 +83,7 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 | File | Role | Runnable now? |
 |------|------|----------------|
 | [`test/command/definedraw-once`](../test/command/definedraw-once) | Define + first draws (ASCII) | Yes |
-| [`test/command/definedraw-redraw`](../test/command/definedraw-redraw) | Sample `D` + redraw | **No** until `D` exists |
-| [`test/testdefinedraw.morpho`](../test/testdefinedraw.morpho) | `View.open` of once fixture | Yes |
+| [`test/command/definedraw-redraw`](../test/command/definedraw-redraw) | `D` + redraw draws (no `#` comments — command lexer) | Yes |
+| [`test/testdefinedraw.morpho`](../test/testdefinedraw.morpho) | `View.open` once + `View.redraw` | Yes |
 
 Yardstick: [`examples/amigaball.morpho`](../examples/amigaball.morpho).

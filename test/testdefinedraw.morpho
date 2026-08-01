@@ -1,21 +1,32 @@
-// Smoke: open the define/draw command fixture via View.
+// Smoke: define once, then D + redraw via View.redraw (no U S).
 // Expect: prints "ok" then exits.
 // Requires: morphoview on PATH, morpho-zeromq, display.
 //
 //   cd test && morpho6 testdefinedraw.morpho
-//
-// See docs/definedraw.md. A redraw half waits on Phase C (`D`).
 
 import morphoview
 
-var f = File("command/definedraw-once", "read")
-var commands = f.readall()
-f.close()
+fn load(path) {
+  var f = File(path, "read")
+  var s = f.readall()
+  f.close()
+  return s
+}
+
+var once = load("command/definedraw-once")
+var redraw = load("command/definedraw-redraw")
 
 var v = View()
-if (!v.open(commands)) {
+if (!v.open(once)) {
   print "open failed"
-} else {
-  v.wait(sessionTimeOut=1500)
-  print "ok"
+  System.exit()
 }
+
+if (!v.redraw(redraw)) {
+  print "redraw failed"
+  v.close()
+  System.exit()
+}
+
+v.wait(sessionTimeOut=1500)
+print "ok"

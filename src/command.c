@@ -52,6 +52,23 @@ void command_applyctx_init(command_applyctx *ctx) {
     ctx->cobject=NULL;
 }
 
+/** Sticky apply context across command_process batches (follow-up chunks may omit `S`). */
+static command_applyctx g_applyctx;
+static bool g_applyctx_ready=false;
+
+static command_applyctx *command_sticky_applyctx(void) {
+    if (!g_applyctx_ready) {
+        command_applyctx_init(&g_applyctx);
+        g_applyctx_ready=true;
+    }
+    return &g_applyctx;
+}
+
+static void command_sticky_applyctx_reset(void) {
+    command_applyctx_init(&g_applyctx);
+    g_applyctx_ready=false;
+}
+
 /* -------------------------------------------------------
  * Allocation / free
  * ------------------------------------------------------- */
@@ -214,7 +231,23 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 listener_reply(LISTENER_WINDOW_CLOSED);
                 listener_stop();
             }
+            command_sticky_applyctx_reset();
             return true;
+
+        case MVCMD_CLEAR_DISPLAY: {
+            /* Apply-time scene only — parse must not require has_scene (ok-before-apply). */
+            if (!ctx->scene) {
+                fprintf(stderr, "morphoview: No current scene for D.\n");
+                return false;
+            }
+            scene_cleardisplaylist(ctx->scene);
+            scene_markchanged(ctx->scene);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
+            }
+            return true;
+        }
 
         case MVCMD_WINDOW_TITLE: {
             mv_cmd_window *c = MVCMD_AS_WINDOW(cmd);
@@ -389,8 +422,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 }
 
 int command_process(void) {
-    command_applyctx ctx;
-    command_applyctx_init(&ctx);
+    command_applyctx *ctx = command_sticky_applyctx();
 
     /* Steal the queue under the lock so apply (GL) does not block the I/O thread. */
     varray_mv_commandptr batch;
@@ -402,7 +434,7 @@ int command_process(void) {
     int applied=0;
     for (unsigned int i=0; i<batch.count; i++) {
         mv_command *cmd = batch.data[i];
-        if (!command_apply(cmd, &ctx)) {
+        if (!command_apply(cmd, ctx)) {
             for (unsigned int j=i; j<batch.count; j++) {
                 command_free(batch.data[j]);
             }
@@ -431,6 +463,7 @@ enum {
     MVTOKEN_COLOR,
     MVTOKEN_SELECTCOLOR,
     MVTOKEN_DRAW,
+    MVTOKEN_CLEAR_DISPLAY,
     MVTOKEN_OBJECT,
     MVTOKEN_VERTICES,
     MVTOKEN_POINTS,
@@ -469,6 +502,7 @@ tokendefn mvtokens[] = {
     { "c",          MVTOKEN_COLOR                 , NULL },
     { "C",          MVTOKEN_SELECTCOLOR           , NULL },
     { "d",          MVTOKEN_DRAW                  , NULL },
+    { "D",          MVTOKEN_CLEAR_DISPLAY         , NULL },
     { "o",          MVTOKEN_OBJECT                , NULL },
     { "p",          MVTOKEN_POINTS                , NULL },
     { "l",          MVTOKEN_LINES                 , NULL },
@@ -889,6 +923,19 @@ bool command_parsedraw(parser *p, void *out) {
     }
 
     return command_enqueue_owned(p, &cmd->cmd);
+}
+
+/** `D` — clear displaylist only (no parse-time has_scene; sticky apply supplies scene). */
+bool command_parsecleardisplay(parser *p, void *out) {
+    (void) p;
+    (void) out;
+
+    mv_command *cmd = command_new(MVCMD_CLEAR_DISPLAY, sizeof(mv_command));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    return command_enqueue_owned(p, cmd);
 }
 
 bool command_parseobject(parser *p, void *out) {
@@ -1320,6 +1367,7 @@ parserule mv_parserules[] = {
     PARSERULE_PREFIX(MVTOKEN_COLOR, command_parsecolor),
     PARSERULE_PREFIX(MVTOKEN_SELECTCOLOR, command_parseselectcolor),
     PARSERULE_PREFIX(MVTOKEN_DRAW, command_parsedraw),
+    PARSERULE_PREFIX(MVTOKEN_CLEAR_DISPLAY, command_parsecleardisplay),
     PARSERULE_PREFIX(MVTOKEN_OBJECT, command_parseobject),
     PARSERULE_PREFIX(MVTOKEN_VERTICES, command_parsevertices),
     PARSERULE_PREFIX(MVTOKEN_POINTS, command_parseindex),
@@ -1474,4 +1522,5 @@ void command_initialize(void) {
 
 void command_finalize(void) {
     command_queue_clear();
+    command_sticky_applyctx_reset();
 }

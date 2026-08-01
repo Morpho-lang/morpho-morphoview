@@ -154,6 +154,7 @@ typedef struct sscene {
 scene *scene_new(int id, int dim);
 scene *scene_find(int id);
 void scene_clear(scene *s); /**< Free contents; keep id/dim and list link */
+void scene_cleardisplaylist(scene *s); /**< Clear draws only; keep objects/colors/fonts/pools */
 void scene_free(scene *s);
 void scene_markchanged(scene *s);
 

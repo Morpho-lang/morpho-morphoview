@@ -347,6 +347,9 @@ void display_prepareall(void) {
         if (!d->window || !d->s || !d->s->changed) continue;
         glfwMakeContextCurrent(d->window);
 
+        /* render_preparescene appends; reset so re-prepare after D/U S is safe. */
+        render_reset(&d->render);
+
         if (!d->s->bbox_explicit)
             scene_computebbox(d->s);
 

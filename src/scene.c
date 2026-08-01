@@ -132,6 +132,13 @@ void scene_clear(scene *s) {
     scene_resetbackground(s);
 }
 
+/** Clear the displaylist only (objects, colors, fonts, data pools kept). */
+void scene_cleardisplaylist(scene *s) {
+    if (!s) return;
+    varray_gdrawclear(&s->displaylist);
+    varray_gdrawinit(&s->displaylist);
+}
+
 /** Set an explicit scene AABB and request a camera refit. */
 void scene_setbbox(scene *s, float xmin, float xmax, float ymin, float ymax, float zmin, float zmax) {
     if (!s) return;

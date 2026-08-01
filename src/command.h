@@ -73,6 +73,7 @@ typedef enum {
     MVCMD_SELECT_COLOR,   /**< Select active color (`C`) */
     MVCMD_MATERIAL,       /**< Shade mode + Phong coeffs (`M`) */
     MVCMD_DRAW,           /**< Draw object, optional matrix (`d`) */
+    MVCMD_CLEAR_DISPLAY,  /**< Clear displaylist only (`D`); keep objects/colors/fonts */
     MVCMD_FONT,           /**< Load font (`F`) */
     MVCMD_TEXT,           /**< Add/draw text, optional matrix (`T`) */
     MVCMD_PREPARE         /**< Upload scene to GL (header only; no typed payload) */
