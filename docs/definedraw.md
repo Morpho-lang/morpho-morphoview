@@ -36,12 +36,12 @@ Simulation state may still live in script variables; the script applies it via `
 Not a full scene graph. Richer than today’s append-only displaylist:
 
 - Stable **ids** from `Graphics.display` (returned Int on the entry). Not on mesh primitives — same value may be displayed twice under two ids.
-- Entry **SRT** owns presentation pose (`position` as Matrix 3-vector / `scale` / `rotate` as fields on the entry); `Show` places from the entry only. API accepts list or Matrix for position and coerces to Matrix. Keep SRT fields (not one 4×4). Posed `Sphere`s normalize to unit item + pose on entry. `move`: position always sets absolute `entry.position`; omitted scale/rotate leave components unchanged.
+- Entry **SRT** owns presentation pose (`position` as Matrix 3-vector / `scale` / `rotate` as fields on the entry); `Show` places from the entry only. API accepts list or Matrix for position and coerces to Matrix. Keep SRT fields (not one 4×4). `Sphere`s store as **unit** item + pose on entry (Phase 5c). `move`: position always sets absolute `entry.position`; omitted scale/rotate leave components unchanged.
 - Small **mutation API**: `display`, `move`; `beginBatch`/`endBatch` on Broadcaster; later replace/remove
 - **Listeners** (`broadcast` module) + typed events (`GraphicsEventDefined` / `Moved`)
 - `open(g)` uses one `Show.write` then listens; `update(g)` full replace + rebind
 
-`Show` walks Graphics **entries**. Abstract primitives (`Sphere`, `Cylinder`, …) convert in `visit` / `visitGeneric` like today — no Show-level sphere mesh cache. Prefer clients `display`ing one item at many poses. Entry SRT is recorded now; using it for draw (vs baking) is Phase 5c.
+`Show` walks Graphics **entries**. Phase 5c: `Sphere` → unit mesh via Show cache (key = refine bucket + material mode), draw with entry SRT; many entries may share one viewer `o`. Color/opacity via `C`, not baked vertices, so instances share geometry. `PointCloud` / `LineSet` use entry SRT. `Cylinder` / `Arrow` / `Text` stay world-baked until an orientation-in-transform cut.
 
 ## Viewer protocol
 
@@ -55,7 +55,9 @@ Re-issuing `d` today only **appends**. To refresh draws without wiping geometry:
 | `D` | Clear displaylist only (objects / colors / fonts / pools kept) | Done |
 | then `C` / `M` / transforms / `d` | Rebuild draws | Existing |
 
-Sticky apply context lets follow-up chunks omit leading `S`. Per-object mesh edits later: `U O` / `U V` (Phase 5d). Re-issuing `d` for an object id already in the displaylist **replaces** its matrix (Phase 5b); first `d` for an id still appends.
+Sticky apply context lets follow-up chunks omit leading `S`. Per-object mesh edits later: `U O` / `U V` (Phase 5d).
+
+**Draw slots (Phase 5c):** each Graphics entry ↔ one displaylist slot (`d <drawId> [objectId]`; matrix + stamped uniform color). Pose/`recolor` update that slot; several slots may reference the same object id. No-matrix `d` preserves pose (recolor).
 
 Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; primary animation API is Graphics mutations → listener.
 
@@ -63,10 +65,9 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 
 | Primitive | First define | Later draw (same Show / same id) |
 |-----------|--------------|----------------------------------|
-| Opaque `Sphere` | `visitGeneric` → `o`/`v`/`f` (bake center/r) | `i`/`d` (entry SRT — Phase 5c) |
-| Translucent `Sphere` | same + `C` if transmit | `i`/`d` (entry SRT — Phase 5c) |
+| Opaque / translucent `Sphere` | unit mesh `o`/`v`/`f` (cached by refine key); `C` for color/alpha | entry SRT `i`/`s`/`r`/`t`/`d` (Phase 5c; many `d` → one `o`) |
 | `TriangleComplex` | `o`/`v`/`f` (+ register `c` if transmit) | entry SRT (often identity if world-baked) |
-| `PointCloud` / `LineSet` | `o`/`v`/`p|l` | entry SRT (confirm in Phase 5c) |
+| `PointCloud` / `LineSet` | `o`/`v`/`p|l` | entry SRT (Phase 5c) |
 
 ## Implementation order
 
@@ -83,7 +84,9 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 | [`test/command/definedraw-redraw`](../test/command/definedraw-redraw) | `D` + redraw draws (no `#` comments — command lexer) | Yes |
 | [`test/command/definedraw-pose-update`](../test/command/definedraw-pose-update) | Pose-only `d` (in-place matrix, no `D`) | Yes |
 | [`test/testdefinedraw.morpho`](../test/testdefinedraw.morpho) | `View.open` once + `View.redraw` | Yes |
-| [`test/testgraphicsmove.morpho`](../test/testgraphicsmove.morpho) | `move` / listeners / objectMap | Yes |
+| [`test/testgraphicsmove.morpho`](../test/testgraphicsmove.morpho) | `move` / listeners / objectMap / recolor | Yes |
 | [`test/testviewmove.morpho`](../test/testviewmove.morpho) | Live `open` → `move` | Yes |
+| [`test/command/definedraw-drawslots`](../test/command/definedraw-drawslots) | Two draws of one `o` + pose one slot | Yes |
+| [`test/testspherecache.morpho`](../test/testspherecache.morpho) | Sphere mesh cache (one `o`, N `d`) | Yes |
 
-Yardstick: [`examples/amigaball.morpho`](../examples/amigaball.morpho).
+Yardsticks: [`examples/amigaball.morpho`](../examples/amigaball.morpho) (TriangleComplex movers); [`examples/nbody.morpho`](../examples/nbody.morpho) (shared `Sphere`s + `move`/`recolor`).

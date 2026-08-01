@@ -37,6 +37,7 @@ typedef struct {
     scene *scene;
     display *display;
     gobject *cobject;
+    int current_colorid; /**< Last `C` id, or SCENE_EMPTY */
 } command_applyctx;
 
 void command_parsectx_init(command_parsectx *ctx) {
@@ -50,6 +51,7 @@ void command_applyctx_init(command_applyctx *ctx) {
     ctx->scene=NULL;
     ctx->display=NULL;
     ctx->cobject=NULL;
+    ctx->current_colorid=SCENE_EMPTY;
 }
 
 /** Sticky apply context across command_process batches (follow-up chunks may omit `S`). */
@@ -181,6 +183,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
             ctx->scene = s;
             ctx->cobject = NULL;
+            ctx->current_colorid = SCENE_EMPTY;
             return true;
         }
 
@@ -203,6 +206,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
             ctx->scene = s;
             ctx->cobject = NULL;
+            ctx->current_colorid = SCENE_EMPTY;
             return true;
         }
 
@@ -242,6 +246,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             }
             scene_cleardisplaylist(ctx->scene);
             scene_markchanged(ctx->scene);
+            ctx->current_colorid = SCENE_EMPTY;
             if (ctx->display && ctx->display->window) {
                 glfwMakeContextCurrent(ctx->display->window);
                 render_reset(&ctx->display->render);
@@ -359,7 +364,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_SELECT_COLOR:
             if (!ctx->scene) return false;
-            scene_adddraw(ctx->scene, COLOR, MVCMD_AS_SELECT_COLOR(cmd)->id, -1);
+            ctx->current_colorid = MVCMD_AS_SELECT_COLOR(cmd)->id;
+            /* Keep COLOR displaylist entries for fixtures that rely on ordered state. */
+            scene_adddraw(ctx->scene, COLOR, ctx->current_colorid, -1);
             command_touchscene(ctx);
             return true;
 
@@ -376,17 +383,25 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
         case MVCMD_DRAW: {
             mv_cmd_draw *c = MVCMD_AS_DRAW(cmd);
             if (!ctx->scene) return false;
-            /* Same object id already drawn: replace its matrix in place (pose update). */
-            if (scene_setobjectdrawmatrix(ctx->scene, c->id,
-                                          c->has_matrix ? c->matrix : NULL)) {
-                command_touchscene(ctx);
-                return true;
+
+            int objectid = c->has_objectid ? c->objectid : c->drawid;
+            int stamp = ctx->current_colorid;
+            gdraw *drw = scene_finddrawbydrawid(ctx->scene, c->drawid);
+
+            /* Legacy single-arg: fall back to first OBJECT with this object id. */
+            if (!drw && !c->has_objectid)
+                drw = scene_findobjectdraw(ctx->scene, c->drawid);
+
+            if (drw) {
+                if (c->has_objectid) scene_setobjectdrawobject(drw, objectid);
+                /* Ensure legacy draws get a stable drawid for later pose updates. */
+                if (drw->drawid == SCENE_EMPTY) drw->drawid = c->drawid;
+                scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
+                                       c->has_matrix ? c->matrix : NULL, stamp);
+            } else {
+                scene_addobjectdraw(ctx->scene, c->drawid, objectid,
+                                    c->has_matrix ? c->matrix : NULL, stamp);
             }
-            int matindx = SCENE_EMPTY;
-            if (c->has_matrix) {
-                matindx=scene_adddata(ctx->scene, c->matrix, 16);
-            }
-            scene_adddraw(ctx->scene, OBJECT, c->id, matindx);
             command_touchscene(ctx);
             return true;
         }
@@ -429,6 +444,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
 int command_process(void) {
     command_applyctx *ctx = command_sticky_applyctx();
+    /* Per-batch color selection: pose-only `d` must not stamp a stale `C`
+     * from a previous ZMQ chunk (e.g. after recolor). */
+    ctx->current_colorid = SCENE_EMPTY;
 
     /* Steal the queue under the lock so apply (GL) does not block the I/O thread. */
     varray_mv_commandptr batch;
@@ -912,20 +930,28 @@ bool command_parsematerial(parser *p, void *out) {
 
 bool command_parsedraw(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
-    int id;
+    int drawid;
+    int objectid = 0;
+    bool has_objectid = false;
 
-    PARSE_CHECK(command_parseinteger(p, &id));
+    PARSE_CHECK(command_parseinteger(p, &drawid));
+    if (parse_checktoken(p, MVTOKEN_INTEGER)) {
+        PARSE_CHECK(command_parseinteger(p, &objectid));
+        has_objectid = true;
+    }
 
     mv_cmd_draw *cmd = command_new(MVCMD_DRAW, sizeof(mv_cmd_draw));
     if (!cmd) {
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
         return false;
     }
-    cmd->id=id;
-    cmd->has_matrix=ctx->modelchanged;
+    cmd->drawid = drawid;
+    cmd->has_objectid = has_objectid;
+    cmd->objectid = objectid;
+    cmd->has_matrix = ctx->modelchanged;
     if (ctx->modelchanged) {
         memcpy(cmd->matrix, ctx->model, sizeof(float)*16);
-        ctx->modelchanged=false;
+        ctx->modelchanged = false;
     }
 
     return command_enqueue_owned(p, &cmd->cmd);

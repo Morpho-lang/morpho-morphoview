@@ -662,6 +662,17 @@ void render_prepareobject(renderer *r, scene *s, gdraw *drw, GLuint *carray) {
         cins.data.color.rgba[3]=1.0f;
         cins.data.color.use_uniform=0;
         varray_renderinstructionadd(&r->renderlist, &cins, 1);
+    } else if (drw->colorid != SCENE_EMPTY) {
+        /* Per-draw-slot uniform albedo (instanced meshes share geometry). */
+        gcolor *color = scene_getcolorfromid(s, drw->colorid);
+        if (color) {
+            renderinstruction cins = { .instruction = RCOLOR, .obj=obj };
+            int ncomp = (color->components==4) ? 4 : 3;
+            for (int k=0; k<3; k++) cins.data.color.rgba[k]=s->data.data[color->indx+k];
+            cins.data.color.rgba[3]=(ncomp==4) ? s->data.data[color->indx+3] : 1.0f;
+            cins.data.color.use_uniform=1;
+            varray_renderinstructionadd(&r->renderlist, &cins, 1);
+        }
     }
 
     /* Change the model matrix if provided */

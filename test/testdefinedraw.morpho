@@ -1,4 +1,4 @@
-// Smoke: define once, D+redraw, then pose-only `d` updates (no D / no U S).
+// Smoke: define once, D+redraw, pose-only `d`, then draw-slot instancing.
 // Expect: prints "ok" then exits.
 // Requires: morphoview on PATH, morpho-zeromq, display.
 //
@@ -16,6 +16,8 @@ fn load(path) {
 var once = load("command/definedraw-once")
 var redraw = load("command/definedraw-redraw")
 var pose = load("command/definedraw-pose-update")
+var slots = load("command/definedraw-drawslots")
+var slotsPose = load("command/definedraw-drawslots-pose")
 
 var v = View()
 if (!v.open(once)) {
@@ -36,5 +38,18 @@ if (!v.update(pose)) {
   System.exit()
 }
 
-v.wait(sessionTimeOut=1500)
+v.close()
+
+// Two draw slots sharing one object; pose updates only slot 10.
+var v2 = View()
+if (!v2.open(slots)) {
+  print "drawslots open failed"
+  System.exit()
+}
+if (!v2.update(slotsPose)) {
+  print "drawslots pose failed"
+  v2.close()
+  System.exit()
+}
+v2.wait(sessionTimeOut=1500)
 print "ok"

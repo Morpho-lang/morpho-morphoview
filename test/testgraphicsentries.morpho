@@ -52,7 +52,8 @@ expect(ismatrix(gs.displaylist[0].position), "position is Matrix")
 expect(gs.displaylist[0].position[0] == 1, "center → entry.position")
 expect(gs.displaylist[0].scale == 0.5, "r → entry.scale")
 expect(isobject(gs.displaylist[0].item), "stores abstract Sphere")
-expect(gs.displaylist[0].item.r == 0.5, "Sphere.r unchanged")
+expect(gs.displaylist[0].item.r == 1, "unit Sphere r=1")
+expect(gs.displaylist[0].item.center[0] == 0, "unit Sphere at origin")
 
 /* ---- Sphere with pose args ---- */
 var gp = Graphics()
@@ -62,8 +63,8 @@ var e = gp.displaylist[0]
 expect(e.position[0] == 4 && e.position[1] == 5 && e.position[2] == 6, "posed position")
 expect(e.scale == 2.5, "posed scale")
 expect(!isnil(e.rotate), "posed rotate recorded")
-expect(e.item.r == 2.5, "posed Sphere stores r for Show bake")
-expect(e.item.center[0] == 4, "posed Sphere stores center for Show bake")
+expect(e.item.r == 1, "posed Sphere stores unit r")
+expect(e.item.center[0] == 0, "posed Sphere stores unit center")
 
 /* ---- add remaps right-hand ids ---- */
 var a = Graphics()

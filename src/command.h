@@ -216,13 +216,18 @@ typedef struct {
 } mv_cmd_material;
 
 /** Draw an object, optionally with a model matrix.
- *  Language: `d <id>` (matrix baked from preceding `i`/`m`/`r`/`s`/`t` at parse time)
- *  @param id          Object identifier
- *  @param has_matrix  Whether @p matrix is valid
- *  @param matrix      Column-major 4×4 model transform when @p has_matrix is true */
+ *  Language: `d <drawId>` | `d <drawId> <objectId>`
+ *  Matrix baked from preceding `i`/`m`/`r`/`s`/`t` at parse time.
+ *  @param drawid        Draw-slot id (Graphics entry id for Morpho path)
+ *  @param has_objectid  Whether @p objectid was provided (two-arg form)
+ *  @param objectid      Object to draw when creating/rebinding
+ *  @param has_matrix    Whether @p matrix is valid
+ *  @param matrix        Column-major 4×4 model transform when @p has_matrix is true */
 typedef struct {
     mv_command cmd;
-    int id;
+    int drawid;
+    bool has_objectid;
+    int objectid;
     bool has_matrix;
     float matrix[16];
 } mv_cmd_draw;

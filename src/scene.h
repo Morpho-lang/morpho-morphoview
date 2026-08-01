@@ -113,6 +113,8 @@ typedef enum {
 typedef struct {
     gdrawtype type;
     int id;       /**< Object/color/text id, or SCENE_SHADE_* for SHADE */
+    int drawid;   /**< OBJECT: draw-slot id (Graphics entry id); else unused */
+    int colorid;  /**< OBJECT: stamped uniform color id, or SCENE_EMPTY */
     int matindx;  /**< Model matrix, or material coeffs (ka kd ks n) for SHADE */
 } gdraw;
 
@@ -180,11 +182,21 @@ textfont *scene_getfontfromid(scene *s, int fontid);
 int scene_addtext(scene *s, int fontid, char *text);
 int scene_addcolor(scene *s, int colorid, int length, int components, int indx);
 void scene_adddraw(scene *scene, gdrawtype type, int id, int matindx);
-/** First OBJECT draw with @p id, or NULL. */
-gdraw *scene_findobjectdraw(scene *s, int id);
-/** Replace model matrix on an existing OBJECT draw; false if no such draw.
- *  @p matrix may be NULL to clear the matrix (identity). */
-bool scene_setobjectdrawmatrix(scene *s, int id, const float *matrix);
+/** OBJECT draw with @p drawid, or NULL. */
+gdraw *scene_finddrawbydrawid(scene *s, int drawid);
+/** First OBJECT draw with object id @p objectid (legacy 5b), or NULL. */
+gdraw *scene_findobjectdraw(scene *s, int objectid);
+/** Create OBJECT draw slot @p drawid referencing @p objectid.
+ *  @p matrix may be NULL (identity). @p colorid may be SCENE_EMPTY. */
+gdraw *scene_addobjectdraw(scene *s, int drawid, int objectid,
+                           const float *matrix, int colorid);
+/** Update matrix and/or color on an existing OBJECT draw.
+ *  If @p has_matrix, replace matrix; otherwise leave matrix unchanged.
+ *  If @p colorid != SCENE_EMPTY, stamp it. Returns false if draw missing. */
+bool scene_updateobjectdraw(scene *s, gdraw *drw, bool has_matrix,
+                            const float *matrix, int colorid);
+/** Rebind object id on an OBJECT draw (instancing / two-arg `d`). */
+void scene_setobjectdrawobject(gdraw *drw, int objectid);
 
 gobject *scene_getgobjectfromid(scene *s, int id);
 gcolor *scene_getcolorfromid(scene *s, int id);

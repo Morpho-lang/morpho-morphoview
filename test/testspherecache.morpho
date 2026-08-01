@@ -1,0 +1,59 @@
+// Sphere mesh cache: many displays → one `o`, N draw slots.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testspherecache.morpho
+
+import morphoview
+import xgraphics
+import color
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+var g = Graphics()
+var proto = Sphere([0, 0, 0], 1, color=Red, maxrefine=1)
+g.display(proto, [0, 0, 0], scale=0.3)
+g.display(proto, [1, 0, 0], scale=0.3)
+g.display(Sphere([0, 0, 0], 1, color=Blue, maxrefine=1), [0, 1, 0], scale=0.3)
+
+var buf = Buf()
+var show = Show()
+show.write(g, buf)
+
+expect(countPrefix(buf.lines, "o ") == 1, "one shared sphere object")
+expect(countPrefix(buf.lines, "d ") == 3, "three draw slots")
+expect(show.objectMap[1] == show.objectMap[2], "entries 1 and 2 share viewer id")
+expect(show.objectMap[1] == show.objectMap[3], "entries 1 and 3 share viewer id")
+expect(show.posedIds.contains(1), "sphere 1 is posed")
+
+// Pose-only emit uses draw id alone.
+var poseBuf = Buf()
+expect(show.emitEntryPose(g, 2, poseBuf), "emit pose for id 2")
+expect(countPrefix(poseBuf.lines, "d ") == 1, "one pose draw")
+var dline = poseBuf.lines[poseBuf.lines.count()-1]
+expect(dline == "d 2", "pose is d <graphicsId> only")
+
+print "ok"

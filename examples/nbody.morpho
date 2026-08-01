@@ -1,0 +1,130 @@
+// N-body soft-sphere yardstick — shared unit Sphere mesh, many draw slots.
+// Soft repulsion + Brownian diffusion; translucent spheres; batched g.move/recolor.
+//
+//   morpho6 examples/nbody.morpho
+//
+// Close the viewer window (or wait for the run to finish) to exit.
+
+import morphoview
+import xgraphics
+import color
+import constants
+
+var nBodies = 24
+var box = 2.2
+var dt = 1/50
+var nFrames = 900
+var softK = 8.0
+var damp = 0.015
+var diffusion = 1.4   // Brownian kick strength (length / sqrt(time))
+var glass = 0.55      // POVRay-style transmit → viewer alpha
+
+fn hsv(h, s, v) {
+  var hh = h
+  while (hh < 0) hh += 360
+  while (hh >= 360) hh -= 360
+  var c = v*s
+  var sector = Int(hh/60)
+  var f = hh/60 - Float(sector)
+  var x = c*(1 - abs(2*f - 1))
+  var m = v - c
+  var r = 0
+  var g = 0
+  var b = 0
+  if (sector == 0) { r = c; g = x }
+  else if (sector == 1) { r = x; g = c }
+  else if (sector == 2) { g = c; b = x }
+  else if (sector == 3) { g = x; b = c }
+  else if (sector == 4) { r = x; b = c }
+  else { r = c; b = x }
+  return Color(r+m, g+m, b+m)
+}
+
+var pos = Matrix(3, nBodies)
+var vel = Matrix(3, nBodies)
+var rad = []
+var ids = []
+
+var g = Graphics(title="N-body", background=Color(0.08, 0.09, 0.11))
+var protoLo = Sphere([0, 0, 0], 1, color=White, maxrefine=1, transmit=glass)
+var protoHi = Sphere([0, 0, 0], 1, color=White, maxrefine=2, transmit=glass)
+
+for (i in 0...nBodies) {
+  var imod = i - 3*Int(i/3)
+  var r = 0.12 + 0.08*Float(imod)/2
+  rad.append(r)
+  pos[0,i] = (2*random()-1)*box*0.7
+  pos[1,i] = (2*random()-1)*box*0.7
+  pos[2,i] = (2*random()-1)*box*0.7
+  vel[0,i] = (2*random()-1)*0.8
+  vel[1,i] = (2*random()-1)*0.8
+  vel[2,i] = (2*random()-1)*0.8
+  var col = hsv(360*Float(i)/Float(nBodies), 0.75, 0.95)
+  var proto = protoLo
+  if (r > 0.16) proto = protoHi
+  var id = g.display(proto, [pos[0,i], pos[1,i], pos[2,i]], scale=r)
+  g.findEntry(id).color = col
+  ids.append(id)
+}
+
+var v = View(g, connectTimeOut=20000)
+var noiseAmp = diffusion*sqrt(dt)
+
+for (frame in 1...nFrames) {
+  if (v.closed) break
+
+  for (i in 0...nBodies) {
+    for (j in 0...nBodies) {
+      if (j <= i) continue
+      var dx = pos[0,i] - pos[0,j]
+      var dy = pos[1,i] - pos[1,j]
+      var dz = pos[2,i] - pos[2,j]
+      var d2 = dx*dx + dy*dy + dz*dz
+      var minD = rad[i] + rad[j]
+      if (d2 < 1e-8) d2 = 1e-8
+      var d = sqrt(d2)
+      if (d < minD) {
+        var f = softK*(minD - d)/d
+        vel[0,i] += f*dx*dt
+        vel[1,i] += f*dy*dt
+        vel[2,i] += f*dz*dt
+        vel[0,j] -= f*dx*dt
+        vel[1,j] -= f*dy*dt
+        vel[2,j] -= f*dz*dt
+      }
+    }
+  }
+
+  g.beginBatch()
+  for (i in 0...nBodies) {
+    for (k in 0...3) {
+      vel[k,i] *= (1 - damp)
+      vel[k,i] += noiseAmp*(2*random()-1)   // Brownian diffusion
+      pos[k,i] += vel[k,i]*dt
+      var lim = box - rad[i]
+      if (pos[k,i] > lim) {
+        pos[k,i] = lim
+        vel[k,i] = -abs(vel[k,i])*0.85
+      }
+      if (pos[k,i] < -lim) {
+        pos[k,i] = -lim
+        vel[k,i] = abs(vel[k,i])*0.85
+      }
+    }
+    g.move(ids[i], [pos[0,i], pos[1,i], pos[2,i]], scale=rad[i])
+
+    if (frame - 15*Int(frame/15) == 0) {
+      var sp = sqrt(vel[0,i]*vel[0,i] + vel[1,i]*vel[1,i] + vel[2,i]*vel[2,i])
+      var t = sp/2.5
+      if (t > 1) t = 1
+      g.recolor(ids[i], hsv(220*(1-t), 0.7, 0.55 + 0.45*t))
+    }
+  }
+  g.endBatch()
+
+  System.sleep(dt)
+  v.poll(timeoutMs=0)
+}
+
+if (!v.closed) v.close()
+print "ok"

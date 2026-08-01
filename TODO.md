@@ -11,7 +11,7 @@ Work in this order. Later tracks depend on decisions from earlier ones.
 | # | Track | Status | Why now |
 |---|--------|--------|---------|
 | **1** | **Graphics prototype** (package `Show` / local Graphics model → upstream) | **Done** (package prototype) | Stable ids, entries, define vs draw, listener. Remaining: push settled pieces to morpho `graphics.morpho`. |
-| **2** | **Animation-friendly viewer + View API** | **Partial** | Sticky context, `D`, `display`/`move`, View listener, amigaball yardstick done. Remaining: [Phase 5](docs/plan-graphics-view-listener.md) (batching, selective redraw, `U O` / `U V` / `X O`). |
+| **2** | **Animation-friendly viewer + View API** | **Partial** | Through Phase 5c (draw-slots, Sphere cache, recolor, n-body). Remaining: [Phase 5d](docs/plan-graphics-view-listener.md) (`U O` / `U V` / `X O`). |
 | **3** | **Binary / byte-buffer transport** | Later | Viewer can accept blobs sooner; real gain needs Morpho-side serialize + framing. Biggest on fat `v` / `U V` paths; redraw often avoids blobs entirely |
 
 Tried and deferred: making `View.update` async / drop-under-pressure. The old bottleneck was full `U S` reserialize; the live path is now `g.move` → listener → redraw (no per-frame `U S`).
@@ -34,7 +34,7 @@ Local prototype in [`xgraphics.morpho`](share/modules/xgraphics.morpho) (`Graphi
 - [x] Stable Graphics-owned ids on `display` (not ephemeral per write for the model)
 - [x] Distinguish **define** (`o` / `v` / `f`) vs **draw** (`d` + transforms) via entries + `Show`
 - [x] Mid-session `move` + Broadcaster / Listener → View
-- [ ] Dedup / instance identical primitives (optional Show-level unit-sphere cache — Phase 5c)
+- [x] Dedup / instance identical primitives (Show-level unit-sphere cache — Phase 5c)
 - [ ] Push settled pieces to morpho `graphics.morpho`
 
 ### 2. Animation / composition infra — partial
@@ -50,7 +50,7 @@ Remaining ([Phase 5](docs/plan-graphics-view-listener.md)):
 
 1. [x] **5a** — `beginBatch` / `endBatch` on Broadcaster (one Moved notify per frame)
 2. [x] **5b** — Selective pose redraw (in-place `d` matrix update; no full `D` every move)
-3. **5c** — Show emit review (Sphere entry SRT; PointCloud/LineSet)
+3. [x] **5c** — Draw-slot identity; unit Sphere + mesh cache + `C`/recolor; PointCloud/LineSet SRT; n-body yardstick
 4. **5d** — `U O <id>` / `X O <id>` / `U V <id>` + Graphics removed/replaced events
 
 ### 3. Binary transport (later)
@@ -76,9 +76,8 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 - [x] Private helpers prefixed with `_`
 - [x] `beginBatch` / `endBatch` via Broadcaster mixin (Phase 5a)
 - [x] Phase 5b — selective pose redraw (in-place `d`; `emitEntryPose`)
-- [ ] Phase 5c — Show emit review (see plan)
-
-### Show / Graphics prototype (upstream candidate) — track 1 done
+- [x] Phase 5c — draw-slot identity; unit Sphere + cache + recolor; n-body example
+- [ ] Phase 5d — `U O` / `U V` / `X O`### Show / Graphics prototype (upstream candidate) — track 1 done
 
 `Show` lives in [`xgraphics.morpho`](share/modules/xgraphics.morpho):
 
@@ -88,7 +87,7 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 - [x] `GraphicsEntry` + `display` / `move`; Show walks entries
 - [x] PointCloud / LineSet
 - [x] Broadcaster events (`GraphicsEventDefined` / `Moved`)
-- [ ] Phase 5c — Sphere (and friends) entry-SRT emit; optional unit-sphere mesh cache
+- [x] Phase 5c — draw-slots; unit Sphere + entry SRT; mesh cache; `recolor`; PointCloud/LineSet SRT; n-body
 - [ ] Push settled pieces to morpho `graphics.morpho`
 
 ## Framing / camera
@@ -117,6 +116,7 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 |---------|--------|--------|
 | `U S <id>` | Done | Clear scene `id` in place (keep window); select as current; following `o`/`v`/`l`/`d` refill |
 | `D` | Done | Clear displaylist only; keep objects / colors / fonts / pools |
+| Draw-slot pose/color | Done (Phase 5c) | Per-instance matrix + albedo (many draws → one `o`) |
 | `U O <id>` | Phase 5d | Clear/redefine one object in the current scene |
 | `U V <objid>` | Phase 5d | Replace vertex blob only (morph targets / pointwise edits) |
 
@@ -191,7 +191,7 @@ Small viewer-only polish can land anytime; strategic sequence is Graphics (done)
 **Strategic projects** (ordered):
 
 - [x] **Track 1** — Graphics prototype (stable ids; define vs draw; listener) — package done; upstream push still open
-- [ ] **Track 2 remainder** — Phase 5c–5d: Show emit review, `U O` / `U V` / `X O`
+- [ ] **Track 2 remainder** — Phase 5d: `U O` / `U V` / `X O`
 - [ ] **Track 3** — Binary / byte-buffer vertex transport (viewer IR already accepts blobs; Morpho needs serialize + ZMQ framing)
 
 ## Demos / tests
@@ -219,10 +219,11 @@ Small viewer-only polish can land anytime; strategic sequence is Graphics (done)
 - [x] `move` / listeners / objectMap: [`test/testgraphicsmove.morpho`](test/testgraphicsmove.morpho)
 - [x] Live `open` → `move`: [`test/testviewmove.morpho`](test/testviewmove.morpho)
 - [x] Live Graphics yardstick (define-once + `g.move`): [`examples/amigaball.morpho`](examples/amigaball.morpho)
+- [x] Phase 5c n-body yardstick (many shared `Sphere`s + `g.move` / `recolor`): [`examples/nbody.morpho`](examples/nbody.morpho)
 
 ## Notes
 
 - Sticky `command_applyctx` persists across `command_process` batches, so follow-up chunks (redraw / later `U O` / `U V`) may omit a leading `S` / `U S`.
 - Package `Show` prototypes the upstream split: fire-and-forget (`Show(g)` / `-t`) vs serialize-to-delegate (`Show().write(g, out)`). `View` is the live duplex path and a `write` sink.
 - ASCII float emission uses 3 significant figures (`Show.fmt` / `%0.3g`) to keep the string path smaller until binary vertex transport (track 3) exists.
-- Phase 5a/5b: `beginBatch`/`endBatch` coalesce Moved; View pose-only `d` replaces matrices in place (no full `D` every frame).
+- Phase 5a/5b: `beginBatch`/`endBatch` coalesce Moved; View pose-only `d` replaces matrices in place (no full `D` every frame). Phase 5c: draw-slot identity for many draws → one `o`, plus per-slot recolor.

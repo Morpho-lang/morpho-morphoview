@@ -21,6 +21,7 @@ class Capture with Listener {
   }
   _kind(GraphicsEventDefined ev) { return GraphicsEventDefined }
   _kind(GraphicsEventMoved ev) { return GraphicsEventMoved }
+  _kind(GraphicsEventRecolored ev) { return GraphicsEventRecolored }
 }
 
 /* ---- move merge ---- */
@@ -151,5 +152,36 @@ for (line in bufPose.lines) {
   if (line.count() >= 2 && line[0] == "d") hasD = true
 }
 expect(hasD && !hasClear, "selective pose emits d without D")
+
+/* ---- recolor ---- */
+var g8 = Graphics()
+var id8 = g8.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], scale=0.5)
+expect(g8.recolor(id8, Blue), "recolor ok")
+expect(g8.findEntry(id8).color == Blue, "entry color updated")
+expect(!g8.recolor(999, Red), "missing id fails")
+
+var cap8 = Capture()
+cap8.listen(g8)
+g8.beginBatch()
+g8.recolor(id8, Green)
+g8.recolor(id8, Yellow)
+expect(cap8.events.count() == 0, "recolor inside batch silent")
+g8.endBatch()
+expect(cap8.events.count() == 1 && cap8.events[0] == GraphicsEventRecolored, "one coalesced Recolored")
+var recolored = g8.takeRecolorIds()
+expect(recolored.count() == 1 && recolored[0] == id8, "takeRecolorIds")
+
+var show8 = Show()
+var buf8 = Buf()
+show8.write(g8, buf8)
+var bufRecolor = Buf()
+expect(show8.emitEntryRecolor(g8, id8, bufRecolor), "emitEntryRecolor")
+var hasC = false
+var hasPoseD = false
+for (line in bufRecolor.lines) {
+  if (line.count() >= 1 && line[0] == "C") hasC = true
+  if (line == "d ${id8}") hasPoseD = true
+}
+expect(hasC && hasPoseD, "recolor emits C and d <id>")
 
 print "ok"

@@ -508,36 +508,67 @@ int scene_addcolor(scene *s, int colorid, int length, int components, int indx) 
 }
 
 void scene_adddraw(scene *scene, gdrawtype type, int id, int matindx) {
-    gdraw d = { .type = type, .id = id, .matindx = matindx };
+    gdraw d = { .type = type, .id = id, .drawid = SCENE_EMPTY,
+                .colorid = SCENE_EMPTY, .matindx = matindx };
     varray_gdrawwrite(&scene->displaylist, d);
 }
 
-/** First OBJECT draw with id, or NULL. */
-gdraw *scene_findobjectdraw(scene *s, int id) {
+/** OBJECT draw with drawid, or NULL. */
+gdraw *scene_finddrawbydrawid(scene *s, int drawid) {
     if (!s) return NULL;
     for (unsigned int i = 0; i < s->displaylist.count; i++) {
         gdraw *drw = &s->displaylist.data[i];
-        if (drw->type == OBJECT && drw->id == id) return drw;
+        if (drw->type == OBJECT && drw->drawid == drawid) return drw;
     }
     return NULL;
 }
 
-/** Replace matrix on existing OBJECT draw; false if not found. */
-bool scene_setobjectdrawmatrix(scene *s, int id, const float *matrix) {
-    gdraw *drw = scene_findobjectdraw(s, id);
-    if (!drw) return false;
-    if (!matrix) {
-        drw->matindx = SCENE_EMPTY;
-        return true;
+/** First OBJECT draw with object id (legacy), or NULL. */
+gdraw *scene_findobjectdraw(scene *s, int objectid) {
+    if (!s) return NULL;
+    for (unsigned int i = 0; i < s->displaylist.count; i++) {
+        gdraw *drw = &s->displaylist.data[i];
+        if (drw->type == OBJECT && drw->id == objectid) return drw;
     }
-    if (drw->matindx != SCENE_EMPTY) {
-        memcpy(&s->data.data[drw->matindx], matrix, sizeof(float) * 16);
-    } else {
-        /* scene_adddata takes a non-const pointer; matrix is 16 floats we own on the cmd. */
+    return NULL;
+}
+
+void scene_setobjectdrawobject(gdraw *drw, int objectid) {
+    if (drw) drw->id = objectid;
+}
+
+/** Create OBJECT draw slot. */
+gdraw *scene_addobjectdraw(scene *s, int drawid, int objectid,
+                           const float *matrix, int colorid) {
+    if (!s) return NULL;
+    int matindx = SCENE_EMPTY;
+    if (matrix) {
         float tmp[16];
         memcpy(tmp, matrix, sizeof(tmp));
-        drw->matindx = scene_adddata(s, tmp, 16);
+        matindx = scene_adddata(s, tmp, 16);
     }
+    gdraw d = { .type = OBJECT, .id = objectid, .drawid = drawid,
+                .colorid = colorid, .matindx = matindx };
+    varray_gdrawwrite(&s->displaylist, d);
+    return &s->displaylist.data[s->displaylist.count - 1];
+}
+
+/** Update matrix and/or color; leave matrix alone when !has_matrix. */
+bool scene_updateobjectdraw(scene *s, gdraw *drw, bool has_matrix,
+                            const float *matrix, int colorid) {
+    if (!s || !drw || drw->type != OBJECT) return false;
+    if (has_matrix) {
+        if (!matrix) {
+            drw->matindx = SCENE_EMPTY;
+        } else if (drw->matindx != SCENE_EMPTY) {
+            memcpy(&s->data.data[drw->matindx], matrix, sizeof(float) * 16);
+        } else {
+            float tmp[16];
+            memcpy(tmp, matrix, sizeof(tmp));
+            drw->matindx = scene_adddata(s, tmp, 16);
+        }
+    }
+    if (colorid != SCENE_EMPTY) drw->colorid = colorid;
     return true;
 }
 

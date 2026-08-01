@@ -89,7 +89,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `c` | `<id> <r g b [a]>...` | Define color table entry (RGB or RGBA) |
 | `C` | `<id>` | Select uniform color for subsequent geometry and text |
 | `M` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Material: unlit or OpenGL/VTK Phong (default ka=kd=0.5, ks=0) |
-| `d` | `<id>` | Draw object (matrix from prior transforms if any). Replaces matrix if this object id is already in the displaylist |
+| `d` | `<drawId>` \| `<drawId> <objectId>` | Draw slot `drawId` referencing object (defaults to `drawId` if one arg). Matrix from prior transforms. Updates existing slot by `drawId` (legacy: first object id match). Stamps current `C` onto the slot. No-matrix update preserves pose (recolor). |
 | `D` | — | Clear displaylist only; keep objects/colors/fonts/pools (sticky scene) |
 | `F` | `<id> "<path>" <size>` | Load font |
 | `T` | `<fontid> "<string>"` | Draw text (matrix like `d`) |

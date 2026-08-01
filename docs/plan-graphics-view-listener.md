@@ -33,8 +33,8 @@ move(id, position, scale=, rotate=)    // Phase 3; same arity pattern
 ```
 
 Morpho treats `param=nil` defaults as keyword-only, so pose is a separate arity overload (not `position=nil` on the 1-arg form). `scale=` / `rotate=` remain kwargs on the posed form. `display(item, nil, scale=2)` works when position should stay default origin.
-- Pose args set on `display` → entry SRT recorded; `Sphere` stored as abstract primitive with matching `center`/`r` (Show bakes via `visitGeneric`, like Cylinder/Arrow).
-- No pose args + `Sphere` → store the Sphere; copy `center`→entry position, `r`→scale.
+- Pose args set on `display` → entry SRT recorded; `Sphere` stored as **unit** abstract primitive (Phase 5c; Phase 1 temporarily stored matching center/r + baked).
+- No pose args + `Sphere` → store unit Sphere; copy `center`→entry position, `r`→scale.
 - No pose args + other primitives → identity SRT; geometry as authored.
 - Same item `display`’d twice → two ids / two entries.
 
@@ -43,9 +43,9 @@ Morpho treats `param=nil` defaults as keyword-only, so pose is a separate arity 
 - New `position` (2nd positional or kwarg) **always** sets `entry.position`.
 - Omitted `scale` / `rotate` leave that entry component **unchanged**.
 
-### Translucent `Sphere` (Phase 1)
+### Translucent `Sphere` (Phase 1; emit superseded by 5c)
 
-Graphics stores the abstract `Sphere`; `Show` visits via `visitGeneric` → `totrianglecomplex()` (same pattern as Cylinder/Arrow). No Show-level sphere mesh cache — prefer clients `display`ing one unit item at many poses; a serializer cache can return later if needed. Entry SRT is recorded for later `move`; applying entry pose in Show (instead of baking `center`/`r`) is part of the later primitive emit review.
+Graphics stores the abstract `Sphere`; Phase 1 Show baked via `visitGeneric`. **Phase 5c:** unit Sphere + entry SRT; Show mesh cache (few `o`, many `d`); color via `C` so instances share geometry. See Phase 5c locked decisions.
 
 ### Other
 
@@ -185,18 +185,13 @@ g.endBatch()            # one coalesced Moved
 
 **Done when:** `move` updates one object’s pose without clearing other draws; amigaball room is not re-sent each frame.
 
-#### Phase 5c — Show emit review (primitives)
+#### Phase 5c — Show emit review (primitives) + draw-slot identity ✅
 
-**Goal:** entry SRT is the draw authority for more than `TriangleComplex`.
+**Goal:** entry SRT (and color) are per-instance draw authority; many spheres share few viewer objects.
 
-**Locked first cut:**
+**Substeps done:** 5c.1 draw-slots · 5c.2 unit Sphere + mesh cache · 5c.3 recolor · 5c.4 PointCloud/LineSet SRT · 5c.5 n-body (`examples/nbody.morpho`).
 
-- **Sphere:** define a **unit** mesh (per distinct tessellation/transmit key, or first display of that abstract sphere); draw with entry SRT — stop baking center/r into vertices for the posed path (Phase 1 bake-vs-entry-SRT follow-through).
-- **PointCloud / LineSet:** confirm `visitEntry` uses entry SRT; add overload if still world-baked + identity.
-- **Cylinder / Arrow / Text:** still world-baked for this cut (orientation/path baked); document; no fake SRT.
-- Optional Show-level unit-sphere mesh cache only if a single `Show.write` with many identical spheres is hot — secondary to clients `display`ing one unit item at many poses.
-
-**Done when:** posed `Sphere` via `display`/`move` animates without rebuilding sphere mesh; tests cover Sphere `objectMap` + pose redraw.
+**Contract:** Graphics entry id = viewer draw-slot id (`d <drawId> [objectId]`); color stamped on slot from `C`; unit Sphere + Show mesh cache by refine level; `Graphics.recolor` + `GraphicsEventRecolored`; Cylinder/Arrow/Text still world-baked.
 
 #### Phase 5d — `U O` / `U V` / `X O`
 
