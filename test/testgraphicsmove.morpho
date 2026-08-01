@@ -115,7 +115,7 @@ var buf = Buf()
 var show = Show()
 show.write(g6, buf)
 expect(show.objectMap[id6] == 1, "objectMap records viewer id")
-expect(show.posedIds.contains(id6), "TC is posed")
+expect(show.objectMap.contains(id6), "TC is mapped")
 
 var buf2 = Buf()
 show.emitPoseDraws(g6, buf2)

@@ -74,7 +74,7 @@ var id3 = g3.display(PointCloud(pos, color=Red), [1, 2, 3], scale=2)
 var buf3 = Buf()
 var show3 = Show()
 show3.write(g3, buf3)
-expect(show3.posedIds.contains(id3), "PointCloud entry is posed")
+expect(show3.objectMap.contains(id3), "PointCloud entry is mapped")
 expect(anyStarts(buf3.lines, "t 1"), "posed PointCloud emits translation")
 expect(anyExact(buf3.lines, "d ${id3} ${show3.objectMap[id3]}"), "d graphicsId objectId")
 

@@ -112,7 +112,7 @@ g.move(shadow, [x,0.02,z], scale=shadowR)
 
 **Locked:**
 
-- **Id map:** View session owns `graphicsId → viewerObjectId` (on the live `Show` instance: `objectMap`, plus `posedIds` / `entryColorId`). `open(g)` builds it from one `Show.write` — no fake N `defined` events.
+- **Id map:** View session owns `graphicsId → viewerObjectId` (on the live `Show` instance: `objectMap`, plus `entryColorId` / `flatIds`). `open(g)` builds it from one `Show.write` — no fake N `defined` events.
 - **Mid-session `display`:** notifies `GraphicsEventDefined`; View emits define+draw via `Show.writeEntry`.
 - **Events:** `GraphicsEventDefined`, `GraphicsEventMoved` (`removed` / `replaced` later).
 - **On `moved`:** pose-only `d` via `emitEntryPose` (Phase 5b); fall back to `D` + `emitPoseDraws` if unmapped.
@@ -179,7 +179,7 @@ g.endBatch()            # one coalesced Moved
 
 - Viewer: when applying `d <id>` with a matrix, if an `OBJECT` draw for that id already exists in the scene displaylist, **replace its matrix** instead of appending. Objects first; text `T` draws later if cheap.
 - View `receive(Moved)`: emit **only** pose lines via `Show.emitEntryPose` (no `C`/`M`); **do not** send `D`. Unmapped ids → fall back to full `D` + `emitPoseDraws`.
-- Graphics tracks `_pendingMoved`; `takeMovedIds()` returns ids (displaylist order) and clears — coalesced batch Moved updates every mover.
+- Graphics tracks dirty ids via `_dirty` / `takeDirtyIds` (`takeMovedIds` / `takeRecolorIds` wrappers); coalesced batch Moved updates every mover.
 - Mid-session `Defined` unchanged (append define+draw).
 - Keep `View.redraw(ascii)` and explicit `D` for tests/fixtures (`definedraw-redraw` stays valid).
 

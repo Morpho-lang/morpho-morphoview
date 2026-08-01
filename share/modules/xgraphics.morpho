@@ -722,8 +722,8 @@ class Graphics with Broadcaster {
     if (!self.title) self.title="Morpho" // Title to show
     self.background = background
     if (!self.background) self.background = Black
-    self._pendingMoved = Dictionary() // graphicsId → true; drained by takeMovedIds
-    self._pendingRecolor = Dictionary()
+    // kind → { graphicsId → true }; drained by takeDirtyIds
+    self._dirty = Dictionary()
   }
 
   /** Look up an entry by Graphics-owned id; nil if missing. */
@@ -734,34 +734,35 @@ class Graphics with Broadcaster {
     return nil
   }
 
-  /** Ids moved since last take (displaylist order). Clears the pending set. */
-  takeMovedIds() {
+  /** Drain pending ids for `kind` ("moved" / "recolored") in displaylist order. */
+  takeDirtyIds(kind) {
     var ids = []
+    if (!self._dirty.contains(kind)) return ids
+    var pending = self._dirty[kind]
     for (e in self.displaylist) {
-      if (self._pendingMoved.contains(e.id)) ids.append(e.id)
+      if (pending.contains(e.id)) ids.append(e.id)
     }
-    self._pendingMoved = Dictionary()
+    self._dirty[kind] = Dictionary()
     return ids
   }
+
+  _markDirty(kind, id, event) {
+    var pending = Dictionary()
+    if (self._dirty.contains(kind)) pending = self._dirty[kind]
+    pending[id] = true
+    self._dirty[kind] = pending
+    self.notify(event)
+  }
+
+  takeMovedIds() { return self.takeDirtyIds("moved") }
+  takeRecolorIds() { return self.takeDirtyIds("recolored") }
 
   _markMoved(id) {
-    self._pendingMoved[id] = true
-    self.notify(GraphicsEventMoved(id))
-  }
-
-  /** Ids recolored since last take (displaylist order). Clears the pending set. */
-  takeRecolorIds() {
-    var ids = []
-    for (e in self.displaylist) {
-      if (self._pendingRecolor.contains(e.id)) ids.append(e.id)
-    }
-    self._pendingRecolor = Dictionary()
-    return ids
+    self._markDirty("moved", id, GraphicsEventMoved(id))
   }
 
   _markRecolor(id) {
-    self._pendingRecolor[id] = true
-    self.notify(GraphicsEventRecolored(id))
+    self._markDirty("recolored", id, GraphicsEventRecolored(id))
   }
 
   /** Allocate id and append a GraphicsEntry; returns the id. */
@@ -904,7 +905,6 @@ class Show {
     self.sceneId = 1
     self.replace = false
     self.objectMap = Dictionary()    // graphicsId → viewer object id
-    self.posedIds = Dictionary()     // graphicsId → true if draw uses entry SRT
     self.entryColorId = Dictionary() // graphicsId → color id when draw needs `C`
     self.flatIds = Dictionary()      // graphicsId → true if draw needs `M flat`
     self.meshCache = Dictionary()    // mesh key → viewer object id (shared geometry)
@@ -1010,9 +1010,11 @@ class Show {
     self.visitGeneric(item, out)
   }
 
-  /** Emit i / s / r / t / d. With a Graphics entry id: `d <graphicsId> <viewerId>`.
-   *  Identity draws (entry.id == 0): legacy `d <viewerId>`. */
-  emitEntryDraw(entry, viewerId, out) {
+  /** Emit i / s / r / t / d.
+   *  - viewerId set, entry.id ≠ 0 → `d <graphicsId> <viewerId>` (define/redraw)
+   *  - viewerId set, entry.id == 0 → `d <viewerId>` (identity / world-baked)
+   *  - viewerId nil → `d <graphicsId>` (pose-only update) */
+  emitEntryDraw(entry, out, viewerId=nil) {
     out.write("i")
     if (entry.scale != 1) out.write("s ${self.fmt(entry.scale)}")
     if (!isnil(entry.rotate)) {
@@ -1023,39 +1025,25 @@ class Show {
     if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
       out.write("t ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}")
     }
-    if (entry.id != 0) {
+    if (isnil(viewerId)) {
+      out.write("d ${entry.id}")
+    } else if (entry.id != 0) {
       out.write("d ${entry.id} ${viewerId}")
     } else {
       out.write("d ${viewerId}")
     }
   }
 
-  /** Pose-only update: transforms + `d <graphicsId>` (matrix in place; no object rebind). */
-  emitEntryDrawPose(entry, out) {
-    out.write("i")
-    if (entry.scale != 1) out.write("s ${self.fmt(entry.scale)}")
-    if (!isnil(entry.rotate)) {
-      var r = entry.rotate
-      out.write("r ${self.fmt(r[0])} ${self.fmt(r[1])} ${self.fmt(r[2])} ${self.fmt(r[3])}")
-    }
-    var p = entry.position
-    if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
-      out.write("t ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}")
-    }
-    out.write("d ${entry.id}")
-  }
-
   /** Record graphicsId → viewer id (and optional draw color / flat shade) for the current entry. */
-  _recordObject(viewerId, posed, colorId=nil, flat=false) {
+  _recordObject(viewerId, colorId=nil, flat=false) {
     var entry = self._currentEntry
     if (isnil(entry) || entry.id == 0) return
     self.objectMap[entry.id] = viewerId
-    if (posed) self.posedIds[entry.id] = true
     if (!isnil(colorId)) self.entryColorId[entry.id] = colorId
     if (flat) self.flatIds[entry.id] = true
   }
 
-  /** Re-issue draws for all mapped entries after `D` (entry SRT when posed). */
+  /** Re-issue draws for all mapped entries after `D` (entry SRT). */
   emitPoseDraws(graphic, out) {
     for (entry in graphic.displaylist) {
       if (!self.objectMap.contains(entry.id)) continue
@@ -1065,11 +1053,7 @@ class Show {
       if (self.entryColorId.contains(entry.id)) {
         out.write("C ${self.entryColorId[entry.id]}")
       }
-      if (self.posedIds.contains(entry.id)) {
-        self.emitEntryDraw(entry, vid, out)
-      } else {
-        self.emitEntryDraw(GraphicsEntry(0, entry.item), vid, out)
-      }
+      self.emitEntryDraw(entry, out, viewerId=vid)
       if (needFlat) out.write("M shaded")
     }
   }
@@ -1079,12 +1063,7 @@ class Show {
     if (!self.objectMap.contains(graphicsId)) return false
     var entry = graphic.findEntry(graphicsId)
     if (isnil(entry)) return false
-    if (self.posedIds.contains(graphicsId)) {
-      self.emitEntryDrawPose(entry, out)
-    } else {
-      var vid = self.objectMap[graphicsId]
-      self.emitEntryDraw(GraphicsEntry(0, entry.item), vid, out)
-    }
+    self.emitEntryDraw(entry, out)
     return true
   }
 
@@ -1220,20 +1199,6 @@ class Show {
     return id
   }
 
-  /** RGB for a Sphere entry: entry.color, else item.color. */
-  sphereRgb(entry, item) {
-    var col = entry.color
-    if (isnil(col)) col = item.color
-    if (isnil(col)) return [0.5, 0.5, 0.5]
-    if (ismatrix(col)) return [col[0,0], col[1,0], col[2,0]]
-    if (islist(col)) return col
-    if (isobject(col)) {
-      if (!isnil(col.r) && !isnil(col.g) && !isnil(col.b)) return [col.r, col.g, col.b]
-      return col.rgb(0)
-    }
-    return [0.5, 0.5, 0.5]
-  }
-
   /** Define a TriangleComplex (`o`/`v`/`f`, optional `C`); returns viewer object id.
    *  Sets `self._lastColorId` when a uniform `C` is selected (else nil). */
   defineTriangleComplex(item, out) {
@@ -1257,8 +1222,8 @@ class Show {
   /** From visitGeneric (baked Sphere/Cylinder/…): identity draw; record map if under an entry. */
   visit(TriangleComplex item, out) {
     var vid = self.defineTriangleComplex(item, out)
-    self._recordObject(vid, false, colorId=self._lastColorId)
-    self.emitEntryDraw(GraphicsEntry(0, item), vid, out)
+    self._recordObject(vid, colorId=self._lastColorId)
+    self.emitEntryDraw(GraphicsEntry(0, item), out, viewerId=vid)
   }
 
   /** Uniform RGB for PointCloud / LineSet color field. */
@@ -1367,8 +1332,8 @@ class Show {
     out.write("M flat")
     var id = self.definePointCloud(item, out)
     if (isnil(id)) { out.write("M shaded"); return }
-    self._recordObject(id, false, colorId=self._lastColorId, flat=true)
-    self.emitEntryDraw(GraphicsEntry(0, item), id, out)
+    self._recordObject(id, colorId=self._lastColorId, flat=true)
+    self.emitEntryDraw(GraphicsEntry(0, item), out, viewerId=id)
     out.write("M shaded")
   }
 
@@ -1376,8 +1341,8 @@ class Show {
     out.write("M flat")
     var id = self.defineLineSet(item, out)
     if (isnil(id)) { out.write("M shaded"); return }
-    self._recordObject(id, false, colorId=self._lastColorId, flat=true)
-    self.emitEntryDraw(GraphicsEntry(0, item), id, out)
+    self._recordObject(id, colorId=self._lastColorId, flat=true)
+    self.emitEntryDraw(GraphicsEntry(0, item), out, viewerId=id)
     out.write("M shaded")
   }
 
@@ -1478,7 +1443,6 @@ class Show {
   write(graphic, out) {
     self.preamble(graphic, out)
     self.objectMap = Dictionary()
-    self.posedIds = Dictionary()
     self.entryColorId = Dictionary()
     self.flatIds = Dictionary()
     self.meshCache = Dictionary()
@@ -1516,10 +1480,10 @@ class Show {
       self.meshCache[key] = vid
     }
     var alpha = self.opacity(item)
-    var cid = self.addRgb(self.sphereRgb(entry, item), alpha, out)
+    var cid = self.addRgb(self.entryRgb(entry), alpha, out)
     out.write("C ${cid}")
-    self._recordObject(vid, true, colorId=cid)
-    self.emitEntryDraw(entry, vid, out)
+    self._recordObject(vid, colorId=cid)
+    self.emitEntryDraw(entry, out, viewerId=vid)
     self._currentEntry = nil
   }
 
@@ -1529,8 +1493,8 @@ class Show {
     out.write("M flat")
     var vid = self.definePointCloud(item, out)
     if (!isnil(vid)) {
-      self._recordObject(vid, true, colorId=self._lastColorId, flat=true)
-      self.emitEntryDraw(entry, vid, out)
+      self._recordObject(vid, colorId=self._lastColorId, flat=true)
+      self.emitEntryDraw(entry, out, viewerId=vid)
     }
     out.write("M shaded")
     self._currentEntry = nil
@@ -1542,8 +1506,8 @@ class Show {
     out.write("M flat")
     var vid = self.defineLineSet(item, out)
     if (!isnil(vid)) {
-      self._recordObject(vid, true, colorId=self._lastColorId, flat=true)
-      self.emitEntryDraw(entry, vid, out)
+      self._recordObject(vid, colorId=self._lastColorId, flat=true)
+      self.emitEntryDraw(entry, out, viewerId=vid)
     }
     out.write("M shaded")
     self._currentEntry = nil
@@ -1556,8 +1520,8 @@ class Show {
     var flat = entry.flat
     if (flat) out.write("M flat")
     var vid = self.defineTriangleComplex(item, out)
-    self._recordObject(vid, true, colorId=self._lastColorId, flat=flat)
-    self.emitEntryDraw(entry, vid, out)
+    self._recordObject(vid, colorId=self._lastColorId, flat=flat)
+    self.emitEntryDraw(entry, out, viewerId=vid)
     if (flat) out.write("M shaded")
     self._currentEntry = nil
   }
