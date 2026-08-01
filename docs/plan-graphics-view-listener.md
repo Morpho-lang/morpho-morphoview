@@ -4,7 +4,7 @@ Design source of truth: [`definedraw.md`](definedraw.md).
 
 **Working agreement:** one phase at a time; pause for review before the next.
 
-**Canonical View API:** `View()` + `open(g)` (not `View(g)`).
+**Canonical View API:** `View(g)` or `View()` + `open(g)` (both listen after one `Show.write`).
 
 ## Locked decisions (Phase 1 readiness)
 
@@ -50,10 +50,10 @@ Graphics stores the abstract `Sphere`; `Show` visits via `visitGeneric` → `tot
 ### Other
 
 - `Graphics.add`: remap right-hand ids (unique within one Graphics).
-- Phase 3 batching: immediate outside `begin`/`end`; queue inside; no nested `begin`; `display` in batch queued; prefer batching for multi-object frames.
+- Phase 3 batching: deferred — each `notify` is immediate; `begin`/`end` can return later.
 - `open(g)`: one `Show.write`, then listen (no fake N `defined` on open).
-- `update(g)`: full `U S`; rebind listener; drop pending batch; reset Show/object maps.
-- Phase 3 v1: `D` + full pose redraw (known limit for large static+one mover).
+- `update(g)`: full `U S`; rebind listener; reset Show/object maps.
+- Phase 3 v1: each `moved` → `D` + full pose redraw (known limit for large static+one mover).
 
 ## Target loop
 
@@ -62,12 +62,9 @@ Put the **first pose on `display`** (or `move` before `open`) so the first paint
 ```
 var ball = g.display(unitBall, [x0,y0,z0], scale=ballR)
 var shadow = g.display(unitShadow, [x0,0.02,z0], scale=shadowR)
-v = View()
-v.open(g)   # first paint already posed
-g.begin()
+v = View(g)   # first paint already posed
 g.move(ball, [x,y,z], scale=ballR, rotate=[angle,0,1,0])
 g.move(shadow, [x,0.02,z], scale=shadowR)
-g.end()
 ```
 
 ## Non-goals
@@ -80,7 +77,7 @@ g.end()
 
 ## Phases
 
-### Phase 1 — Entries + Show define/draw foundation
+### Phase 1 — Entries + Show define/draw foundation ✅
 
 **Files:** `share/modules/xgraphics.morpho`, `test/`
 
@@ -95,7 +92,7 @@ g.end()
 
 **Done when:** `Show(g)` / `View.open(g)` emit correctly from entries; set-and-forget path unchanged in spirit; no C viewer changes.
 
-### Phase 2 — Viewer redraw support
+### Phase 2 — Viewer redraw support ✅
 
 **Files:** `src/command.c` / `command.h`, `src/scene.c` / `scene.h`, `src/display.c`, docs, `share/modules/morphoview.morpho`
 
@@ -110,26 +107,29 @@ g.end()
 
 **Done when:** `definedraw-redraw` fixture runs; `View.redraw` can clear draws and re-issue poses without `U S`.
 
-### Phase 3 — `move` + View listener
+### Phase 3 — `move` + View listener ✅
 
 **Files:** `share/modules/xgraphics.morpho` (`Graphics`), `share/modules/morphoview.morpho` (`View`)
 
-**Before coding, lock:**
+**Locked:**
 
-- Who owns `graphicsId → viewerObjectId` (View session state vs Show); `open` builds map from one `Show.write` (no fake N `defined`).
-- Mid-session `display` after `open` emits `defined` (define+draw); batched `display` queued.
-- Minimal events: `defined`, `moved` (`removed` / `replaced` later).
+- **Id map:** View session owns `graphicsId → viewerObjectId` (on the live `Show` instance: `objectMap`, plus `posedIds` / `entryColorId`). `open(g)` builds it from one `Show.write` — no fake N `defined` events.
+- **Mid-session `display`:** notifies `GraphicsEventDefined`; View emits define+draw via `Show.writeEntry`.
+- **Events:** `GraphicsEventDefined`, `GraphicsEventMoved` (`removed` / `replaced` later).
+- **On `moved`:** `D` + full pose redraw via `Show.emitPoseDraws` (v1).
 
 **Steps:**
 
-1. `move(id, position=, scale=, rotate=)` — locked merge rules; notify listeners.
-2. `begin` / `end` — immediate outside batch; queue inside; no nested `begin`.
-3. `addListener` / `removeListener` on Graphics (no global dependents framework).
-4. `open(g)`: one `Show.write`, then listen; `update(g)`: full `U S`, rebind, drop pending batch, reset Show/object maps.
-5. On batched `moved`: `D` + full pose redraw (v1; known limit for large static+one mover).
-6. Keep `View.redraw(ascii)` for tests.
+1. `move(id, …)` — locked merge rules; notify listeners. ✅
+2. `begin` / `end` batching — deferred (immediate `notify` for now).
+3. `Broadcaster.subscribe` / `Listener.listen`/`ignore` (`broadcast` module). ✅
+4. `open(g)`: one `Show.write`, then listen; `update(g)`: full `U S`, rebind, reset Show/object maps. ✅
+5. On `moved`: `D` + full pose redraw (v1). ✅
+6. Keep `View.redraw(ascii)` for tests. ✅
 
-**Done when:** script can `display` → `open` → `begin`/`move`/`end` and viewer updates without per-frame `U S`.
+**Done when:** script can `display` → `open` → `move` and viewer updates without per-frame `U S`.
+
+**Tests:** `test/testgraphicsmove.morpho` (no viewer), `test/testviewmove.morpho` (live session).
 
 ### Phase 4 — Yardstick
 

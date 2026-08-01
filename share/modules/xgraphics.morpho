@@ -8,11 +8,13 @@
  * - PointCloud / LineSet primitives
  * - display() creates GraphicsEntry, enabling pose information to be decoupled from the item
  * - Show can now clear display list
+ * - Graphics.move via Broadcaster.notify; View is Listener
  */
 
 import constants
 import meshtools
 import color
+import broadcast
 
 var _eps = 1e-15
 var _fntntfnd = Error("FntNtFnd", "Font not found.")
@@ -681,8 +683,19 @@ class GraphicsEntry {
   }
 }
 
-class Graphics {
+/** Pub/sub events from Graphics. Typed subclasses enable multiple dispatch. */
+class GraphicsEvent {
+  init(id) {
+    self.id = id
+  }
+}
+
+class GraphicsEventDefined is GraphicsEvent {}
+class GraphicsEventMoved is GraphicsEvent {}
+
+class Graphics with Broadcaster {
   init(title = nil, background = nil) {
+    self._broadcasterInit()
     self.displaylist = [] // GraphicsEntry list
     self._nextid = 1
     self.title = title
@@ -691,11 +704,20 @@ class Graphics {
     if (!self.background) self.background = Black
   }
 
-  /** Allocate id and append a GraphicsEntry; returns the id. */
+  /** Look up an entry by Graphics-owned id; nil if missing. */
+  findEntry(id) {
+    for (e in self.displaylist) {
+      if (e.id == id) return e
+    }
+    return nil
+  }
+
+  /** Allocate id and append a GraphicsEntry; returns the id. Notifies defined. */
   _append(item, position=nil, scale=nil, rotate=nil) {
     var id = self._nextid
     self._nextid += 1
     self.displaylist.append(GraphicsEntry(id, item, position=position, scale=scale, rotate=rotate))
+    self.notify(GraphicsEventDefined(id))
     return id
   }
 
@@ -728,6 +750,27 @@ class Graphics {
     return self._append(s, position=position, scale=scl, rotate=rotate)
   }
 
+  /** Update scale=/rotate= only; omitted kwargs leave that component unchanged. */
+  move(id, scale=nil, rotate=nil) {
+    var e = self.findEntry(id)
+    if (isnil(e)) return false
+    if (!isnil(scale)) e.scale = scale
+    if (!isnil(rotate)) e.rotate = rotate
+    self.notify(GraphicsEventMoved(id))
+    return true
+  }
+
+  /** Set position (always); scale=/rotate= only when provided. */
+  move(id, position, scale=nil, rotate=nil) {
+    var e = self.findEntry(id)
+    if (isnil(e)) return false
+    e.position = _asposition(position)
+    if (!isnil(scale)) e.scale = scale
+    if (!isnil(rotate)) e.rotate = rotate
+    self.notify(GraphicsEventMoved(id))
+    return true
+  }
+
   /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result. */
   add(right) {
     var g = Graphics()
@@ -735,6 +778,7 @@ class Graphics {
     g.background = self.background
     g._nextid = self._nextid
     for (el in self.displaylist) g.displaylist.append(el)
+    // Remap via _append without notifying (no listeners on fresh g; avoid noise if later bound).
     for (el in right.displaylist) {
       g._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate)
     }
@@ -792,6 +836,11 @@ class Show {
     self.colors = Dictionary()
     self.sceneId = 1
     self.replace = false
+    self.objectMap = Dictionary()    // graphicsId → viewer object id
+    self.posedIds = Dictionary()     // graphicsId → true if draw uses entry SRT
+    self.entryColorId = Dictionary() // graphicsId → color id when draw needs `C`
+    self._currentEntry = nil
+    self._lastColorId = nil
   }
 
   // Fire-and-forget: temp file + morphoview -t.
@@ -906,6 +955,31 @@ class Show {
     out.write("d ${id}")
   }
 
+  /** Record graphicsId → viewer id (and optional draw color) for the current entry. */
+  _recordObject(viewerId, posed, colorId=nil) {
+    var entry = self._currentEntry
+    if (isnil(entry) || entry.id == 0) return
+    self.objectMap[entry.id] = viewerId
+    if (posed) self.posedIds[entry.id] = true
+    if (!isnil(colorId)) self.entryColorId[entry.id] = colorId
+  }
+
+  /** Re-issue draws for all mapped entries after `D` (entry SRT when posed). */
+  emitPoseDraws(graphic, out) {
+    for (entry in graphic.displaylist) {
+      if (!self.objectMap.contains(entry.id)) continue
+      var vid = self.objectMap[entry.id]
+      if (self.entryColorId.contains(entry.id)) {
+        out.write("C ${self.entryColorId[entry.id]}")
+      }
+      if (self.posedIds.contains(entry.id)) {
+        self.emitEntryDraw(entry, vid, out)
+      } else {
+        self.emitEntryDraw(GraphicsEntry(0, entry.item), vid, out)
+      }
+    }
+  }
+
   /** POVRay transmit/filter → OpenGL alpha: a = 1 - clamp(transmit + filter, 0, 1). */
   opacity(item) {
     var t = isnil(item.transmit) ? 0 : item.transmit
@@ -998,13 +1072,16 @@ class Show {
     }
   }
 
-  /** Define a TriangleComplex (`o`/`v`/`f`, optional `C`); returns viewer object id. */
+  /** Define a TriangleComplex (`o`/`v`/`f`, optional `C`); returns viewer object id.
+   *  Also returns selected color id (or nil) as a second value via self._lastColorId. */
   defineTriangleComplex(item, out) {
     var id = self.uid()
     var alpha = self.opacity(item)
+    self._lastColorId = nil
     if (alpha < 0.999) {
       // Uniform albedo + alpha (viewer transparent pass); vertex colors deferred.
       var cid = self.addRgb(self.uniformRgb(item), alpha, out)
+      self._lastColorId = cid
       out.write("C ${cid}")
       out.write("o ${id}")
       self.triangleComplexObjectData(item, out, includeColor=false)
@@ -1015,8 +1092,11 @@ class Show {
     return id
   }
 
+  /** From visitGeneric (baked Sphere/Cylinder/…): identity draw; record map if under an entry. */
   visit(TriangleComplex item, out) {
-    self.emitEntryDraw(GraphicsEntry(0, item), self.defineTriangleComplex(item, out), out)
+    var vid = self.defineTriangleComplex(item, out)
+    self._recordObject(vid, false, colorId=self._lastColorId)
+    self.emitEntryDraw(GraphicsEntry(0, item), vid, out)
   }
 
   /** Uniform RGB for PointCloud / LineSet color field. */
@@ -1080,8 +1160,9 @@ class Show {
 
     // Flat shade (no normals); bake RGB into vertices when opaque (like mesh xnc).
     out.write("M flat")
+    var cid = nil
     if (alpha < 0.999) {
-      var cid = self.addRgb(self.pointLineRgb(item), alpha, out)
+      cid = self.addRgb(self.pointLineRgb(item), alpha, out)
       out.write("C ${cid}")
       out.write("o ${id}")
       self.pointLineVertexData(item, out, includeColor=false)
@@ -1089,6 +1170,7 @@ class Show {
       out.write("o ${id}")
       self.pointLineVertexData(item, out, includeColor=true)
     }
+    self._recordObject(id, false, colorId=cid)
 
     var pline = "p"
     for (i in 0...nv) pline += " ${i}"
@@ -1106,8 +1188,9 @@ class Show {
     if (nv < 1 || segs.count() < 2) return
 
     out.write("M flat")
+    var cid = nil
     if (alpha < 0.999) {
-      var cid = self.addRgb(self.pointLineRgb(item), alpha, out)
+      cid = self.addRgb(self.pointLineRgb(item), alpha, out)
       out.write("C ${cid}")
       out.write("o ${id}")
       self.pointLineVertexData(item, out, includeColor=false)
@@ -1115,6 +1198,7 @@ class Show {
       out.write("o ${id}")
       self.pointLineVertexData(item, out, includeColor=true)
     }
+    self._recordObject(id, false, colorId=cid)
 
     var lline = "l"
     for (i in 0...segs.count()) lline += " ${segs[i]}"
@@ -1220,19 +1304,33 @@ class Show {
 
   write(graphic, out) {
     self.preamble(graphic, out)
+    self.objectMap = Dictionary()
+    self.posedIds = Dictionary()
+    self.entryColorId = Dictionary()
 
     for (entry in graphic.displaylist) {
       self.visitEntry(entry, entry.item, out)
     }
   }
 
-  /** Default: world-baked item, ignore entry pose (Cylinder/Arrow/Text/points/…). */
+  /** Define + draw a single entry (mid-session `defined`); updates object maps. */
+  writeEntry(entry, out) {
+    self.visitEntry(entry, entry.item, out)
+  }
+
+  /** Default: world-baked item, identity draw (Cylinder/Arrow/Text/points/Sphere…). */
   visitEntry(entry, item, out) {
+    self._currentEntry = entry
     self.visit(item, out)
+    self._currentEntry = nil
   }
 
   /** TriangleComplex: define once for this write, draw with entry SRT. */
   visitEntry(entry, TriangleComplex item, out) {
-    self.emitEntryDraw(entry, self.defineTriangleComplex(item, out), out)
+    self._currentEntry = entry
+    var vid = self.defineTriangleComplex(item, out)
+    self._recordObject(vid, true, colorId=self._lastColorId)
+    self.emitEntryDraw(entry, vid, out)
+    self._currentEntry = nil
   }
 }

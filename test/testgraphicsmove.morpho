@@ -1,0 +1,93 @@
+// Graphics move / listeners (no viewer required).
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testgraphicsmove.morpho
+
+import xgraphics
+import broadcast
+import color
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+class Capture with Listener {
+  init() { self.events = [] }
+  receive(g, event) {
+    self.events.append(self._kind(event))
+  }
+  _kind(GraphicsEventDefined ev) { return GraphicsEventDefined }
+  _kind(GraphicsEventMoved ev) { return GraphicsEventMoved }
+}
+
+/* ---- move merge ---- */
+var g = Graphics()
+var tc = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+var id = g.display(tc, [1, 2, 3], scale=2, rotate=[0.1, 0, 1, 0])
+var e = g.findEntry(id)
+expect(e.position[0] == 1 && e.scale == 2, "initial pose")
+
+expect(g.move(id, [4, 5, 6]), "move position")
+expect(e.position[0] == 4 && e.position[1] == 5 && e.position[2] == 6, "position set")
+expect(e.scale == 2, "scale unchanged when omitted")
+expect(!isnil(e.rotate), "rotate unchanged when omitted")
+
+expect(g.move(id, scale=3.5), "move scale only")
+expect(e.position[0] == 4, "position unchanged on scale-only move")
+expect(e.scale == 3.5, "scale updated")
+
+expect(g.move(id, [0, 0, 0], rotate=[1, 0, 0, 1]), "move position+rotate")
+expect(e.position[0] == 0 && e.position[1] == 0 && e.position[2] == 0, "position origin")
+expect(e.scale == 3.5, "scale still 3.5")
+expect(e.rotate[0] == 1, "rotate updated")
+
+expect(!g.move(999, [0, 0, 0]), "missing id fails")
+
+/* ---- immediate listener ---- */
+var g2 = Graphics()
+var cap = Capture()
+cap.listen(g2)
+var id2 = g2.display(tc, [0, 1, 0])
+expect(cap.events.count() == 1 && cap.events[0] == GraphicsEventDefined, "immediate defined")
+g2.move(id2, [1, 1, 1])
+expect(cap.events.count() == 2 && cap.events[1] == GraphicsEventMoved, "immediate moved")
+
+/* ---- ignore ---- */
+var g5 = Graphics()
+var cap5 = Capture()
+cap5.listen(g5)
+cap5.ignore(g5)
+g5.display(tc)
+expect(cap5.events.count() == 0, "ignored silent")
+
+/* ---- Show objectMap for TriangleComplex ---- */
+var g6 = Graphics()
+var id6 = g6.display(tc, [1, 0, 0], scale=2)
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+var buf = Buf()
+var show = Show()
+show.write(g6, buf)
+expect(show.objectMap[id6] == 1, "objectMap records viewer id")
+expect(show.posedIds.contains(id6), "TC is posed")
+
+var buf2 = Buf()
+show.emitPoseDraws(g6, buf2)
+expect(buf2.lines.count() > 0, "emitPoseDraws emits")
+var hasT = false
+for (line in buf2.lines) {
+  if (line.count() >= 2 && line[0] == "t") hasT = true
+}
+expect(hasT, "pose redraw includes translation")
+
+print "ok"

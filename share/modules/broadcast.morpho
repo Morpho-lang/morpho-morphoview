@@ -1,0 +1,51 @@
+/** Broadcaster / Listener mixins
+ *
+ *  Broadcasters send events to listeners that have subscribed to them. To use:
+ *
+ *    class myBroadcaster with Broadcaster { ... }
+ *    class myListener with Listener { ... }
+ *
+ *    listener.listen(broadcaster)
+ *    broadcaster.notify(event)       // → listener.receive(broadcaster, event)
+ *    listener.ignore(broadcaster)
+ */
+
+class Broadcaster {
+  _broadcasterInit() {
+    self.listeners = []
+  }
+
+  subscribe(listener) { // Register a listener
+    for (l in self.listeners) {
+      if (l == listener) return
+    }
+    self.listeners.append(listener)
+  }
+
+  unsubscribe(listener) { // Deregister a listener
+    var out = []
+    for (l in self.listeners) {
+      if (l != listener) out.append(l)
+    }
+    self.listeners = out
+  }
+
+  notify(event) {
+    for (l in self.listeners) {
+      if (l.respondsto("receive")) l.receive(self, event)
+    }
+  }
+}
+
+/** Receives events from a Broadcaster. Override `receive` (typed overloads OK). */
+class Listener {
+  listen(broadcaster) { // Start receiving from `broadcaster`
+    broadcaster.subscribe(self)
+  }
+
+  ignore(broadcaster) { // Stop receiving from `broadcaster`
+    broadcaster.unsubscribe(self)
+  }
+
+  receive(broadcaster, event) { }
+}

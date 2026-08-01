@@ -9,10 +9,12 @@
  *
  *    var v = View()
  *    v.open(commands)           // ASCII string
- *    v.open(g)                  // Graphics (via xgraphics Show serializer)
+ *    v.open(g)                  // Graphics: Show.write once, then listen
+ *    var v = View(g)            // same as View() + open(g); throws on failure
  *    v.update(morecommands)     // e.g. chunk starting with `U S <id>`
- *    v.update(g)                // Graphics replace via `U S`
+ *    v.update(g)                // Graphics replace via `U S` + rebind
  *    v.redraw(posecommands)     // `D` + redraw draws (no geometry wipe)
+ *    // After open(g) / View(g): g.move drives the viewer via Listener.receive
  *    v.poll(timeoutMs=0)
  *    v.wait(sessionTimeOut=1500)
  *    v.close()
@@ -22,12 +24,15 @@
 
 import zeromq
 import xgraphics
+import broadcast
+
+var _vwopnfl = Error("VwOpnFl", "View failed to open morphoview session.")
 
 /* **************************************
  * View — live duplex session
  **************************************** */
 
-class View {
+class View with Listener {
   init(connectTimeOut=5000, pollMs=100) {
     self.connectTimeOut = connectTimeOut
     self.pollMs = pollMs
@@ -37,6 +42,15 @@ class View {
     self.closed = true
     self.gotOk = false
     self.cmdBuf = ""
+    self.graphics = nil
+    self.show = nil
+  }
+
+  // Open immediately on a Graphics (same as View() then open(g)).
+  // Throws if the session cannot be established — a returned View is ready to use.
+  init(Graphics g, connectTimeOut=5000, pollMs=100) {
+    self.init(connectTimeOut=connectTimeOut, pollMs=pollMs)
+    if (!self.open(g)) _vwopnfl.throw()
   }
 
   // File-compatible sink for Show.write(g, out): each line gets a trailing newline
@@ -60,12 +74,20 @@ class View {
     return self._waitOk()
   }
 
-  // Serialize Graphics via Show, then open the resulting ASCII chunk.
+  // Serialize Graphics via Show, open, then listen for move/display events.
   open(Graphics g) {
+    if (!isnil(self.graphics)) self.ignore(self.graphics)
+    self.show = Show()
     self.cmdBuf = ""
-    var show = Show()
-    show.write(g, self)
-    return self.open(self.cmdBuf)
+    self.show.write(g, self)
+    var ok = self.open(self.cmdBuf)
+    if (ok) {
+      self.graphics = g
+      self.listen(g)
+    } else {
+      self.show = nil
+    }
+    return ok
   }
 
   // Send another command chunk and wait for `ok`.
@@ -76,13 +98,23 @@ class View {
     return self._waitOk()
   }
 
-  // Serialize Graphics with replace preamble (`U S`), then update.
+  // Full `U S` replace: reset Show/object maps, rebind listener.
   update(Graphics g) {
+    if (self.closed) return false
+    if (!isnil(self.graphics)) self.ignore(self.graphics)
+    self.show = Show()
+    self.show.replace = true
     self.cmdBuf = ""
-    var show = Show()
-    show.replace = true
-    show.write(g, self)
-    return self.update(self.cmdBuf)
+    self.show.write(g, self)
+    var ok = self.update(self.cmdBuf)
+    if (ok) {
+      self.graphics = g
+      self.listen(g)
+    } else {
+      self.graphics = nil
+      self.show = nil
+    }
+    return ok
   }
 
   // Clear draws (`D`) and re-issue pose/draw ASCII without `U S`.
@@ -97,6 +129,29 @@ class View {
     }
     self._send(body)
     return self._waitOk()
+  }
+
+  // GraphicsEventDefined → define+draw; GraphicsEventMoved → `D` + full pose redraw (v1).
+  receive(Graphics g, GraphicsEventDefined ev) {
+    if (self.closed || isnil(self.show)) return
+    var entry = g.findEntry(ev.id)
+    if (isnil(entry)) return
+    self.cmdBuf = ""
+    self.show.writeEntry(entry, self)
+    if (self.cmdBuf.count() == 0) return
+    self.gotOk = false
+    self._send(self.cmdBuf)
+    self._waitOk()
+  }
+
+  receive(Graphics g, GraphicsEventMoved ev) {
+    if (self.closed || isnil(self.show)) return
+    self.cmdBuf = ""
+    self.write("D")
+    self.show.emitPoseDraws(g, self)
+    self.gotOk = false
+    self._send(self.cmdBuf)
+    self._waitOk()
   }
 
   // Wait briefly for one reply/event. Returns the message string, or nil.
@@ -130,6 +185,9 @@ class View {
   // Best-effort stop of the viewer; idempotent. Prefers command `Q` over pkill.
   close() {
     if (self.closed) return
+    if (!isnil(self.graphics)) self.ignore(self.graphics)
+    self.graphics = nil
+    self.show = nil
     if (!isnil(self.sock)) {
       self._send("Q")
       var waited = 0
