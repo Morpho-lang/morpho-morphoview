@@ -1,227 +1,216 @@
-// Amiga-style "Boing" bouncing ball — live MorphoView session.
-// Red/white checkered ball, checkerboard floor, soft shadow, bounce physics.
+// Amiga "Boing" ball — live Graphics session.
+// Pitched magenta wireframe room + faceted ball; physics via g.move.
 //
 //   morpho6 examples/amigaball.morpho
 //
 // Close the viewer window (or wait for the run to finish) to exit.
-// Requires: morphoview on PATH, morpho-zeromq, display.
 
 import morphoview
 import xgraphics
 import color
 import constants
 
-/* ---- world ---- */
-var floorHalf = 3.0
-var floorTiles = 8
-var ballR = 0.55
-var wall = floorHalf - ballR - 0.05
-var gravity = -14.0
-var restitution = 0.92
-var dt = 1/60
-var nFrames = 900            // ~15s; close the window anytime
-var nCheck = 8
+var amigaGrey = Color(10/15, 10/15, 10/15)
+var amigaWire = Color(1, 0, 1)                 // bright magenta grid
+var amigaRed = Color(1, 0, 0)
+var amigaWhite = Color(1, 1, 1)
+var amigaShadow = Color(0.22, 0.22, 0.22)
 
-/* ---- unit checkered ball (painted once) ---- */
-fn checkersphere(ncheck) {
-  var s = Sphere([0, 0, 0], 1, color=Red, maxrefine=2)
-  var t = s.totrianglecomplex()
-  var x = t.position
-  var nv = x.dimensions()[1]
-  var col = Matrix(3, nv)
+var roomHalf = 3.0
+var roomTiles = 8
+var wallH = 3.0
+var ballR = 0.85
+var wallX = roomHalf - ballR - 0.1
+var nLat = 8
+var nLon = 16
+var floorZ = 0.2
+var pitch = 35*Pi/180
+var gravity = -18.0
+var dt = 1/50
+var nFrames = 1200
 
-  for (i in 0...nv) {
-    var px = x[0, i]
-    var py = x[1, i]
-    var pz = x[2, i]
-    var theta = acos(py)
-    var rxz = sqrt(px*px + pz*pz)
-    var phi = 0.0
-    if (rxz > 1e-8) {
-      phi = acos(px/rxz)
-      if (pz < 0) phi = -phi
-    }
-    var u = Int((phi + Pi)/(2*Pi)*ncheck)
-    var v = Int(theta/Pi*ncheck)
-    var parity = u + v - 2*Int(Float(u + v)/2)
-    if (parity == 0) {
-      col[0, i] = 0.92; col[1, i] = 0.05; col[2, i] = 0.08
-    } else {
-      col[0, i] = 0.98; col[1, i] = 0.98; col[2, i] = 0.96
-    }
-  }
-  t.colors = col
-  return t
+fn pitchPt(p) {
+  var c = cos(pitch)
+  var s = sin(pitch)
+  return [p[0], p[1]*c - p[2]*s, p[1]*s + p[2]*c]
 }
 
-var unitBall = checkersphere(nCheck)
-var ballBase = unitBall.position.clone()
-var ballNrm = unitBall.normals.clone()
-var ballCol = unitBall.colors
-var ballConn = unitBall.connectivity
-var ballNv = ballBase.dimensions()[1]
-
-/* Spin about z (classic Boing roll when moving in x). */
-fn ballat(cx, cy, cz, angle) {
-  var c = cos(angle)
-  var s = sin(angle)
-  var pos = ballBase.clone()
-  var nrm = ballNrm.clone()
-  for (i in 0...ballNv) {
-    var x = ballBase[0, i]
-    var y = ballBase[1, i]
-    var z = ballBase[2, i]
-    var xr = c*x + s*z
-    var zr = -s*x + c*z
-    pos[0, i] = ballR*xr + cx
-    pos[1, i] = ballR*y + cy
-    pos[2, i] = ballR*zr + cz
-
-    x = ballNrm[0, i]
-    y = ballNrm[1, i]
-    z = ballNrm[2, i]
-    nrm[0, i] = c*x + s*z
-    nrm[1, i] = y
-    nrm[2, i] = -s*x + c*z
-  }
-  return TriangleComplex(pos, nrm, ballCol, ballConn)
+fn pitchN(n) {
+  return pitchPt(n)
 }
 
-/* Checkerboard floor — duplicated verts so tile colors stay hard-edged. */
-fn floorboard(half, n, y) {
-  var nv = n*n*4
+fn worldPos(x, y, z) {
+  return pitchPt([x, y, z])
+}
+
+/* Magenta wireframe floor + back wall (classic Boing), pitched for default −Z camera. */
+fn amigaroom(half, n, height) {
+  var pts = []
+  var segs = []
+  var h = 2*half/Float(n)
+  var vh = height/Float(n)
+  var zBack = -half
+
+  // Floor: lines of constant z (span x)
+  for (j in 0...(n+1)) {
+    var z = -half + Float(j)*h
+    var i0 = pts.count()
+    pts.append(pitchPt([-half, 0, z]))
+    pts.append(pitchPt([half, 0, z]))
+    segs.append([i0, i0+1])
+  }
+  // Floor: lines of constant x (span z)
+  for (i in 0...(n+1)) {
+    var x = -half + Float(i)*h
+    var i0 = pts.count()
+    pts.append(pitchPt([x, 0, -half]))
+    pts.append(pitchPt([x, 0, half]))
+    segs.append([i0, i0+1])
+  }
+  // Wall: horizontal lines (span x)
+  for (j in 0...(n+1)) {
+    var y = Float(j)*vh
+    var i0 = pts.count()
+    pts.append(pitchPt([-half, y, zBack]))
+    pts.append(pitchPt([half, y, zBack]))
+    segs.append([i0, i0+1])
+  }
+  // Wall: vertical lines (span y)
+  for (i in 0...(n+1)) {
+    var x = -half + Float(i)*h
+    var i0 = pts.count()
+    pts.append(pitchPt([x, 0, zBack]))
+    pts.append(pitchPt([x, height, zBack]))
+    segs.append([i0, i0+1])
+  }
+
+  return LineSet(pts, segs, color=amigaWire)
+}
+
+fn checkersphere(nlat, nlon) {
+  var nv = nlat*nlon*4
   var pos = Matrix(3, nv)
   var nrm = Matrix(3, nv)
   var col = Matrix(3, nv)
   var triplets = []
-  var h = 2*half/Float(n)
+  var squash = 0.86
   var vi = 0
   var fi = 0
-
-  for (j in 0...n) {
-    for (i in 0...n) {
-      var x0 = -half + Float(i)*h
-      var z0 = -half + Float(j)*h
-      var x1 = x0 + h
-      var z1 = z0 + h
+  for (i in 0...nlat) {
+    var t0 = Pi*Float(i)/Float(nlat)
+    var t1 = Pi*Float(i+1)/Float(nlat)
+    for (j in 0...nlon) {
+      var p0 = 2*Pi*Float(j)/Float(nlon)
+      var p1 = 2*Pi*Float(j+1)/Float(nlon)
+      var raw = [
+        [sin(t0)*cos(p0), cos(t0)*squash, sin(t0)*sin(p0)],
+        [sin(t0)*cos(p1), cos(t0)*squash, sin(t0)*sin(p1)],
+        [sin(t1)*cos(p1), cos(t1)*squash, sin(t1)*sin(p1)],
+        [sin(t1)*cos(p0), cos(t1)*squash, sin(t1)*sin(p0)]
+      ]
       var parity = i + j - 2*Int(Float(i + j)/2)
-      var r = 0.18
-      var g = 0.20
-      var b = 0.38
-      if (parity != 0) {
-        r = 0.62; g = 0.64; b = 0.78
-      }
-
-      pos[0, vi] = x0; pos[1, vi] = y; pos[2, vi] = z0
-      pos[0, vi+1] = x1; pos[1, vi+1] = y; pos[2, vi+1] = z0
-      pos[0, vi+2] = x1; pos[1, vi+2] = y; pos[2, vi+2] = z1
-      pos[0, vi+3] = x0; pos[1, vi+3] = y; pos[2, vi+3] = z1
-
+      var rgb = (parity == 0) ?
+        [amigaRed.r, amigaRed.g, amigaRed.b] :
+        [amigaWhite.r, amigaWhite.g, amigaWhite.b]
+      var e1 = [raw[1][0]-raw[0][0], raw[1][1]-raw[0][1], raw[1][2]-raw[0][2]]
+      var e2 = [raw[3][0]-raw[0][0], raw[3][1]-raw[0][1], raw[3][2]-raw[0][2]]
+      var nx = e1[1]*e2[2]-e1[2]*e2[1]
+      var ny = e1[2]*e2[0]-e1[0]*e2[2]
+      var nz = e1[0]*e2[1]-e1[1]*e2[0]
+      var nn = sqrt(nx*nx+ny*ny+nz*nz)
+      if (nn < 1e-8) { nx=0; ny=1; nz=0; nn=1 }
+      var nrmP = pitchN([nx/nn, ny/nn, nz/nn])
       for (k in 0...4) {
-        nrm[1, vi+k] = 1
-        col[0, vi+k] = r; col[1, vi+k] = g; col[2, vi+k] = b
+        var pp = pitchPt(raw[k])
+        pos[0,vi]=pp[0]; pos[1,vi]=pp[1]; pos[2,vi]=pp[2]
+        nrm[0,vi]=nrmP[0]; nrm[1,vi]=nrmP[1]; nrm[2,vi]=nrmP[2]
+        col[0,vi]=rgb[0]; col[1,vi]=rgb[1]; col[2,vi]=rgb[2]
+        vi += 1
       }
-
-      triplets.append([vi, fi, 1])
-      triplets.append([vi+1, fi, 1])
-      triplets.append([vi+2, fi, 1])
-      fi += 1
-      triplets.append([vi, fi, 1])
-      triplets.append([vi+2, fi, 1])
-      triplets.append([vi+3, fi, 1])
-      fi += 1
-      vi += 4
+      var b = vi-4
+      triplets.append([b,fi,1]); triplets.append([b+1,fi,1]); triplets.append([b+2,fi,1]); fi+=1
+      triplets.append([b,fi,1]); triplets.append([b+2,fi,1]); triplets.append([b+3,fi,1]); fi+=1
     }
   }
   return TriangleComplex(pos, nrm, col, Sparse(triplets))
 }
 
-var floorMesh = floorboard(floorHalf, floorTiles, 0)
-
-/* Soft elliptical shadow on the floor (grows with height). */
-fn shadowat(cx, cz, radius) {
-  var n = 20
+fn unitshadow() {
+  var n = 28
   var pos = Matrix(3, n+1)
   var nrm = Matrix(3, n+1)
   var col = Matrix(3, n+1)
   var triplets = []
-
-  pos[0, 0] = cx; pos[1, 0] = 0.02; pos[2, 0] = cz
-  nrm[1, 0] = 1
-  col[0, 0] = 0.05; col[1, 0] = 0.05; col[2, 0] = 0.08
-
+  var nn = pitchN([0, 1, 0])
+  var p0 = pitchPt([0, 0.02, 0])
+  pos[0,0]=p0[0]; pos[1,0]=p0[1]; pos[2,0]=p0[2]
+  nrm[0,0]=nn[0]; nrm[1,0]=nn[1]; nrm[2,0]=nn[2]
+  col[0,0]=amigaShadow.r; col[1,0]=amigaShadow.g; col[2,0]=amigaShadow.b
   for (i in 0...n) {
     var a = 2*Pi*Float(i)/Float(n)
-    pos[0, i+1] = cx + radius*cos(a)
-    pos[1, i+1] = 0.02
-    pos[2, i+1] = cz + radius*0.55*sin(a)
-    nrm[1, i+1] = 1
-    col[0, i+1] = 0.05; col[1, i+1] = 0.05; col[2, i+1] = 0.08
+    var pp = pitchPt([cos(a), 0.02, 0.65*sin(a)])
+    pos[0,i+1]=pp[0]; pos[1,i+1]=pp[1]; pos[2,i+1]=pp[2]
+    nrm[0,i+1]=nn[0]; nrm[1,i+1]=nn[1]; nrm[2,i+1]=nn[2]
+    col[0,i+1]=amigaShadow.r; col[1,i+1]=amigaShadow.g; col[2,i+1]=amigaShadow.b
   }
-
   for (i in 0...n) {
-    var j = i + 1
+    var j = i+1
     if (j == n) j = 0
-    triplets.append([0, i, 1])
-    triplets.append([i+1, i, 1])
-    triplets.append([j+1, i, 1])
+    triplets.append([0,i,1]); triplets.append([i+1,i,1]); triplets.append([j+1,i,1])
   }
-
   var sh = TriangleComplex(pos, nrm, col, Sparse(triplets))
-  sh.transmit = 0.55
+  sh.transmit = 0.35
   return sh
 }
 
-fn scene(cx, cy, cz, angle) {
-  var g = Graphics()
-  g.title = "Amiga Boing"
-  g.display(floorMesh)
+fn shadowScale(cy) {
   var height = cy - ballR
   if (height < 0) height = 0
-  g.display(shadowat(cx, cz, ballR*(1.15 + 0.35*height)))
-  g.display(ballat(cx, cy, cz, angle))
-  return g
+  return ballR*(1.1 + 0.2*height)
 }
 
-/* ---- bounce ---- */
-var x = -1.2
-var y = 2.4
-var z = 0.4
-var vx = 2.8
+var x = -1.0
+var y = 2.2
+var z = floorZ
+var vx = 2.5
 var vy = 0.0
-var vz = 1.6
 var angle = 0.0
 
-var v = View(connectTimeOut=10000)
-if (!v.open(scene(x, y, z, angle))) {
-  print "open failed"
-} else {
-  for (frame in 1...nFrames) {
-    if (v.closed) break
+var g = Graphics(title="Boing", background=amigaGrey)
 
-    vy += gravity*dt
-    x += vx*dt
-    y += vy*dt
-    z += vz*dt
+/* Translucent shadow before the room (display order matches the working
+   translucent-then-vertex-color case); ball last. */
+var sp = worldPos(x, 0.04, z)
+var bp = worldPos(x, y, z)
+var shadow = g.display(unitshadow(), sp, scale=shadowScale(y))
+g.findEntry(shadow).flat = true
+g.display(amigaroom(roomHalf, roomTiles, wallH))
+var ball = g.display(checkersphere(nLat, nLon), bp, scale=ballR, rotate=[angle, 0, 1, 0])
+g.findEntry(ball).flat = true
 
-    if (y < ballR) {
-      y = ballR
-      vy = -vy*restitution
-      if (abs(vy) < 0.4) vy = 0
-    }
+var v = View(g, connectTimeOut=10000)
 
-    if (x > wall)  { x = wall;  vx = -abs(vx) }
-    if (x < -wall) { x = -wall; vx =  abs(vx) }
-    if (z > wall)  { z = wall;  vz = -abs(vz) }
-    if (z < -wall) { z = -wall; vz =  abs(vz) }
+for (frame in 1...nFrames) {
+  if (v.closed) break
 
-    angle += sqrt(vx*vx + vz*vz)/ballR*dt
+  vy += gravity*dt
+  x += vx*dt
+  y += vy*dt
 
-    if (!v.update(scene(x, y, z, angle))) break
-    System.sleep(dt)
-    v.poll(timeoutMs=0)
+  if (y < ballR) {
+    y = ballR
+    vy = -vy
   }
+  if (x > wallX)  { x = wallX;  vx = -abs(vx) }
+  if (x < -wallX) { x = -wallX; vx =  abs(vx) }
 
-  if (!v.closed) v.close()
-  print "ok"
+  angle += vx/ballR*dt
+
+  g.move(ball, worldPos(x, y, z), rotate=[angle, 0, 1, 0])
+  g.move(shadow, worldPos(x, 0.04, z), scale=shadowScale(y))
+  System.sleep(dt)
+  v.poll(timeoutMs=0)
 }
+
+if (!v.closed) v.close()
+print "ok"

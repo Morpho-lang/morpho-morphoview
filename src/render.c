@@ -462,7 +462,7 @@ renderobject *render_findrenderobjectwithid(varray_renderobject *list, int id) {
 renderobject *render_addobject(varray_renderobject *list, gobject *obj) {
     renderobject *out = render_findrenderobject(list, obj);
     if (!out) {
-        renderobject robj = { .obj = obj, .buffer = NULL, .voffset = 0, .eoffset = 0 };
+        renderobject robj = { .obj = obj, .bufferindex = -1, .voffset = 0, .eoffset = 0 };
         if (varray_renderobjectadd(list, &robj, 1)) {
             out = &list->data[list->count-1];
         }
@@ -470,41 +470,27 @@ renderobject *render_addobject(varray_renderobject *list, gobject *obj) {
     return out;
 }
 
-/** Finds the appropriate vertex buffer from  */
-renderglbuffers *render_findglbuffer(varray_renderglbuffers *list, char *format) {
-    for (unsigned int i=0; i<list->count; i++) {
-        if (strcmp(list->data[i].format, format)==0) return &list->data[i];
-    }
-    return NULL;
-}
-
-/** Adds an object to appropriate OpenGL buffers if it hasn't already been added. */
+/** Adds an object to its own OpenGL buffer (one VAO/VBO/EBO per object).
+ *  Sharing by vertex format used to store raw pointers into a reallocating
+ *  varray; one-buffer-per-object keeps lifetimes simple and isolates meshes. */
 void render_addobjecttoglbuffer(varray_renderglbuffers *list, renderobject *robj) {
-    if (!robj || robj->buffer!=NULL) return; /* The renderobject already has been allocated to a buffer */
-    
-    /* First find if an appropriate OpenGL buffer exists for the given format */
-    renderglbuffers *buffer = render_findglbuffer(list, robj->obj->vertexdata.format);
-    if (!buffer) {
-        renderglbuffers new = { .format = robj->obj->vertexdata.format, .array = 0, .buffer = 0, .element = 0, .vlength = 0, .elength = 0};
-        if (varray_renderglbuffersadd(list, &new, 1)) {
-            buffer = &list->data[list->count-1];
-        }
-    }
-    
-    if (buffer) {
-        /* Store buffer information in the render object */
-        robj->buffer=buffer;
-        /* Offset and size of vertex buffer entries */
-        robj->voffset=buffer->vlength;
-        buffer->vlength+=robj->obj->vertexdata.length;
-        
-        /* Offset and size of element buffer entries */
-        robj->eoffset=buffer->elength;
-        /* Loop over the objects separate elements */
-        for (unsigned int i=0; i<robj->obj->elements.count; i++) {
-            gelement *el=&robj->obj->elements.data[i];
-            buffer->elength+=el->length;
-        }
+    if (!robj || robj->bufferindex>=0) return;
+
+    renderglbuffers new = {
+        .format = robj->obj->vertexdata.format,
+        .array = 0, .buffer = 0, .element = 0,
+        .vlength = 0, .elength = 0
+    };
+    if (!varray_renderglbuffersadd(list, &new, 1)) return;
+
+    int bindex = (int) list->count - 1;
+    renderglbuffers *buffer = &list->data[bindex];
+    robj->bufferindex = bindex;
+    robj->voffset = 0;
+    buffer->vlength = robj->obj->vertexdata.length;
+    robj->eoffset = 0;
+    for (unsigned int i=0; i<robj->obj->elements.count; i++) {
+        buffer->elength += robj->obj->elements.data[i].length;
     }
 }
 
@@ -581,7 +567,7 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
     /* Copy all the object data into the buffer */
     for (unsigned int j=0; j<r->objects.count; j++) {
         renderobject *obj = &r->objects.data[j];
-        if (obj && obj->buffer==b) {
+        if (obj && obj->bufferindex==(int) i) {
             glBufferSubData( GL_ARRAY_BUFFER,
                             sizeof(GLfloat)*obj->voffset,
                             sizeof(GLfloat)*obj->obj->vertexdata.length,
@@ -618,7 +604,7 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
     for (unsigned int j=0; j<r->objects.count; j++) {
         renderobject *obj = &r->objects.data[j];
         
-        if (obj->buffer==b) {
+        if (obj->bufferindex==(int) i) {
             int eoff = obj->eoffset;
             
             /* Loop over elements */
@@ -654,12 +640,16 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
 /** Prepares an object for rendering, inserting appropriate instructions into the render list */
 void render_prepareobject(renderer *r, scene *s, gdraw *drw, GLuint *carray) {
     renderobject *obj = render_findrenderobjectwithid(&r->objects, drw->id);
-    if (!obj || !obj->obj || !obj->buffer) return;
+    if (!obj || !obj->obj || obj->bufferindex<0 ||
+        (unsigned) obj->bufferindex>=r->glbuffers.count) return;
 
-    /* Select the vertex array if necessary */
-    renderinstruction ins = { .instruction = RARRAY, .data.array.handle = obj->buffer->array, .obj=obj };
-    if (*carray!=obj->buffer->array) varray_renderinstructionadd(&r->renderlist, &ins, 1);
-    *carray=obj->buffer->array;
+    renderglbuffers *buf = &r->glbuffers.data[obj->bufferindex];
+
+    /* Select the vertex array — always rebind (don't skip); VAO switches between
+     * `xn` (no color attrib) and `xnc` must not leave stale bindings. */
+    renderinstruction ins = { .instruction = RARRAY, .data.array.handle = buf->array, .obj=obj };
+    varray_renderinstructionadd(&r->renderlist, &ins, 1);
+    *carray=buf->array;
 
     /* Vertex colors (format has 'c') must not inherit a prior uniform `C`
      * (e.g. translucent mesh); otherwise uUseUniform stays set and albedo/alpha
@@ -1024,14 +1014,43 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
             case RTRIANGLES:
             case RLINES:
             case RPOINTS: {
-                bool trans=render_is_transparent(st.use_uniform, st.ucolor[3]);
+                /* Vertex-colored meshes must never inherit a prior uniform `C`
+                 * (e.g. translucent shadow). That both picks the wrong albedo and
+                 * can yank the mesh into the transparent pass via alpha. */
+                int use_uniform = st.use_uniform;
+                float alpha = st.ucolor[3];
+                if (ins->obj && ins->obj->obj && ins->obj->obj->vertexdata.format &&
+                    strchr(ins->obj->obj->vertexdata.format, 'c')) {
+                    use_uniform = 0;
+                    alpha = 1.0f;
+                }
+                bool trans=render_is_transparent(use_uniform, alpha);
                 if (pass==RENDER_PASS_OPAQUE && !trans) {
+                    /* Force GPU state for vertex-colored draws even if a prior
+                     * uniform `C` left uUseUniform set. */
+                    glUniform1i(r->uniforms.uUseUniform, use_uniform);
+                    if (use_uniform==0) {
+                        float one[4]={1.0f,1.0f,1.0f,1.0f};
+                        glUniform4fv(r->uniforms.uColor, 1, one);
+                    } else {
+                        glUniform4fv(r->uniforms.uColor, 1, st.ucolor);
+                    }
                     GLenum mode=(ins->instruction==RTRIANGLES) ? GL_TRIANGLES :
                                 (ins->instruction==RLINES) ? GL_LINES : GL_POINTS;
                     glDrawElements(mode, ins->data.triangles.length, GL_UNSIGNED_INT,
                                    ins->data.triangles.offset);
                 } else if (pass==RENDER_PASS_COLLECT_TRANSPARENT && trans) {
-                    if (!render_collect_tdraw(r, s, view, &st, ins)) return false;
+                    int saved=st.use_uniform;
+                    float saveda=st.ucolor[3];
+                    st.use_uniform=use_uniform;
+                    st.ucolor[3]=alpha;
+                    if (!render_collect_tdraw(r, s, view, &st, ins)) {
+                        st.use_uniform=saved;
+                        st.ucolor[3]=saveda;
+                        return false;
+                    }
+                    st.use_uniform=saved;
+                    st.ucolor[3]=saveda;
                 }
                 break;
             }
@@ -1098,11 +1117,13 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    /* --- Opaque pass: display-list order, depth write on --- */
+    /* --- Opaque pass: display-list order, depth write on, no blending --- */
     glDepthMask(GL_TRUE);
+    glDisable(GL_BLEND);
     render_walk_geometry(r, s, view, proj, lightcolor, lightposn, viewposn, RENDER_PASS_OPAQUE);
 
     /* --- Transparent pass: collect, sort far→near by centroid view-z, draw --- */
+    glEnable(GL_BLEND);
     glDepthMask(GL_FALSE);
     if (render_walk_geometry(r, s, view, proj, lightcolor, lightposn, viewposn,
                              RENDER_PASS_COLLECT_TRANSPARENT) &&
@@ -1117,6 +1138,7 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     }
 
     glDepthMask(GL_TRUE);
+    glEnable(GL_BLEND);
     
     /* Text rendering pass */
     glUseProgram(r->textshader);

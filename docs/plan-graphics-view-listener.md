@@ -131,7 +131,7 @@ g.move(shadow, [x,0.02,z], scale=shadowR)
 
 **Tests:** `test/testgraphicsmove.morpho` (no viewer), `test/testviewmove.morpho` (live session).
 
-### Phase 4 — Yardstick
+### Phase 4 — Yardstick ✅
 
 **Files:** `examples/amigaball.morpho`
 

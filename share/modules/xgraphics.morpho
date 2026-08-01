@@ -680,6 +680,7 @@ class GraphicsEntry {
     self.position = _asposition(position)
     self.scale = isnil(scale) ? 1 : scale
     self.rotate = rotate
+    self.flat = false              // unlit draw (set true for solid facet colors)
   }
 }
 
@@ -779,7 +780,9 @@ class Graphics with Broadcaster {
     g.background = self.background
     g._nextid = self._nextid
     for (el in self.displaylist) {
-      g.displaylist.append(GraphicsEntry(el.id, el.item, position=el.position, scale=el.scale, rotate=el.rotate))
+      var e = GraphicsEntry(el.id, el.item, position=el.position, scale=el.scale, rotate=el.rotate)
+      e.flat = el.flat
+      g.displaylist.append(e)
     }
     for (el in right.displaylist) {
       g._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate, notify=false)
@@ -841,6 +844,7 @@ class Show {
     self.objectMap = Dictionary()    // graphicsId → viewer object id
     self.posedIds = Dictionary()     // graphicsId → true if draw uses entry SRT
     self.entryColorId = Dictionary() // graphicsId → color id when draw needs `C`
+    self.flatIds = Dictionary()      // graphicsId → true if draw needs `M flat`
     self._currentEntry = nil
     self._lastColorId = nil
   }
@@ -957,13 +961,14 @@ class Show {
     out.write("d ${id}")
   }
 
-  /** Record graphicsId → viewer id (and optional draw color) for the current entry. */
-  _recordObject(viewerId, posed, colorId=nil) {
+  /** Record graphicsId → viewer id (and optional draw color / flat shade) for the current entry. */
+  _recordObject(viewerId, posed, colorId=nil, flat=false) {
     var entry = self._currentEntry
     if (isnil(entry) || entry.id == 0) return
     self.objectMap[entry.id] = viewerId
     if (posed) self.posedIds[entry.id] = true
     if (!isnil(colorId)) self.entryColorId[entry.id] = colorId
+    if (flat) self.flatIds[entry.id] = true
   }
 
   /** Re-issue draws for all mapped entries after `D` (entry SRT when posed). */
@@ -971,6 +976,8 @@ class Show {
     for (entry in graphic.displaylist) {
       if (!self.objectMap.contains(entry.id)) continue
       var vid = self.objectMap[entry.id]
+      var needFlat = self.flatIds.contains(entry.id)
+      if (needFlat) out.write("M flat")
       if (self.entryColorId.contains(entry.id)) {
         out.write("C ${self.entryColorId[entry.id]}")
       }
@@ -979,6 +986,7 @@ class Show {
       } else {
         self.emitEntryDraw(GraphicsEntry(0, entry.item), vid, out)
       }
+      if (needFlat) out.write("M shaded")
     }
   }
 
@@ -1172,7 +1180,7 @@ class Show {
       out.write("o ${id}")
       self.pointLineVertexData(item, out, includeColor=true)
     }
-    self._recordObject(id, false, colorId=cid)
+    self._recordObject(id, false, colorId=cid, flat=true)
 
     var pline = "p"
     for (i in 0...nv) pline += " ${i}"
@@ -1200,7 +1208,7 @@ class Show {
       out.write("o ${id}")
       self.pointLineVertexData(item, out, includeColor=true)
     }
-    self._recordObject(id, false, colorId=cid)
+    self._recordObject(id, false, colorId=cid, flat=true)
 
     var lline = "l"
     for (i in 0...segs.count()) lline += " ${segs[i]}"
@@ -1309,6 +1317,7 @@ class Show {
     self.objectMap = Dictionary()
     self.posedIds = Dictionary()
     self.entryColorId = Dictionary()
+    self.flatIds = Dictionary()
 
     for (entry in graphic.displaylist) {
       self.visitEntry(entry, entry.item, out)
@@ -1327,12 +1336,16 @@ class Show {
     self._currentEntry = nil
   }
 
-  /** TriangleComplex: define once for this write, draw with entry SRT. */
+  /** TriangleComplex: define once for this write, draw with entry SRT.
+   *  Set `entry.flat = true` (after display) for unlit solid facet colors. */
   visitEntry(entry, TriangleComplex item, out) {
     self._currentEntry = entry
+    var flat = entry.flat
+    if (flat) out.write("M flat")
     var vid = self.defineTriangleComplex(item, out)
-    self._recordObject(vid, true, colorId=self._lastColorId)
+    self._recordObject(vid, true, colorId=self._lastColorId, flat=flat)
     self.emitEntryDraw(entry, vid, out)
+    if (flat) out.write("M shaded")
     self._currentEntry = nil
   }
 }

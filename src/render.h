@@ -37,10 +37,11 @@ typedef struct {
 DECLARE_VARRAY(renderglbuffers, renderglbuffers)
 
 /** @brief An object to be rendered
- *  @details Points to the appropriate OpenGL buffer. */
+ *  @details Refers to an OpenGL buffer by index into the renderer's glbuffers
+ *  varray (not a raw pointer — that varray reallocates as formats are added). */
 typedef struct {
     gobject *obj; /* The original object */
-    renderglbuffers *buffer; /* Pointer to OpenGL buffer collection */
+    int bufferindex; /* Index into renderer.glbuffers, or -1 if unset */
     int voffset; /* Offset into the vertex buffer */
     int eoffset; /* Offset into the element array buffer */
 } renderobject;
