@@ -703,6 +703,10 @@ class Graphics with Broadcaster {
     if (!self.title) self.title="Morpho" // Title to show
     self.background = background
     if (!self.background) self.background = Black
+    self._batchDepth = 0
+    self._pendingDefined = []   // ids defined inside a batch
+    self._movedInBatch = false
+    self._lastMovedId = 0
   }
 
   /** Look up an entry by Graphics-owned id; nil if missing. */
@@ -713,13 +717,49 @@ class Graphics with Broadcaster {
     return nil
   }
 
+  /** Start a mutation batch; nested begin/end supported. Suppresses notify until outermost end. */
+  begin() {
+    self._batchDepth += 1
+  }
+
+  /** End a batch; outermost end flushes pending Defined (each) then one coalesced Moved. */
+  end() {
+    if (self._batchDepth <= 0) return
+    self._batchDepth -= 1
+    if (self._batchDepth > 0) return
+    for (id in self._pendingDefined) {
+      self.notify(GraphicsEventDefined(id))
+    }
+    self._pendingDefined = []
+    if (self._movedInBatch) {
+      self.notify(GraphicsEventMoved(self._lastMovedId))
+      self._movedInBatch = false
+      self._lastMovedId = 0
+    }
+  }
+
   /** Allocate id and append a GraphicsEntry; returns the id. */
   _append(item, position=nil, scale=nil, rotate=nil, notify=true) {
     var id = self._nextid
     self._nextid += 1
     self.displaylist.append(GraphicsEntry(id, item, position=position, scale=scale, rotate=rotate))
-    if (notify) self.notify(GraphicsEventDefined(id))
+    if (notify) {
+      if (self._batchDepth > 0) {
+        self._pendingDefined.append(id)
+      } else {
+        self.notify(GraphicsEventDefined(id))
+      }
+    }
     return id
+  }
+
+  _notifyMoved(id) {
+    if (self._batchDepth > 0) {
+      self._movedInBatch = true
+      self._lastMovedId = id
+    } else {
+      self.notify(GraphicsEventMoved(id))
+    }
   }
 
   /** Append a non-Sphere item (identity SRT). Returns Graphics-owned id.
@@ -757,7 +797,7 @@ class Graphics with Broadcaster {
     if (isnil(e)) return false
     if (!isnil(scale)) e.scale = scale
     if (!isnil(rotate)) e.rotate = rotate
-    self.notify(GraphicsEventMoved(id))
+    self._notifyMoved(id)
     return true
   }
 
@@ -768,7 +808,7 @@ class Graphics with Broadcaster {
     e.position = _asposition(position)
     if (!isnil(scale)) e.scale = scale
     if (!isnil(rotate)) e.rotate = rotate
-    self.notify(GraphicsEventMoved(id))
+    self._notifyMoved(id)
     return true
   }
 

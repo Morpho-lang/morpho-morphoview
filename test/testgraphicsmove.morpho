@@ -68,6 +68,41 @@ cap5.ignore(g5)
 g5.display(tc)
 expect(cap5.events.count() == 0, "ignored silent")
 
+/* ---- begin/end batching ---- */
+var gBatch = Graphics()
+var capBatch = Capture()
+capBatch.listen(gBatch)
+var idA = gBatch.display(tc, [0, 0, 0])
+var idB = gBatch.display(tc, [1, 0, 0])
+expect(capBatch.events.count() == 2, "display outside batch still notifies")
+capBatch.events = []
+gBatch.begin()
+gBatch.move(idA, [2, 0, 0])
+gBatch.move(idB, [3, 0, 0], scale=2)
+expect(capBatch.events.count() == 0, "moves inside batch silent")
+gBatch.end()
+expect(capBatch.events.count() == 1 && capBatch.events[0] == GraphicsEventMoved, "one coalesced Moved")
+capBatch.events = []
+gBatch.begin()
+gBatch.end()
+expect(capBatch.events.count() == 0, "empty batch silent")
+capBatch.events = []
+gBatch.begin()
+gBatch.begin()
+gBatch.move(idA, [4, 0, 0])
+gBatch.end()
+expect(capBatch.events.count() == 0, "inner end does not flush")
+gBatch.end()
+expect(capBatch.events.count() == 1 && capBatch.events[0] == GraphicsEventMoved, "outer end flushes")
+capBatch.events = []
+gBatch.begin()
+var idC = gBatch.display(tc, [5, 0, 0])
+gBatch.move(idA, [6, 0, 0])
+gBatch.end()
+expect(capBatch.events.count() == 2, "batch flushes Defined then Moved")
+expect(capBatch.events[0] == GraphicsEventDefined, "Defined first")
+expect(capBatch.events[1] == GraphicsEventMoved, "Moved after Defined")
+
 /* ---- Show objectMap for TriangleComplex ---- */
 var g6 = Graphics()
 var id6 = g6.display(tc, [1, 0, 0], scale=2)

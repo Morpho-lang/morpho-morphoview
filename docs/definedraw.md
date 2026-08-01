@@ -10,7 +10,7 @@ A general Morpho “dependent object” framework is **out of scope** for now. G
 |-------|------|
 | **Graphics** | Live, id-bearing model + mutation API; broadcasts to listeners |
 | **View** | Listener / presenter over ZMQ (one of possibly several) |
-| **Viewer** | Define/draw command protocol (`o`/`v`/`f`, `d`, proposed `D`, later `U O` / `U V`) |
+| **Viewer** | Define/draw command protocol (`o`/`v`/`f`, `d`, `D`; later `U O` / `U V`) |
 | **`Show(g)` / `update(Graphics)`** | Snapshot path (full serialize / `U S`) — fire-and-forget and occasional refresh |
 
 **Two equally valid uses of Graphics:**
@@ -24,7 +24,7 @@ Do **not** auto-diff inside `update(Graphics)`. Incremental updates go through G
 g = Graphics()
 var id = g.display(Sphere(...))   // stable id; optional position=/scale=/rotate=
 var v = View(g)                       // one Show.write, then listen
-g.move(id, ...)                   // Graphics state changes → View: D + pose redraw
+g.move(id, ...)                   // Graphics state changes → View: pose redraw (v1: D + all poses)
 ```
 
 Simulation state may still live in script variables; the script applies it via `g.move` / similar so Graphics (and thus View) stay consistent.
@@ -37,11 +37,11 @@ Not a full scene graph. Richer than today’s append-only displaylist:
 
 - Stable **ids** from `Graphics.display` (returned Int on the entry). Not on mesh primitives — same value may be displayed twice under two ids.
 - Entry **SRT** owns presentation pose (`position` as Matrix 3-vector / `scale` / `rotate` as fields on the entry); `Show` places from the entry only. API accepts list or Matrix for position and coerces to Matrix. Keep SRT fields (not one 4×4). Posed `Sphere`s normalize to unit item + pose on entry. `move`: position always sets absolute `entry.position`; omitted scale/rotate leave components unchanged.
-- Small **mutation API**: `display`, `move`, later replace/remove / `begin`/`end` batching
+- Small **mutation API**: `display`, `move`, `begin`/`end` batching; later replace/remove
 - **Listeners** (`broadcast` module) + typed events (`GraphicsEventDefined` / `Moved`)
 - `open(g)` uses one `Show.write` then listens; `update(g)` full replace + rebind
 
-`Show` walks Graphics **entries**. Abstract primitives (`Sphere`, `Cylinder`, …) convert in `visit` / `visitGeneric` like today — no Show-level sphere mesh cache. Prefer clients `display`ing one item at many poses. Entry SRT is recorded now; using it for draw (vs baking) comes with the later primitive emit review.
+`Show` walks Graphics **entries**. Abstract primitives (`Sphere`, `Cylinder`, …) convert in `visit` / `visitGeneric` like today — no Show-level sphere mesh cache. Prefer clients `display`ing one item at many poses. Entry SRT is recorded now; using it for draw (vs baking) is Phase 5c.
 
 ## Viewer protocol
 
@@ -55,7 +55,7 @@ Re-issuing `d` today only **appends**. To refresh draws without wiping geometry:
 | `D` | Clear displaylist only (objects / colors / fonts / pools kept) | Done |
 | then `C` / `M` / transforms / `d` | Rebuild draws | Existing |
 
-Sticky apply context lets follow-up chunks omit leading `S`. Per-object mesh edits later: `U O` / `U V`.
+Sticky apply context lets follow-up chunks omit leading `S`. Per-object mesh edits later: `U O` / `U V` (Phase 5d). Re-issuing `d` still **appends** today; Phase 5b will replace the matrix of an existing `OBJECT` draw for the same id.
 
 Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; primary animation API is Graphics mutations → listener.
 
@@ -63,19 +63,18 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 
 | Primitive | First define | Later draw (same Show / same id) |
 |-----------|--------------|----------------------------------|
-| Opaque `Sphere` | `visitGeneric` → `o`/`v`/`f` (bake center/r) | `i`/`d` (entry SRT later) |
-| Translucent `Sphere` | same + `C` if transmit | `i`/`d` (entry SRT later) |
+| Opaque `Sphere` | `visitGeneric` → `o`/`v`/`f` (bake center/r) | `i`/`d` (entry SRT — Phase 5c) |
+| Translucent `Sphere` | same + `C` if transmit | `i`/`d` (entry SRT — Phase 5c) |
 | `TriangleComplex` | `o`/`v`/`f` (+ register `c` if transmit) | entry SRT (often identity if world-baked) |
-| `PointCloud` / `LineSet` | `o`/`v`/`p|l` | entry SRT |
+| `PointCloud` / `LineSet` | `o`/`v`/`p|l` | entry SRT (confirm in Phase 5c) |
 
-## Implementation order (to refine in plan)
+## Implementation order
 
-1. **Foundation** — Graphics-owned ids on `display`; Show walks entries; opaque sphere + `C` instancing; keep `U S` snapshot path
-2. **Viewer** — sticky context; `D`; prepare-safe redraw
-3. **Graphics ↔ View** — `move`; listener registration; View translates events → commands (batched)
-4. **Yardstick** — rewrite `examples/amigaball.morpho` via `g.move` (not full `U S`)
-5. **Later** — `U O` / `U V`; general Morpho dependents framework
-
+1. **Foundation** — Graphics-owned ids on `display`; Show walks entries; keep `U S` snapshot path ✅
+2. **Viewer** — sticky context; `D`; prepare-safe redraw ✅
+3. **Graphics ↔ View** — `move`; listener registration; View translates events → commands ✅
+4. **Yardstick** — rewrite `examples/amigaball.morpho` via `g.move` (not full `U S`) ✅
+5. **Phase 5** — batching (5a), selective redraw (5b), Show emit (5c), `U O` / `U V` / `X O` (5d); dependents framework later (5e). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
 ## Hand sequences / tests
 
 | File | Role | Runnable now? |

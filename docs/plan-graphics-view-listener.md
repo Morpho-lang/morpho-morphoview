@@ -50,10 +50,9 @@ Graphics stores the abstract `Sphere`; `Show` visits via `visitGeneric` → `tot
 ### Other
 
 - `Graphics.add`: remap right-hand ids (unique within one Graphics).
-- Phase 3 batching: deferred — each `notify` is immediate; `begin`/`end` can return later.
 - `open(g)`: one `Show.write`, then listen (no fake N `defined` on open).
 - `update(g)`: full `U S`; rebind listener; reset Show/object maps.
-- Phase 3 v1: each `moved` → `D` + full pose redraw (known limit for large static+one mover).
+- Phase 3 v1 draw path (until 5b): each flushed `moved` → View `D` + full pose redraw (known limit for large static+one mover). Phase 5a coalesces notifies so two moves ⇒ one round-trip.
 
 ## Target loop
 
@@ -121,7 +120,7 @@ g.move(shadow, [x,0.02,z], scale=shadowR)
 **Steps:**
 
 1. `move(id, …)` — locked merge rules; notify listeners. ✅
-2. `begin` / `end` batching — deferred (immediate `notify` for now).
+2. `begin` / `end` batching — Phase 5a. ✅
 3. `Broadcaster.subscribe` / `Listener.listen`/`ignore` (`broadcast` module). ✅
 4. `open(g)`: one `Show.write`, then listen; `update(g)`: full `U S`, rebind, reset Show/object maps. ✅
 5. On `moved`: `D` + full pose redraw (v1). ✅
@@ -141,8 +140,80 @@ Rewrite: define once on `Graphics`, pose on `display` (or `move` before `open`),
 
 ### Phase 5 — Follow-ons
 
-- `U O` / `U V` / `X O`
-- Finer draw updates without full `D` every frame
-- Formal Morpho dependents framework
-- Review Show emit for all primitives (LOD / tessellation, Text pose, non-Sphere entry SRT, optional sphere mesh cache)
-- Optional: Show-level unit-sphere mesh cache if a single `Show.write` with many identical static spheres is hot — secondary to clients `display`ing one unit item at many poses
+One sub-phase at a time; pause for review before the next. Do not start 5b/5c viewer or Sphere emit work in the same pass as 5a.
+
+Target after 5a+5b:
+
+```
+g.begin()
+g.move(ball, ...)
+g.move(shadow, ...)
+g.end()            # one coalesced Moved
+# View: pose draws only (no full D)
+```
+
+#### Phase 5a — `begin` / `end` batching ✅
+
+**Files:** `share/modules/xgraphics.morpho`, `test/testgraphicsmove.morpho`; optionally wrap amigaball moves. View can stay on v1 (`D` + full `emitPoseDraws`) for this sub-phase.
+
+**Locked:**
+
+- `Graphics.begin()` / `end()` with a nesting counter.
+- Inside a batch: `display` / `move` still mutate entries; **suppress** `notify`.
+- `end()` at nesting 0:
+  - Flush each pending `GraphicsEventDefined` individually (cheap; rare mid-frame).
+  - If any `move`s occurred → **one** `GraphicsEventMoved` (id of last moved, or `0`).
+  - Nothing dirty → no-op.
+- Outside a batch: behavior unchanged (immediate notify).
+- Nested `begin`/`end` pairs supported; only the outermost `end` flushes.
+
+**Done when:** test (and/or amigaball) can `begin` → two `move`s → `end` and a Capture listener sees **one** Moved; one viewer round-trip per frame when View is attached.
+
+**Out of scope for 5a:** changing `D` + full pose redraw on the View side.
+
+#### Phase 5b — Selective pose redraw (no full `D`)
+
+**Why:** After `D`, static draws vanish unless re-issued. True “movers only” needs in-place draw update.
+
+**Files:** `src/command.c`, `src/scene.c` / `scene.h`, `share/modules/morphoview.morpho`, `share/modules/xgraphics.morpho` (single-id emit helper), tests + command fixture.
+
+**Locked:**
+
+- Viewer: when applying `d <id>` with a matrix, if an `OBJECT` draw for that id already exists in the scene displaylist, **replace its matrix** instead of appending. Objects first; text `T` draws later if cheap.
+- View `receive(Moved)`: emit **only** the moved entry’s color/flat/pose lines; **do not** send `D`. Unknown id → no-op or fall back to full `D` + `emitPoseDraws`.
+- After 5a coalesced Moved with id `0` / multiple movers: emit pose draws for each dirty id (Graphics tracks dirty set across the batch), still without `D`.
+- Mid-session `Defined` unchanged (append define+draw).
+- Keep `View.redraw(ascii)` and explicit `D` for tests/fixtures (`definedraw-redraw` stays valid).
+
+**Done when:** `move` updates one object’s pose without clearing other draws; amigaball room is not re-sent each frame.
+
+#### Phase 5c — Show emit review (primitives)
+
+**Goal:** entry SRT is the draw authority for more than `TriangleComplex`.
+
+**Locked first cut:**
+
+- **Sphere:** define a **unit** mesh (per distinct tessellation/transmit key, or first display of that abstract sphere); draw with entry SRT — stop baking center/r into vertices for the posed path (Phase 1 bake-vs-entry-SRT follow-through).
+- **PointCloud / LineSet:** confirm `visitEntry` uses entry SRT; add overload if still world-baked + identity.
+- **Cylinder / Arrow / Text:** still world-baked for this cut (orientation/path baked); document; no fake SRT.
+- Optional Show-level unit-sphere mesh cache only if a single `Show.write` with many identical spheres is hot — secondary to clients `display`ing one unit item at many poses.
+
+**Done when:** posed `Sphere` via `display`/`move` animates without rebuilding sphere mesh; tests cover Sphere `objectMap` + pose redraw.
+
+#### Phase 5d — `U O` / `U V` / `X O`
+
+Viewer command language + minimal Graphics/View wiring:
+
+| Command | Intent |
+|---------|--------|
+| `U O <id>` | Clear/redefine one object in the current scene |
+| `X O <id>` | Delete one object (+ its draws) |
+| `U V <id>` | Same-length vertex replace + `glBufferSubData` where possible |
+
+Graphics: `removed` / `replaced` events (deferred from Phase 3). View maps events → commands. Full `update(Graphics)` / `U S` unchanged.
+
+**Done when:** command fixtures exist; optional Morpho smoke for redefine/delete. Not required for pose animation.
+
+#### Phase 5e — Formal Morpho dependents (backlog only)
+
+Non-goal for this series. Learn from Graphics→View; formalize a general Morpho dependent-object framework later.
