@@ -24,7 +24,7 @@ Do **not** auto-diff inside `update(Graphics)`. Incremental updates go through G
 g = Graphics()
 var id = g.display(Sphere(...))   // stable id; optional position=/scale=/rotate=
 var v = View(g)                       // one Show.write, then listen
-g.move(id, ...)                   // Graphics state changes → View: pose redraw (v1: D + all poses)
+g.move(id, ...)                   // Graphics → View: pose-only `d` (in-place matrix)
 ```
 
 Simulation state may still live in script variables; the script applies it via `g.move` / similar so Graphics (and thus View) stay consistent.
@@ -55,7 +55,7 @@ Re-issuing `d` today only **appends**. To refresh draws without wiping geometry:
 | `D` | Clear displaylist only (objects / colors / fonts / pools kept) | Done |
 | then `C` / `M` / transforms / `d` | Rebuild draws | Existing |
 
-Sticky apply context lets follow-up chunks omit leading `S`. Per-object mesh edits later: `U O` / `U V` (Phase 5d). Re-issuing `d` still **appends** today; Phase 5b will replace the matrix of an existing `OBJECT` draw for the same id.
+Sticky apply context lets follow-up chunks omit leading `S`. Per-object mesh edits later: `U O` / `U V` (Phase 5d). Re-issuing `d` for an object id already in the displaylist **replaces** its matrix (Phase 5b); first `d` for an id still appends.
 
 Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; primary animation API is Graphics mutations → listener.
 
@@ -81,6 +81,7 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 |------|------|----------------|
 | [`test/command/definedraw-once`](../test/command/definedraw-once) | Define + first draws (ASCII) | Yes |
 | [`test/command/definedraw-redraw`](../test/command/definedraw-redraw) | `D` + redraw draws (no `#` comments — command lexer) | Yes |
+| [`test/command/definedraw-pose-update`](../test/command/definedraw-pose-update) | Pose-only `d` (in-place matrix, no `D`) | Yes |
 | [`test/testdefinedraw.morpho`](../test/testdefinedraw.morpho) | `View.open` once + `View.redraw` | Yes |
 | [`test/testgraphicsmove.morpho`](../test/testgraphicsmove.morpho) | `move` / listeners / objectMap | Yes |
 | [`test/testviewmove.morpho`](../test/testviewmove.morpho) | Live `open` → `move` | Yes |

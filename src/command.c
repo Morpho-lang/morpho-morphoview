@@ -376,6 +376,12 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
         case MVCMD_DRAW: {
             mv_cmd_draw *c = MVCMD_AS_DRAW(cmd);
             if (!ctx->scene) return false;
+            /* Same object id already drawn: replace its matrix in place (pose update). */
+            if (scene_setobjectdrawmatrix(ctx->scene, c->id,
+                                          c->has_matrix ? c->matrix : NULL)) {
+                command_touchscene(ctx);
+                return true;
+            }
             int matindx = SCENE_EMPTY;
             if (c->has_matrix) {
                 matindx=scene_adddata(ctx->scene, c->matrix, 16);

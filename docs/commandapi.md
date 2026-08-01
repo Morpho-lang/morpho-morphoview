@@ -59,7 +59,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_COLOR` | `c <id> <r g b [a]>...` | Color id; RGB triples or RGBA quads |
 | `MVCMD_SELECT_COLOR` | `C <id>` | Active color id (uniform albedo for subsequent geometry/text) |
 | `MVCMD_MATERIAL` | `M flat` / `M shaded [ka kd [ks [n]]]` | Shade mode + Phong coeffs |
-| `MVCMD_DRAW` | `d <id>` | Object id; optional baked 4×4 matrix |
+| `MVCMD_DRAW` | `d <id>` | Object id; optional baked 4×4 matrix. If an OBJECT draw for `@p id` already exists, **replaces its matrix** instead of appending. |
 | `MVCMD_CLEAR_DISPLAY` | `D` | Clear displaylist only (objects/colors/fonts/pools kept) |
 | `MVCMD_FONT` | `F <id> "<path>" <size>` | Font id, path, size |
 | `MVCMD_TEXT` | `T <fontid> "<string>"` | Font id, string; optional matrix |
@@ -89,7 +89,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `c` | `<id> <r g b [a]>...` | Define color table entry (RGB or RGBA) |
 | `C` | `<id>` | Select uniform color for subsequent geometry and text |
 | `M` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Material: unlit or OpenGL/VTK Phong (default ka=kd=0.5, ks=0) |
-| `d` | `<id>` | Draw object (matrix from prior transforms if any) |
+| `d` | `<id>` | Draw object (matrix from prior transforms if any). Replaces matrix if this object id is already in the displaylist |
 | `D` | — | Clear displaylist only; keep objects/colors/fonts/pools (sticky scene) |
 | `F` | `<id> "<path>" <size>` | Load font |
 | `T` | `<fontid> "<string>"` | Draw text (matrix like `d`) |

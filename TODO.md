@@ -49,7 +49,7 @@ Done (Phases 2–4):
 Remaining ([Phase 5](docs/plan-graphics-view-listener.md)):
 
 1. [x] **5a** — `beginBatch` / `endBatch` on Broadcaster (one Moved notify per frame)
-2. **5b** — Selective pose redraw (in-place `d` matrix update; no full `D` every move)
+2. [x] **5b** — Selective pose redraw (in-place `d` matrix update; no full `D` every move)
 3. **5c** — Show emit review (Sphere entry SRT; PointCloud/LineSet)
 4. **5d** — `U O <id>` / `X O <id>` / `U V <id>` + Graphics removed/replaced events
 
@@ -75,7 +75,8 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 - [x] `close()` — idempotent cleanup
 - [x] Private helpers prefixed with `_`
 - [x] `beginBatch` / `endBatch` via Broadcaster mixin (Phase 5a)
-- [ ] Phase 5b — selective pose redraw (see plan)
+- [x] Phase 5b — selective pose redraw (in-place `d`; `emitEntryPose`)
+- [ ] Phase 5c — Show emit review (see plan)
 
 ### Show / Graphics prototype (upstream candidate) — track 1 done
 
@@ -190,7 +191,7 @@ Small viewer-only polish can land anytime; strategic sequence is Graphics (done)
 **Strategic projects** (ordered):
 
 - [x] **Track 1** — Graphics prototype (stable ids; define vs draw; listener) — package done; upstream push still open
-- [ ] **Track 2 remainder** — Phase 5: batching, selective redraw, `U O` / `U V` / `X O`
+- [ ] **Track 2 remainder** — Phase 5c–5d: Show emit review, `U O` / `U V` / `X O`
 - [ ] **Track 3** — Binary / byte-buffer vertex transport (viewer IR already accepts blobs; Morpho needs serialize + ZMQ framing)
 
 ## Demos / tests
@@ -224,4 +225,4 @@ Small viewer-only polish can land anytime; strategic sequence is Graphics (done)
 - Sticky `command_applyctx` persists across `command_process` batches, so follow-up chunks (redraw / later `U O` / `U V`) may omit a leading `S` / `U S`.
 - Package `Show` prototypes the upstream split: fire-and-forget (`Show(g)` / `-t`) vs serialize-to-delegate (`Show().write(g, out)`). `View` is the live duplex path and a `write` sink.
 - ASCII float emission uses 3 significant figures (`Show.fmt` / `%0.3g`) to keep the string path smaller until binary vertex transport (track 3) exists.
-- Phase 3 v1 draw path (until 5b): each flushed `moved` → View `D` + full pose redraw. Phase 5a coalesces notifies so two moves ⇒ one round-trip.
+- Phase 5a/5b: `beginBatch`/`endBatch` coalesce Moved; View pose-only `d` replaces matrices in place (no full `D` every frame).

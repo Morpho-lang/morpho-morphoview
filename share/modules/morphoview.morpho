@@ -14,7 +14,7 @@
  *    v.update(morecommands)     // e.g. chunk starting with `U S <id>`
  *    v.update(g)                // Graphics replace via `U S` + rebind
  *    v.redraw(posecommands)     // `D` + redraw draws (no geometry wipe)
- *    // After open(g) / View(g): g.move drives the viewer via Listener.receive
+ *    // After open(g) / View(g): g.move drives the viewer via Listener.receive (pose-only `d`)
  *    v.poll(timeoutMs=0)
  *    v.wait(sessionTimeOut=1500)
  *    v.close()
@@ -131,7 +131,7 @@ class View with Listener {
     return self._waitOk()
   }
 
-  // GraphicsEventDefined → define+draw; GraphicsEventMoved → `D` + full pose redraw (v1).
+  // GraphicsEventDefined → define+draw; GraphicsEventMoved → pose-only `d` (in-place matrix).
   receive(Graphics g, GraphicsEventDefined ev) {
     if (self.closed || isnil(self.show)) return
     var entry = g.findEntry(ev.id)
@@ -146,9 +146,19 @@ class View with Listener {
 
   receive(Graphics g, GraphicsEventMoved ev) {
     if (self.closed || isnil(self.show)) return
+    var ids = g.takeMovedIds()
+    if (ids.count() == 0) ids = [ev.id]
     self.cmdBuf = ""
-    self.write("D")
-    self.show.emitPoseDraws(g, self)
+    var any = false
+    for (id in ids) {
+      if (self.show.emitEntryPose(g, id, self)) any = true
+    }
+    if (!any) {
+      // Nothing mapped yet — fall back to full D + pose redraw.
+      self.write("D")
+      self.show.emitPoseDraws(g, self)
+    }
+    if (self.cmdBuf.count() == 0) return
     self.gotOk = false
     self._send(self.cmdBuf)
     self._waitOk()

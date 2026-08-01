@@ -52,7 +52,7 @@ Graphics stores the abstract `Sphere`; `Show` visits via `visitGeneric` → `tot
 - `Graphics.add`: remap right-hand ids (unique within one Graphics).
 - `open(g)`: one `Show.write`, then listen (no fake N `defined` on open).
 - `update(g)`: full `U S`; rebind listener; reset Show/object maps.
-- Phase 3 v1 draw path (until 5b): each flushed `moved` → View `D` + full pose redraw (known limit for large static+one mover). Phase 5a coalesces notifies so two moves ⇒ one round-trip.
+- Phase 5a/5b: `beginBatch`/`endBatch` coalesce Moved; View emits pose-only `d` (in-place matrix replace, no full `D`).
 
 ## Target loop
 
@@ -115,7 +115,7 @@ g.move(shadow, [x,0.02,z], scale=shadowR)
 - **Id map:** View session owns `graphicsId → viewerObjectId` (on the live `Show` instance: `objectMap`, plus `posedIds` / `entryColorId`). `open(g)` builds it from one `Show.write` — no fake N `defined` events.
 - **Mid-session `display`:** notifies `GraphicsEventDefined`; View emits define+draw via `Show.writeEntry`.
 - **Events:** `GraphicsEventDefined`, `GraphicsEventMoved` (`removed` / `replaced` later).
-- **On `moved`:** `D` + full pose redraw via `Show.emitPoseDraws` (v1).
+- **On `moved`:** pose-only `d` via `emitEntryPose` (Phase 5b); fall back to `D` + `emitPoseDraws` if unmapped.
 
 **Steps:**
 
@@ -123,7 +123,7 @@ g.move(shadow, [x,0.02,z], scale=shadowR)
 2. `beginBatch` / `endBatch` — Phase 5a (`broadcast` mixin). ✅
 3. `Broadcaster.subscribe` / `Listener.listen`/`ignore` (`broadcast` module). ✅
 4. `open(g)`: one `Show.write`, then listen; `update(g)`: full `U S`, rebind, reset Show/object maps. ✅
-5. On `moved`: `D` + full pose redraw (v1). ✅
+5. On `moved`: pose-only `d` (Phase 5b). ✅
 6. Keep `View.redraw(ascii)` for tests. ✅
 
 **Done when:** script can `display` → `open` → `move` and viewer updates without per-frame `U S`.
@@ -167,19 +167,19 @@ g.endBatch()            # one coalesced Moved
 
 **Done when:** test (and/or amigaball) can `beginBatch` → two `move`s → `endBatch` and a Capture listener sees **one** Moved; one viewer round-trip per frame when View is attached.
 
-**Out of scope for 5a:** changing `D` + full pose redraw on the View side.
+**Out of scope for 5a:** changing `D` + full pose redraw on the View side (done in 5b).
 
-#### Phase 5b — Selective pose redraw (no full `D`)
+#### Phase 5b — Selective pose redraw (no full `D`) ✅
 
 **Why:** After `D`, static draws vanish unless re-issued. True “movers only” needs in-place draw update.
 
-**Files:** `src/command.c`, `src/scene.c` / `scene.h`, `share/modules/morphoview.morpho`, `share/modules/xgraphics.morpho` (single-id emit helper), tests + command fixture.
+**Files:** `src/command.c`, `src/scene.c` / `scene.h`, `share/modules/morphoview.morpho`, `share/modules/xgraphics.morpho` (`emitEntryPose`, `takeMovedIds`), `test/command/definedraw-pose-update`, `test/testdefinedraw.morpho`.
 
 **Locked:**
 
 - Viewer: when applying `d <id>` with a matrix, if an `OBJECT` draw for that id already exists in the scene displaylist, **replace its matrix** instead of appending. Objects first; text `T` draws later if cheap.
-- View `receive(Moved)`: emit **only** the moved entry’s color/flat/pose lines; **do not** send `D`. Unknown id → no-op or fall back to full `D` + `emitPoseDraws`.
-- After 5a coalesced Moved with id `0` / multiple movers: emit pose draws for each dirty id (Graphics tracks dirty set across the batch), still without `D`.
+- View `receive(Moved)`: emit **only** pose lines via `Show.emitEntryPose` (no `C`/`M`); **do not** send `D`. Unmapped ids → fall back to full `D` + `emitPoseDraws`.
+- Graphics tracks `_pendingMoved`; `takeMovedIds()` returns ids (displaylist order) and clears — coalesced batch Moved updates every mover.
 - Mid-session `Defined` unchanged (append define+draw).
 - Keep `View.redraw(ascii)` and explicit `D` for tests/fixtures (`definedraw-redraw` stays valid).
 

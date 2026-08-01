@@ -707,6 +707,7 @@ class Graphics with Broadcaster {
     if (!self.title) self.title="Morpho" // Title to show
     self.background = background
     if (!self.background) self.background = Black
+    self._pendingMoved = Dictionary() // graphicsId → true; drained by takeMovedIds
   }
 
   /** Look up an entry by Graphics-owned id; nil if missing. */
@@ -715,6 +716,21 @@ class Graphics with Broadcaster {
       if (e.id == id) return e
     }
     return nil
+  }
+
+  /** Ids moved since last take (displaylist order). Clears the pending set. */
+  takeMovedIds() {
+    var ids = []
+    for (e in self.displaylist) {
+      if (self._pendingMoved.contains(e.id)) ids.append(e.id)
+    }
+    self._pendingMoved = Dictionary()
+    return ids
+  }
+
+  _markMoved(id) {
+    self._pendingMoved[id] = true
+    self.notify(GraphicsEventMoved(id))
   }
 
   /** Allocate id and append a GraphicsEntry; returns the id. */
@@ -761,7 +777,7 @@ class Graphics with Broadcaster {
     if (isnil(e)) return false
     if (!isnil(scale)) e.scale = scale
     if (!isnil(rotate)) e.rotate = rotate
-    self.notify(GraphicsEventMoved(id))
+    self._markMoved(id)
     return true
   }
 
@@ -772,7 +788,7 @@ class Graphics with Broadcaster {
     e.position = _asposition(position)
     if (!isnil(scale)) e.scale = scale
     if (!isnil(rotate)) e.rotate = rotate
-    self.notify(GraphicsEventMoved(id))
+    self._markMoved(id)
     return true
   }
 
@@ -992,6 +1008,20 @@ class Show {
       }
       if (needFlat) out.write("M shaded")
     }
+  }
+
+  /** Pose-only draw for one graphics id (no C/M — for in-place `d` update after open). */
+  emitEntryPose(graphic, graphicsId, out) {
+    if (!self.objectMap.contains(graphicsId)) return false
+    var entry = graphic.findEntry(graphicsId)
+    if (isnil(entry)) return false
+    var vid = self.objectMap[graphicsId]
+    if (self.posedIds.contains(graphicsId)) {
+      self.emitEntryDraw(entry, vid, out)
+    } else {
+      self.emitEntryDraw(GraphicsEntry(0, entry.item), vid, out)
+    }
+    return true
   }
 
   /** POVRay transmit/filter → OpenGL alpha: a = 1 - clamp(transmit + filter, 0, 1). */

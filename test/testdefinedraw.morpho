@@ -1,4 +1,4 @@
-// Smoke: define once, then D + redraw via View.redraw (no U S).
+// Smoke: define once, D+redraw, then pose-only `d` updates (no D / no U S).
 // Expect: prints "ok" then exits.
 // Requires: morphoview on PATH, morpho-zeromq, display.
 //
@@ -15,6 +15,7 @@ fn load(path) {
 
 var once = load("command/definedraw-once")
 var redraw = load("command/definedraw-redraw")
+var pose = load("command/definedraw-pose-update")
 
 var v = View()
 if (!v.open(once)) {
@@ -24,6 +25,13 @@ if (!v.open(once)) {
 
 if (!v.redraw(redraw)) {
   print "redraw failed"
+  v.close()
+  System.exit()
+}
+
+// In-place matrix replace for existing object draws (Phase 5b).
+if (!v.update(pose)) {
+  print "pose update failed"
   v.close()
   System.exit()
 }

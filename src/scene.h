@@ -180,6 +180,11 @@ textfont *scene_getfontfromid(scene *s, int fontid);
 int scene_addtext(scene *s, int fontid, char *text);
 int scene_addcolor(scene *s, int colorid, int length, int components, int indx);
 void scene_adddraw(scene *scene, gdrawtype type, int id, int matindx);
+/** First OBJECT draw with @p id, or NULL. */
+gdraw *scene_findobjectdraw(scene *s, int id);
+/** Replace model matrix on an existing OBJECT draw; false if no such draw.
+ *  @p matrix may be NULL to clear the matrix (identity). */
+bool scene_setobjectdrawmatrix(scene *s, int id, const float *matrix);
 
 gobject *scene_getgobjectfromid(scene *s, int id);
 gcolor *scene_getcolorfromid(scene *s, int id);

@@ -512,6 +512,35 @@ void scene_adddraw(scene *scene, gdrawtype type, int id, int matindx) {
     varray_gdrawwrite(&scene->displaylist, d);
 }
 
+/** First OBJECT draw with id, or NULL. */
+gdraw *scene_findobjectdraw(scene *s, int id) {
+    if (!s) return NULL;
+    for (unsigned int i = 0; i < s->displaylist.count; i++) {
+        gdraw *drw = &s->displaylist.data[i];
+        if (drw->type == OBJECT && drw->id == id) return drw;
+    }
+    return NULL;
+}
+
+/** Replace matrix on existing OBJECT draw; false if not found. */
+bool scene_setobjectdrawmatrix(scene *s, int id, const float *matrix) {
+    gdraw *drw = scene_findobjectdraw(s, id);
+    if (!drw) return false;
+    if (!matrix) {
+        drw->matindx = SCENE_EMPTY;
+        return true;
+    }
+    if (drw->matindx != SCENE_EMPTY) {
+        memcpy(&s->data.data[drw->matindx], matrix, sizeof(float) * 16);
+    } else {
+        /* scene_adddata takes a non-const pointer; matrix is 16 floats we own on the cmd. */
+        float tmp[16];
+        memcpy(tmp, matrix, sizeof(tmp));
+        drw->matindx = scene_adddata(s, tmp, 16);
+    }
+    return true;
+}
+
 /* -------------------------------------------------------
  * Find
  * ------------------------------------------------------- */

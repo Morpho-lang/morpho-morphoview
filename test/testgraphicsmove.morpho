@@ -125,4 +125,31 @@ for (line in buf2.lines) {
 }
 expect(hasT, "pose redraw includes translation")
 
+/* ---- takeMovedIds + emitEntryPose (selective, no D) ---- */
+var g7 = Graphics()
+var id7a = g7.display(tc, [0, 0, 0], scale=1)
+var id7b = g7.display(tc, [1, 0, 0], scale=1)
+var show7 = Show()
+var buf7 = Buf()
+show7.write(g7, buf7)
+g7.beginBatch()
+g7.move(id7a, [2, 0, 0])
+g7.move(id7b, [3, 0, 0], scale=2)
+g7.endBatch()
+var moved = g7.takeMovedIds()
+expect(moved.count() == 2, "batch pending has both movers")
+expect(moved[0] == id7a && moved[1] == id7b, "pending displaylist order")
+expect(g7.takeMovedIds().count() == 0, "take clears pending")
+
+var bufPose = Buf()
+expect(show7.emitEntryPose(g7, id7a, bufPose), "emitEntryPose a")
+expect(show7.emitEntryPose(g7, id7b, bufPose), "emitEntryPose b")
+var hasD = false
+var hasClear = false
+for (line in bufPose.lines) {
+  if (line.count() >= 1 && line[0] == "D") hasClear = true
+  if (line.count() >= 2 && line[0] == "d") hasD = true
+}
+expect(hasD && !hasClear, "selective pose emits d without D")
+
 print "ok"
