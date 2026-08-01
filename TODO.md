@@ -48,7 +48,7 @@ Done (Phases 2–4):
 
 Remaining ([Phase 5](docs/plan-graphics-view-listener.md)):
 
-1. [x] **5a** — `Graphics.begin` / `end` batching (one Moved notify per frame)
+1. [x] **5a** — `beginBatch` / `endBatch` on Broadcaster (one Moved notify per frame)
 2. **5b** — Selective pose redraw (in-place `d` matrix update; no full `D` every move)
 3. **5c** — Show emit review (Sphere entry SRT; PointCloud/LineSet)
 4. **5d** — `U O <id>` / `X O <id>` / `U V <id>` + Graphics removed/replaced events
@@ -74,7 +74,7 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 - [x] `wait(sessionTimeOut=0)` — convenience loop until closed / timeout
 - [x] `close()` — idempotent cleanup
 - [x] Private helpers prefixed with `_`
-- [x] `Graphics.begin` / `end` batching (Phase 5a)
+- [x] `beginBatch` / `endBatch` via Broadcaster mixin (Phase 5a)
 - [ ] Phase 5b — selective pose redraw (see plan)
 
 ### Show / Graphics prototype (upstream candidate) — track 1 done

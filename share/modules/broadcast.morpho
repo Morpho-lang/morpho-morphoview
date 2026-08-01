@@ -2,17 +2,29 @@
  *
  *  Broadcasters send events to listeners that have subscribed to them. To use:
  *
- *    class myBroadcaster with Broadcaster { ... }
- *    class myListener with Listener { ... }
+ *    class MyBroadcaster with Broadcaster { ... }
+ *    class MyListener with Listener { ... }
  *
  *    listener.listen(broadcaster)
  *    broadcaster.notify(event)       // → listener.receive(broadcaster, event)
  *    listener.ignore(broadcaster)
+ *
+ *  Batching (nested beginBatch/endBatch):
+ *
+ *    broadcaster.beginBatch()
+ *    broadcaster.notify(ev1)         // queued
+ *    broadcaster.notify(ev2)
+ *    broadcaster.endBatch()          // deliver pending in order
+ *
+ *  Events that implement `batchKey()` coalesce within a batch: only the latest
+ *  event with the same key is kept (e.g. many Moved → one Moved).
  */
 
 class Broadcaster {
   _broadcasterInit() {
     self.listeners = []
+    self._batchDepth = 0
+    self._pending = []
   }
 
   subscribe(listener) { // Register a listener
@@ -30,7 +42,43 @@ class Broadcaster {
     self.listeners = out
   }
 
+  /** Start a notification batch; nested beginBatch/endBatch supported. */
+  beginBatch() {
+    self._batchDepth += 1
+  }
+
+  /** End a batch; outermost endBatch delivers pending events in order. */
+  endBatch() {
+    if (self._batchDepth <= 0) return
+    self._batchDepth -= 1
+    if (self._batchDepth > 0) return
+    var pending = self._pending
+    self._pending = []
+    for (event in pending) {
+      self._deliver(event)
+    }
+  }
+
+  /** Queue while batching (optional coalesce via event.batchKey()); else deliver now. */
   notify(event) {
+    if (self._batchDepth > 0) {
+      if (event.respondsto("batchKey")) {
+        var key = event.batchKey()
+        var out = []
+        for (e in self._pending) {
+          if (!(e.respondsto("batchKey") && e.batchKey() == key)) out.append(e)
+        }
+        out.append(event)
+        self._pending = out
+      } else {
+        self._pending.append(event)
+      }
+    } else {
+      self._deliver(event)
+    }
+  }
+
+  _deliver(event) {
     for (l in self.listeners) {
       if (l.respondsto("receive")) l.receive(self, event)
     }

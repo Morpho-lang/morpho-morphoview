@@ -120,7 +120,7 @@ g.move(shadow, [x,0.02,z], scale=shadowR)
 **Steps:**
 
 1. `move(id, …)` — locked merge rules; notify listeners. ✅
-2. `begin` / `end` batching — Phase 5a. ✅
+2. `beginBatch` / `endBatch` — Phase 5a (`broadcast` mixin). ✅
 3. `Broadcaster.subscribe` / `Listener.listen`/`ignore` (`broadcast` module). ✅
 4. `open(g)`: one `Show.write`, then listen; `update(g)`: full `U S`, rebind, reset Show/object maps. ✅
 5. On `moved`: `D` + full pose redraw (v1). ✅
@@ -145,29 +145,27 @@ One sub-phase at a time; pause for review before the next. Do not start 5b/5c vi
 Target after 5a+5b:
 
 ```
-g.begin()
+g.beginBatch()
 g.move(ball, ...)
 g.move(shadow, ...)
-g.end()            # one coalesced Moved
+g.endBatch()            # one coalesced Moved
 # View: pose draws only (no full D)
 ```
 
-#### Phase 5a — `begin` / `end` batching ✅
+#### Phase 5a — `beginBatch` / `endBatch` ✅
 
-**Files:** `share/modules/xgraphics.morpho`, `test/testgraphicsmove.morpho`; optionally wrap amigaball moves. View can stay on v1 (`D` + full `emitPoseDraws`) for this sub-phase.
+**Files:** `share/modules/broadcast.morpho`, `share/modules/xgraphics.morpho`, `test/testgraphicsmove.morpho`; optionally wrap amigaball moves. View can stay on v1 (`D` + full `emitPoseDraws`) for this sub-phase.
 
 **Locked:**
 
-- `Graphics.begin()` / `end()` with a nesting counter.
-- Inside a batch: `display` / `move` still mutate entries; **suppress** `notify`.
-- `end()` at nesting 0:
-  - Flush each pending `GraphicsEventDefined` individually (cheap; rare mid-frame).
-  - If any `move`s occurred → **one** `GraphicsEventMoved` (id of last moved, or `0`).
-  - Nothing dirty → no-op.
-- Outside a batch: behavior unchanged (immediate notify).
-- Nested `begin`/`end` pairs supported; only the outermost `end` flushes.
+- `Broadcaster.beginBatch()` / `endBatch()` with a nesting counter (Graphics inherits via mixin).
+- Inside a batch: `notify` queues events; outermost `endBatch` delivers pending in order.
+- Events that implement `batchKey()` coalesce within a batch (latest with that key wins). `GraphicsEventMoved` coalesces; `GraphicsEventDefined` does not (each id flushed).
+- Outside a batch: `notify` delivers immediately.
+- Nested `beginBatch`/`endBatch` pairs supported; only the outermost `endBatch` flushes.
+- Graphics `display` / `move` always call `notify` — no Graphics-specific batch state.
 
-**Done when:** test (and/or amigaball) can `begin` → two `move`s → `end` and a Capture listener sees **one** Moved; one viewer round-trip per frame when View is attached.
+**Done when:** test (and/or amigaball) can `beginBatch` → two `move`s → `endBatch` and a Capture listener sees **one** Moved; one viewer round-trip per frame when View is attached.
 
 **Out of scope for 5a:** changing `D` + full pose redraw on the View side.
 

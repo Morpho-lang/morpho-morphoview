@@ -206,10 +206,10 @@ for (frame in 1...nFrames) {
 
   angle += vx/ballR*dt
 
-  g.begin()
+  g.beginBatch()
   g.move(ball, worldPos(x, y, z), rotate=[angle, 0, 1, 0])
   g.move(shadow, worldPos(x, 0.04, z), scale=shadowScale(y))
-  g.end()
+  g.endBatch()
   System.sleep(dt)
   v.poll(timeoutMs=0)
 }

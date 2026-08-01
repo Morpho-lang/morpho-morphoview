@@ -37,7 +37,7 @@ Not a full scene graph. Richer than today’s append-only displaylist:
 
 - Stable **ids** from `Graphics.display` (returned Int on the entry). Not on mesh primitives — same value may be displayed twice under two ids.
 - Entry **SRT** owns presentation pose (`position` as Matrix 3-vector / `scale` / `rotate` as fields on the entry); `Show` places from the entry only. API accepts list or Matrix for position and coerces to Matrix. Keep SRT fields (not one 4×4). Posed `Sphere`s normalize to unit item + pose on entry. `move`: position always sets absolute `entry.position`; omitted scale/rotate leave components unchanged.
-- Small **mutation API**: `display`, `move`, `begin`/`end` batching; later replace/remove
+- Small **mutation API**: `display`, `move`; `beginBatch`/`endBatch` on Broadcaster; later replace/remove
 - **Listeners** (`broadcast` module) + typed events (`GraphicsEventDefined` / `Moved`)
 - `open(g)` uses one `Show.write` then listens; `update(g)` full replace + rebind
 
