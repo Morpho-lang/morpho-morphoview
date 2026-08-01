@@ -3,10 +3,11 @@
  * History:
  * 1/7/25 Redirect error output to /dev/null to suppress errors on macOS
  * 1/2/26 Windows compatibility
- * 7/31/26 Show: serializer vs launch split (from morphoview XShow prototype)
- * 7/31/26 PointCloud / LineSet primitives (viewer p / l)
- * 7/31/26 Graphics entries + display pose (unit Sphere + entry SRT)
- * 7/31/26 Show: entry SRT emit; Sphere → unit TriangleComplex (no Show instancing)
+ * 7/31/26 Additional features to support new morphoview: 
+ * - View class to enable communication between the viewer and the application
+ * - PointCloud / LineSet primitives
+ * - display() creates GraphicsEntry, enabling pose information to be decoupled from the item
+ * - Show can now clear display list
  */
 
 import constants
