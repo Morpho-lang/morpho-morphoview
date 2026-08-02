@@ -38,11 +38,7 @@ class Broadcaster {
   }
 
   unsubscribe(listener) {
-    var out = []
-    for (l in self.listeners) {
-      if (l != listener) out.append(l)
-    }
-    self.listeners = out
+    self.listeners.remove(listener)
   }
 
   beginBatch() {
@@ -79,7 +75,7 @@ class Broadcaster {
               out.append(e)
             }
           }
-          if (!isnil(prev)) event.coalesce(prev)
+          if (!isnil(prev) && event.respondsto("coalesce")) event.coalesce(prev)
           out.append(event)
           self._pending = out
         }

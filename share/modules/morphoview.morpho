@@ -135,61 +135,47 @@ class View with Listener {
     if (self.closed || isnil(self.show)) return
     var entry = g.findEntry(ev.id)
     if (isnil(entry)) return
-    self.cmdBuf = ""
-    self.show.writeEntry(entry, self)
-    if (self.cmdBuf.count() == 0) return
-    self.gotOk = false
-    self._send(self.cmdBuf)
-    self._waitOk()
+    self._emitAndWait(fn () { self.show.writeEntry(entry, self) })
   }
 
   receive(Graphics g, GraphicsEventMoved ev) {
     if (self.closed || isnil(self.show)) return
     var ids = ev.ids
     if (isnil(ids) || ids.count() == 0) ids = [ev.id]
-    self.cmdBuf = ""
-    for (id in ids) {
-      self.show.emitEntryPose(g, id, self)
-    }
-    // Unmapped ids: no-op (never D + empty redraw).
-    if (self.cmdBuf.count() == 0) return
-    self.gotOk = false
-    self._send(self.cmdBuf)
-    self._waitOk()
+    self._emitAndWait(fn () {
+      for (id in ids) self.show.emitEntryPose(g, id, self)
+    })
   }
 
   receive(Graphics g, GraphicsEventRecolored ev) {
     if (self.closed || isnil(self.show)) return
     var ids = ev.ids
     if (isnil(ids) || ids.count() == 0) ids = [ev.id]
-    self.cmdBuf = ""
-    for (id in ids) {
-      self.show.emitEntryRecolor(g, id, self)
-    }
-    if (self.cmdBuf.count() == 0) return
-    self.gotOk = false
-    self._send(self.cmdBuf)
-    self._waitOk()
+    self._emitAndWait(fn () {
+      for (id in ids) self.show.emitEntryRecolor(g, id, self)
+    })
   }
 
   receive(Graphics g, GraphicsEventRemoved ev) {
     if (self.closed || isnil(self.show)) return
-    self.cmdBuf = ""
-    self.show.emitEntryRemove(ev.id, self)
-    if (self.cmdBuf.count() == 0) return
-    self.gotOk = false
-    self._send(self.cmdBuf)
-    self._waitOk()
+    self._emitAndWait(fn () { self.show.emitEntryRemove(ev.id, self) })
   }
 
   receive(Graphics g, GraphicsEventReplaced ev) {
     if (self.closed || isnil(self.show)) return
+    self._emitAndWait(fn () {
+      if (!self.show.emitEntryReplace(g, ev.id, self)) return
+    })
+  }
+
+  /** Fill cmdBuf via @p emit, send if non-empty, wait for ok. */
+  _emitAndWait(emit) {
     self.cmdBuf = ""
-    if (!self.show.emitEntryReplace(g, ev.id, self)) return
-    if (self.cmdBuf.count() == 0) return
+    emit()
+    if (self.cmdBuf.count() == 0) return false
     self.gotOk = false
     self._send(self.cmdBuf)
-    self._waitOk()
+    return self._waitOk()
   }
 
   /** Swap item and push same-length vertices (U V). Use replace for new connectivity. */
@@ -202,12 +188,9 @@ class View with Listener {
   /** Push U V for a TriangleComplex entry (layout must match define: xn / xnc). */
   refreshMesh(graphicsId) {
     if (self.closed || isnil(self.show) || isnil(self.graphics)) return false
-    self.cmdBuf = ""
-    if (!self.show.emitEntryVertices(self.graphics, graphicsId, self)) return false
-    if (self.cmdBuf.count() == 0) return false
-    self.gotOk = false
-    self._send(self.cmdBuf)
-    return self._waitOk()
+    return self._emitAndWait(fn () {
+      if (!self.show.emitEntryVertices(self.graphics, graphicsId, self)) return
+    })
   }
 
   /** One reply, or nil on timeout. poll(timeoutms=0) is non-blocking. */
@@ -236,13 +219,16 @@ class View with Listener {
     }
   }
 
-  /** Stop the viewer; idempotent. Prefers Q, then pkill. */
+  /** Stop the viewer; idempotent. Prefers Q, then pkill. Clears transport so reopen works. */
   close() {
-    if (self.closed) return
     if (!isnil(self.graphics)) self._detach(self.graphics)
     self.graphics = nil
     self.show = nil
-    if (!isnil(self.sock)) {
+    if (isnil(self.sock)) {
+      self.closed = true
+      return
+    }
+    if (!self.closed) {
       self._send("Q")
       var waited = 0
       while (!self.closed && waited < self.connecttimeout) {
@@ -252,7 +238,15 @@ class View with Listener {
       }
     }
     if (!self.closed) self._kill()
+    self._resetTransport()
+  }
+
+  /** Drop ZMQ state so a later open() is not blocked by a stale sock. */
+  _resetTransport() {
     self.closed = true
+    self.sock = nil
+    self.ep = nil
+    self.poller = nil
   }
 
   _bind() {
@@ -279,12 +273,15 @@ class View with Listener {
     while (!self.closed && !self.gotOk) {
       self.poll(timeoutms=self.pollms)
       if (self.gotOk) return true
-      if (self.closed) return false
+      if (self.closed) {
+        self._resetTransport()
+        return false
+      }
       waited += self.pollms
       if (waited >= self.connecttimeout) {
         print "morphoview: timed out waiting for ok"
         self._kill()
-        self.closed = true
+        self._resetTransport()
         return false
       }
     }

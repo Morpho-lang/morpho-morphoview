@@ -34,8 +34,8 @@ fn expect(cond, msg) {
 
 /* ---- zero-length rejected ---- */
 var gz = Graphics()
-expect(gz.display(Cylinder([0, 0, 0], [0, 0, 0], n=6)) == false, "zero cylinder fails")
-expect(gz.display(Arrow([1, 1, 1], [1, 1, 1], n=6)) == false, "zero arrow fails")
+expect(isnil(gz.display(Cylinder([0, 0, 0], [0, 0, 0], n=6))), "zero cylinder fails")
+expect(isnil(gz.display(Arrow([1, 1, 1], [1, 1, 1], n=6))), "zero arrow fails")
 
 /* ---- unit storage + SRT from start→end ---- */
 var g = Graphics()

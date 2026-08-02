@@ -273,7 +273,7 @@ expect(gMorph.findEntry(idM).item == tcMorph, "morph sets item")
 expect(capMorph.events.count() == 1, "morph does not notify")
 expect(!gMorph.morph(999, tcMorph), "morph missing id fails")
 expect(!gMorph.morph(idM, 1), "morph bad item fails")
-expect(gMorph.display(1) == false, "display non-object returns false")
+expect(isnil(gMorph.display(1)), "display non-object returns nil")
 
 var show9 = Show()
 var buf9 = Buf()

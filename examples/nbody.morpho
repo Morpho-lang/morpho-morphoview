@@ -10,7 +10,7 @@ import xgraphics
 import color
 import constants
 
-var nBodies = 24
+var nBodies = 100
 var box = 2.2
 var dt = 1/50
 var nFrames = 900
