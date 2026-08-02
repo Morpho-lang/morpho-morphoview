@@ -242,13 +242,16 @@ bool text_skylineextend(textskyline *skyline, int height) {
  * Creating the texture
  * ------------------------------------------------------- */
 
-/** Allocates a texture of correct size */
+/** Allocates a texture of correct size (frees any previous atlas). */
 bool text_allocatetexture(textfont *font) {
-    
-    size_t size = font->skyline.width*font->skyline.height;
-    font->texturedata=malloc(sizeof(char)*size);
+    size_t size = (size_t) font->skyline.width * (size_t) font->skyline.height;
+    if (font->texturedata) {
+        free(font->texturedata);
+        font->texturedata = NULL;
+    }
+    font->texturedata = malloc(sizeof(char) * size);
     if (font->texturedata) memset(font->texturedata, 0, size);
-    return (font->texturedata);
+    return (font->texturedata != NULL);
 }
 
 /** Generates the texture atlas from glyph data */
@@ -270,6 +273,7 @@ bool text_generatetexture(textfont *font) {
         }
         
     }
+    font->atlas_dirty = false;
     return true;
 }
 
@@ -289,6 +293,7 @@ void text_fontinit(textfont *font, int width) {
     text_skylineinit(&font->skyline, width, width*3/4);
     varray_textglyphinit(&font->glyphs);
     font->texturedata=NULL;
+    font->atlas_dirty=true;
 }
 
 /** Clears a font structure */
@@ -358,6 +363,7 @@ bool text_addcharacter(textfont *font, int code) {
     }
     
     varray_textglyphwrite(&font->glyphs, glyph);
+    font->atlas_dirty = true;
     
     //text_drawbitmap(&font->face->glyph->bitmap);
     

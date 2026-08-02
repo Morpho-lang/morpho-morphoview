@@ -1244,9 +1244,8 @@ class Show {
     self.visitGeneric(item, out)
   }
 
-  /** Emit i/s/r/t/d. With viewerid: d <graphicsId> <viewerid> (or d <viewerid> if entry.id==0).
-   *  Without viewerid: d <graphicsId> (pose-only). */
-  emitEntryDraw(entry, out, viewerid=nil) {
+  /** Emit entry i / s / r (no translation, no draw). */
+  _emitEntryBasis(entry, out) {
     out.write("i")
     var scl = entry.scale
     if (ismatrix(scl) || islist(scl)) {
@@ -1260,10 +1259,26 @@ class Show {
         out.write("r ${self.fmt(r[0])} ${self.fmt(r[1])} ${self.fmt(r[2])} ${self.fmt(r[3])}")
       }
     }
+  }
+
+  /** Emit entry t when position is not the origin. */
+  _emitEntryTranslation(entry, out) {
     var p = entry.position
     if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
       out.write("t ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}")
     }
+  }
+
+  /** Emit entry SRT as i / s / r / t (no draw command). */
+  _emitEntrySRT(entry, out) {
+    self._emitEntryBasis(entry, out)
+    self._emitEntryTranslation(entry, out)
+  }
+
+  /** Emit i/s/r/t/d. With viewerid: d <graphicsId> <viewerid> (or d <viewerid> if entry.id==0).
+   *  Without viewerid: d <graphicsId> (pose-only). */
+  emitEntryDraw(entry, out, viewerid=nil) {
+    self._emitEntrySRT(entry, out)
     if (isnil(viewerid)) {
       out.write("d ${entry.id}")
     } else if (entry.id != 0) {
@@ -1824,31 +1839,16 @@ class Show {
     out.write("T ${fid} \"${item.string}\"")
   }
 
-  /** Entry SRT (+ optional dirn/vertical `m`) before `T` / pose `d`. */
+  /** Entry SRT (+ optional dirn/vertical `m` before translation) before `T` / pose `d`. */
   _emitTextTransforms(entry, Text item, out) {
-    out.write("i")
-    var scl = entry.scale
-    if (ismatrix(scl) || islist(scl)) {
-      out.write("s ${self.fmt(scl[0])} ${self.fmt(scl[1])} ${self.fmt(scl[2])}")
-    } else if (scl != 1) {
-      out.write("s ${self.fmt(scl)}")
-    }
-    if (!isnil(entry.rotate)) {
-      var r = entry.rotate
-      if (!(abs(r[0]) < 1e-8)) {
-        out.write("r ${self.fmt(r[0])} ${self.fmt(r[1])} ${self.fmt(r[2])} ${self.fmt(r[3])}")
-      }
-    }
+    self._emitEntryBasis(entry, out)
     var m = item.transformationMatrix()
     if (m) {
       var str = "m"
       for (i in 0..3) for (j in 0..3) str+=" "+self.fmt(m[i,j])
       out.write(str)
     }
-    var p = entry.position
-    if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
-      out.write("t ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}")
-    }
+    self._emitEntryTranslation(entry, out)
   }
 
   write(graphic, out) {
@@ -1954,5 +1954,35 @@ class Show {
     self.emitEntryDraw(entry, out, viewerid=vid)
     if (flat) out.write("M shaded")
     self._currentEntry = nil
+  }
+}
+
+/** Resolve common font roles across platforms (symbol / CJK / default).
+ *  Returns a font *name* for `Text(..., font=...)`, or nil → Show default. */
+class FontFinder {
+  init() { }
+
+  /** First candidate Show can resolve on this machine, else nil. */
+  pick(candidates) {
+    var show = Show()
+    for (name in candidates) {
+      if (show.findFont(name)) return name
+    }
+    return nil
+  }
+
+  /** Platform default body face (Helvetica / arial / FreeSans). */
+  default() {
+    return Show().defaultFontName()
+  }
+
+  /** Math / emoji / symbol coverage when available. */
+  symbol() {
+    return self.pick(["Apple Symbols", "seguisym", "DejaVuSans", "FreeSans", "Symbola"])
+  }
+
+  /** CJK body face when available. */
+  cjk() {
+    return self.pick(["Hiragino Sans GB", "msyh", "NotoSansCJK-Regular", "NotoSansCJKjp-Regular", "TakaoPGothic"])
   }
 }

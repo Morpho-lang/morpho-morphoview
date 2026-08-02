@@ -311,7 +311,10 @@ void render_preparefonts(renderer *r, scene *scene) {
     
     for (int i=0; i<scene->fontlist.count; i++) {
         gfont *f=&scene->fontlist.data[i];
-        text_generatetexture(&f->font);
+        /* Rebuild CPU atlas only when glyphs changed; always re-upload after render_reset. */
+        if (f->font.atlas_dirty || !f->font.texturedata) {
+            if (!text_generatetexture(&f->font)) continue;
+        }
         
         renderfont font;
         font.font=&f->font;

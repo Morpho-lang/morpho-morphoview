@@ -487,18 +487,35 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 drw = scene_findobjectdraw(ctx->scene, c->drawid);
 
             if (drw) {
+                bool need_prepare = false;
                 if (drw->type == OBJECT) {
-                    if (c->has_objectid) scene_setobjectdrawobject(drw, objectid);
+                    if (c->has_objectid) {
+                        scene_setobjectdrawobject(drw, objectid);
+                        need_prepare = true; /* rebind → renderlist object refs */
+                    }
                     /* Ensure legacy draws get a stable drawid for later pose updates. */
                     if (drw->drawid == SCENE_EMPTY) drw->drawid = c->drawid;
                 }
+
+                bool had_matrix = (drw->matindx != SCENE_EMPTY);
+                int old_color = drw->colorid;
                 scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
                                        c->has_matrix ? c->matrix : NULL, stamp);
+
+                /* Color is baked into the renderlist at prepare time. */
+                if (stamp != SCENE_EMPTY && stamp != old_color)
+                    need_prepare = true;
+                /* First matrix on a draw needs prepare so RMODEL enters the list. */
+                if (c->has_matrix && !had_matrix)
+                    need_prepare = true;
+                /* else: in-place matrix memcpy — renderlist already points at scene data */
+
+                if (need_prepare) command_touchscene(ctx);
             } else {
                 scene_addobjectdraw(ctx->scene, c->drawid, objectid,
                                     c->has_matrix ? c->matrix : NULL, stamp);
+                command_touchscene(ctx);
             }
-            command_touchscene(ctx);
             return true;
         }
 

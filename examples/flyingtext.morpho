@@ -4,9 +4,6 @@
 //   morpho6 examples/flyingtext.morpho
 //
 // Close the viewer window (or wait for the run to finish) to exit.
-//
-// Fonts: there is no one cross-platform symbol face. We try a short per-OS
-// candidate list and fall back to Show's default (Helvetica / arial / FreeSans).
 
 import morphoview
 import xgraphics
@@ -15,31 +12,11 @@ import constants
 
 var dt = 1/50
 var nFrames = 1800   // ~36 s
+var recolorEvery = 20
 
-/** First font name that Show can resolve, else nil (→ platform default). */
-fn pickFont(candidates) {
-  var show = Show()
-  for (name in candidates) {
-    if (show.findFont(name)) return name
-  }
-  return nil
-}
-
-var symbolFont = pickFont([
-  "Apple Symbols",   // macOS
-  "seguisym",        // Windows Segoe UI Symbol
-  "DejaVuSans",      // common on Linux
-  "FreeSans",
-  "Symbola"
-])
-
-var cjkFont = pickFont([
-  "Hiragino Sans GB", // macOS
-  "msyh",             // Windows Microsoft YaHei
-  "NotoSansCJK-Regular",
-  "NotoSansCJKjp-Regular",
-  "TakaoPGothic"
-])
+var fonts = FontFinder()
+var symbolFont = fonts.symbol()
+var cjkFont = fonts.cjk()
 
 /** Each label: string, font (nil → default), point size. */
 var labels = [
@@ -104,9 +81,14 @@ for (frame in 1...nFrames) {
     var ay = cos(0.25*t + 1.3*ph)
     var az = 0.4*sin(0.2*t + 0.7*ph)
     g.move(ids[i], [x, y, z], scale=scl, rotate=[ang, ax, ay, az])
-    var ci = i + Int(0.28*t)
-    ci = ci - palette.count()*Int(Float(ci)/Float(palette.count()))
-    g.recolor(ids[i], palette[ci])
+  }
+  // Recolor sparsely — color stamps force a GL prepare; pose-only moves do not.
+  if (frame - recolorEvery*Int(Float(frame)/Float(recolorEvery)) == 0) {
+    for (i in 0...ids.count()) {
+      var ci = i + Int(0.28*t)
+      ci = ci - palette.count()*Int(Float(ci)/Float(palette.count()))
+      g.recolor(ids[i], palette[ci])
+    }
   }
   g.endBatch()
   System.sleep(dt)

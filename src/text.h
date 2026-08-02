@@ -59,7 +59,8 @@ typedef struct {
     textskyline skyline;
     varray_textglyph glyphs;
     
-    char *texturedata; 
+    char *texturedata;
+    bool atlas_dirty; /**< true if glyphs changed since last text_generatetexture */
 } textfont;
 
 void text_test(textfont *font);
