@@ -1,4 +1,4 @@
-// Live Graphics: open → move without U S.
+// Live Scene: open → move without U S.
 // Expect: prints "ok" then exits.
 // Requires: morphoview on PATH, morpho-zeromq, display.
 //
@@ -16,7 +16,7 @@ fn tri() {
   )
 }
 
-var g = Graphics()
+var g = Scene()
 g.title = "move"
 var id = g.display(tri(), [0, 0, 0], scale=1)
 

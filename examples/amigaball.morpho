@@ -1,5 +1,5 @@
 // Amiga "Boing" ball — live Graphics session.
-// Pitched magenta wireframe room + faceted ball; physics via g.move.
+// Pitched magenta wireframe room + faceted ball; physics via Scene.move.
 //
 //   morpho6 examples/amigaball.morpho
 //
@@ -176,7 +176,7 @@ var vx = 2.5
 var vy = 0.0
 var angle = 0.0
 
-var g = Graphics(title="Boing", background=amigaGrey)
+var g = Scene(title="Boing", background=amigaGrey)
 
 /* Translucent shadow before the room (display order matches the working
    translucent-then-vertex-color case); ball last. */

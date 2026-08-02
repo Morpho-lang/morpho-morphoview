@@ -14,27 +14,28 @@ Work in this order. Later tracks depend on decisions from earlier ones.
 | **2** | **Animation-friendly viewer + View API** | **Partial** | Through Phase 5c (draw-slots, Sphere cache, recolor, n-body). Remaining: [Phase 5d](docs/plan-graphics-view-listener.md) (`U O` / `U V` / `X O`). |
 | **3** | **Binary / byte-buffer transport** | Later | Viewer can accept blobs sooner; real gain needs Morpho-side serialize + framing. Biggest on fat `v` / `U V` paths; redraw often avoids blobs entirely |
 
-Tried and deferred: making `View.update` async / drop-under-pressure. The old bottleneck was full `U S` reserialize; the live path is now `g.move` → listener → redraw (no per-frame `U S`).
+Tried and deferred: making `View.update` async / drop-under-pressure. The old bottleneck was full `U S` reserialize; the live path is now `Scene.move` → listener → redraw (no per-frame `U S`).
 
 ## Occasional update vs efficient animation
 
-`Graphics` is a live, id-bearing model (not a full scene graph). `Graphics.display` returns stable Graphics-owned ids; `Show` maps them to viewer `o` ids for a session. Entry SRT owns presentation pose; View listens for mutations.
+`Graphics` is a static, id-bearing displaylist (not a full scene graph). `Scene is Graphics` adds Broadcaster + `move` / `recolor` for live sessions. `Graphics.display` returns stable Graphics-owned ids; `Show` maps them to viewer `o` ids for a session. Entry SRT owns presentation pose; View listens for Scene mutations.
 
 | Use case | Supported path | Expectation |
 |----------|----------------|-------------|
 | Occasional refresh | `View.open(Graphics)` / `update(Graphics)` → `U S` + full reserialize | Intentional. Fine for “recompute viz every N steps / on demand.” |
-| Efficient animation | `display` once → `View(g)` → `g.move` (Phases 1–4); Phase 5 tightens batching / selective redraw | Do **not** expect `update(Graphics)` to be cheap for large static+dynamic scenes. |
+| Efficient animation | `display` once → `View(Scene)` → `g.move` (Phases 1–4); Phase 5 tightens batching / selective redraw | Do **not** expect `update(Graphics)` to be cheap for large static+dynamic scenes. |
 
 Do **not** make `update(Graphics)` automatically incremental or diff the previous displaylist in an ad-hoc way. Keep `U S` as the high-level snapshot path; efficiency comes from Graphics mutations → listener → targeted viewer ops.
 
 ### 1. Graphics prototype — done (package)
 
-Local prototype in [`xgraphics.morpho`](share/modules/xgraphics.morpho) (`Graphics` / `Show` / events) + [`broadcast.morpho`](share/modules/broadcast.morpho):
+Local prototype in [`xgraphics.morpho`](share/modules/xgraphics.morpho) (`Graphics` / `Scene` / `Show` / events) + [`broadcast.morpho`](share/modules/broadcast.morpho):
 
 - [x] Stable Graphics-owned ids on `display` (not ephemeral per write for the model)
 - [x] Distinguish **define** (`o` / `v` / `f`) vs **draw** (`d` + transforms) via entries + `Show`
 - [x] Mid-session `move` + Broadcaster / Listener → View
 - [x] Dedup / instance identical primitives (Show-level unit-sphere cache — Phase 5c)
+- [x] `Scene is Graphics` — static Graphics container; live Scene subclass (Broadcaster + move/recolor)
 - [ ] Push settled pieces to morpho `graphics.morpho`
 
 ### 2. Animation / composition infra — partial
@@ -218,7 +219,7 @@ Small viewer-only polish can land anytime; strategic sequence is Graphics (done)
 - [x] Graphics entries / `add` remap: [`test/testgraphicsentries.morpho`](test/testgraphicsentries.morpho)
 - [x] `move` / listeners / objectMap: [`test/testgraphicsmove.morpho`](test/testgraphicsmove.morpho)
 - [x] Live `open` → `move`: [`test/testviewmove.morpho`](test/testviewmove.morpho)
-- [x] Live Graphics yardstick (define-once + `g.move`): [`examples/amigaball.morpho`](examples/amigaball.morpho)
+- [x] Live Scene yardstick (define-once + `g.move`): [`examples/amigaball.morpho`](examples/amigaball.morpho)
 - [x] Phase 5c n-body yardstick (many shared `Sphere`s + `g.move` / `recolor`): [`examples/nbody.morpho`](examples/nbody.morpho)
 
 ## Notes

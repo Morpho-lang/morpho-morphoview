@@ -4,7 +4,7 @@ Design source of truth: [`definedraw.md`](definedraw.md).
 
 **Working agreement:** one phase at a time; pause for review before the next.
 
-**Canonical View API:** `View(g)` or `View()` + `open(g)` (both listen after one `Show.write`).
+**Canonical View API:** `View(scene)` or `View()` + `open(scene)` on a `Scene` (listen after one `Show.write`). `View.open(Graphics)` works for set-and-forget without listening.
 
 ## Locked decisions (Phase 1 readiness)
 
@@ -173,13 +173,13 @@ g.endBatch()            # one coalesced Moved
 
 **Why:** After `D`, static draws vanish unless re-issued. True “movers only” needs in-place draw update.
 
-**Files:** `src/command.c`, `src/scene.c` / `scene.h`, `share/modules/morphoview.morpho`, `share/modules/xgraphics.morpho` (`emitEntryPose`, `takeMovedIds`), `test/command/definedraw-pose-update`, `test/testdefinedraw.morpho`.
+**Files:** `src/command.c`, `src/scene.c` / `scene.h`, `share/modules/morphoview.morpho`, `share/modules/xgraphics.morpho` (`emitEntryPose`, `processMovedIds`), `test/command/definedraw-pose-update`, `test/testdefinedraw.morpho`.
 
 **Locked:**
 
 - Viewer: when applying `d <id>` with a matrix, if an `OBJECT` draw for that id already exists in the scene displaylist, **replace its matrix** instead of appending. Objects first; text `T` draws later if cheap.
 - View `receive(Moved)`: emit **only** pose lines via `Show.emitEntryPose` (no `C`/`M`); **do not** send `D`. Unmapped ids → fall back to full `D` + `emitPoseDraws`.
-- Graphics tracks dirty ids via `_dirty` / `takeDirtyIds` (`takeMovedIds` / `takeRecolorIds` wrappers); coalesced batch Moved updates every mover.
+- Scene tracks pending ids via `_pendingIds` / `processPendingIds` (`processMovedIds` / `processRecolorIds` wrappers); coalesced batch Moved updates every mover.
 - Mid-session `Defined` unchanged (append define+draw).
 - Keep `View.redraw(ascii)` and explicit `D` for tests/fixtures (`definedraw-redraw` stays valid).
 

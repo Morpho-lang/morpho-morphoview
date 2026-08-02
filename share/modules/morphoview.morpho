@@ -9,12 +9,12 @@
  *
  *    var v = View()
  *    v.open(commands)           // ASCII string
- *    v.open(g)                  // Graphics: Show.write once, then listen
- *    var v = View(g)            // same as View() + open(g); throws on failure
+ *    v.open(g)                  // Graphics or Scene: Show.write once
+ *    var v = View(scene)        // live: open Scene, then listen for move/recolor
  *    v.update(morecommands)     // e.g. chunk starting with `U S <id>`
- *    v.update(g)                // Graphics replace via `U S` + rebind
+ *    v.update(g)                // Graphics/Scene replace via `U S` + rebind
  *    v.redraw(posecommands)     // `D` + redraw draws (no geometry wipe)
- *    // After open(g) / View(g): g.move drives the viewer via Listener.receive (pose-only `d`)
+ *    // After View(scene): scene.move / recolor drive pose-only `d` / `C`
  *    v.poll(timeoutMs=0)
  *    v.wait(sessionTimeOut=1500)
  *    v.close()
@@ -46,8 +46,8 @@ class View with Listener {
     self.show = nil
   }
 
-  // Open immediately on a Graphics (same as View() then open(g)).
-  // Throws if the session cannot be established — a returned View is ready to use.
+  // Open immediately (same as View() then open(g)). Scene → live listen;
+  // plain Graphics → set-and-forget. Throws if the session cannot open.
   init(Graphics g, connectTimeOut=5000, pollMs=100) {
     self.init(connectTimeOut=connectTimeOut, pollMs=pollMs)
     if (!self.open(g)) _vwopnfl.throw()
@@ -74,19 +74,13 @@ class View with Listener {
     return self._waitOk()
   }
 
-  // Serialize Graphics via Show, open, then listen for move/display events.
-  open(Graphics g) {
-    if (!isnil(self.graphics)) self.ignore(self.graphics)
-    self.show = Show()
-    self.cmdBuf = ""
-    self.show.write(g, self)
-    var ok = self.open(self.cmdBuf)
-    if (ok) {
-      self.graphics = g
-      self.listen(g)
-    } else {
-      self.show = nil
-    }
+  // Serialize Graphics via Show and open (no listener).
+  open(Graphics g) { return self._openModel(g) }
+
+  // Serialize Scene, open, then listen for move/recolor/display.
+  open(Scene g) {
+    var ok = self._openModel(g)
+    if (ok) self.listen(g)
     return ok
   }
 
@@ -98,10 +92,35 @@ class View with Listener {
     return self._waitOk()
   }
 
-  // Full `U S` replace: reset Show/object maps, rebind listener.
-  update(Graphics g) {
+  // Full `U S` replace (no listener).
+  update(Graphics g) { return self._updateModel(g) }
+
+  // Full `U S` replace and rebind listener.
+  update(Scene g) {
+    var ok = self._updateModel(g)
+    if (ok) self.listen(g)
+    return ok
+  }
+
+  // Show.write + open(commands); store model. Shared by Graphics/Scene open.
+  _openModel(Graphics g) {
+    if (!isnil(self.graphics)) self._detach(self.graphics)
+    self.show = Show()
+    self.cmdBuf = ""
+    self.show.write(g, self)
+    var ok = self.open(self.cmdBuf)
+    if (ok) {
+      self.graphics = g
+    } else {
+      self.show = nil
+    }
+    return ok
+  }
+
+  // Show.write with replace + update(commands); store model.
+  _updateModel(Graphics g) {
     if (self.closed) return false
-    if (!isnil(self.graphics)) self.ignore(self.graphics)
+    if (!isnil(self.graphics)) self._detach(self.graphics)
     self.show = Show()
     self.show.replace = true
     self.cmdBuf = ""
@@ -109,13 +128,17 @@ class View with Listener {
     var ok = self.update(self.cmdBuf)
     if (ok) {
       self.graphics = g
-      self.listen(g)
     } else {
       self.graphics = nil
       self.show = nil
     }
     return ok
   }
+
+  // No-op for static Graphics; Scene overload unsubscribes.
+  _detach(Graphics g) { }
+
+  _detach(Scene g) { self.ignore(g) }
 
   // Clear draws (`D`) and re-issue pose/draw ASCII without `U S`.
   // Prepends `D` unless `commands` already starts with it.
@@ -146,7 +169,7 @@ class View with Listener {
 
   receive(Graphics g, GraphicsEventMoved ev) {
     if (self.closed || isnil(self.show)) return
-    var ids = g.takeMovedIds()
+    var ids = g.processMovedIds()
     if (ids.count() == 0) ids = [ev.id]
     self.cmdBuf = ""
     var any = false
@@ -166,7 +189,7 @@ class View with Listener {
 
   receive(Graphics g, GraphicsEventRecolored ev) {
     if (self.closed || isnil(self.show)) return
-    var ids = g.takeRecolorIds()
+    var ids = g.processRecolorIds()
     if (ids.count() == 0) ids = [ev.id]
     self.cmdBuf = ""
     var any = false
@@ -210,7 +233,7 @@ class View with Listener {
   // Best-effort stop of the viewer; idempotent. Prefers command `Q` over pkill.
   close() {
     if (self.closed) return
-    if (!isnil(self.graphics)) self.ignore(self.graphics)
+    if (!isnil(self.graphics)) self._detach(self.graphics)
     self.graphics = nil
     self.show = nil
     if (!isnil(self.sock)) {

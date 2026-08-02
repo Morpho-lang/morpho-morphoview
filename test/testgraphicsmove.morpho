@@ -1,4 +1,4 @@
-// Graphics move / listeners (no viewer required).
+// Scene move / listeners (no viewer required). Graphics stays static.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testgraphicsmove.morpho
@@ -24,8 +24,17 @@ class Capture with Listener {
   _kind(GraphicsEventRecolored ev) { return GraphicsEventRecolored }
 }
 
+/* ---- Scene is Graphics; static Graphics has no move ---- */
+var staticG = Graphics()
+expect(!isnil(staticG.displaylist), "Graphics constructs")
+expect(!staticG.respondsto("move"), "Graphics has no move")
+expect(!staticG.respondsto("subscribe"), "Graphics is not a Broadcaster")
+var sceneProbe = Scene()
+expect(sceneProbe.superclass() == Graphics, "Scene is Graphics")
+expect(sceneProbe.respondsto("move") && sceneProbe.respondsto("subscribe"), "Scene is live")
+
 /* ---- move merge ---- */
-var g = Graphics()
+var g = Scene()
 var tc = TriangleComplex(
   Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
   Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
@@ -53,7 +62,7 @@ expect(e.rotate[0] == 1, "rotate updated")
 expect(!g.move(999, [0, 0, 0]), "missing id fails")
 
 /* ---- immediate listener ---- */
-var g2 = Graphics()
+var g2 = Scene()
 var cap = Capture()
 cap.listen(g2)
 var id2 = g2.display(tc, [0, 1, 0])
@@ -62,7 +71,7 @@ g2.move(id2, [1, 1, 1])
 expect(cap.events.count() == 2 && cap.events[1] == GraphicsEventMoved, "immediate moved")
 
 /* ---- ignore ---- */
-var g5 = Graphics()
+var g5 = Scene()
 var cap5 = Capture()
 cap5.listen(g5)
 cap5.ignore(g5)
@@ -70,7 +79,7 @@ g5.display(tc)
 expect(cap5.events.count() == 0, "ignored silent")
 
 /* ---- begin/end batching ---- */
-var gBatch = Graphics()
+var gBatch = Scene()
 var capBatch = Capture()
 capBatch.listen(gBatch)
 var idA = gBatch.display(tc, [0, 0, 0])
@@ -105,7 +114,7 @@ expect(capBatch.events[0] == GraphicsEventDefined, "Defined first")
 expect(capBatch.events[1] == GraphicsEventMoved, "Moved after Defined")
 
 /* ---- Show objectMap for TriangleComplex ---- */
-var g6 = Graphics()
+var g6 = Scene()
 var id6 = g6.display(tc, [1, 0, 0], scale=2)
 class Buf {
   init() { self.lines = [] }
@@ -126,8 +135,8 @@ for (line in buf2.lines) {
 }
 expect(hasT, "pose redraw includes translation")
 
-/* ---- takeMovedIds + emitEntryPose (selective, no D) ---- */
-var g7 = Graphics()
+/* ---- processMovedIds + emitEntryPose (selective, no D) ---- */
+var g7 = Scene()
 var id7a = g7.display(tc, [0, 0, 0], scale=1)
 var id7b = g7.display(tc, [1, 0, 0], scale=1)
 var show7 = Show()
@@ -137,10 +146,10 @@ g7.beginBatch()
 g7.move(id7a, [2, 0, 0])
 g7.move(id7b, [3, 0, 0], scale=2)
 g7.endBatch()
-var moved = g7.takeMovedIds()
+var moved = g7.processMovedIds()
 expect(moved.count() == 2, "batch pending has both movers")
 expect(moved[0] == id7a && moved[1] == id7b, "pending displaylist order")
-expect(g7.takeMovedIds().count() == 0, "take clears pending")
+expect(g7.processMovedIds().count() == 0, "process clears pending")
 
 var bufPose = Buf()
 expect(show7.emitEntryPose(g7, id7a, bufPose), "emitEntryPose a")
@@ -154,7 +163,7 @@ for (line in bufPose.lines) {
 expect(hasD && !hasClear, "selective pose emits d without D")
 
 /* ---- recolor ---- */
-var g8 = Graphics()
+var g8 = Scene()
 var id8 = g8.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], scale=0.5)
 expect(g8.recolor(id8, Blue), "recolor ok")
 expect(g8.findEntry(id8).color == Blue, "entry color updated")
@@ -168,8 +177,8 @@ g8.recolor(id8, Yellow)
 expect(cap8.events.count() == 0, "recolor inside batch silent")
 g8.endBatch()
 expect(cap8.events.count() == 1 && cap8.events[0] == GraphicsEventRecolored, "one coalesced Recolored")
-var recolored = g8.takeRecolorIds()
-expect(recolored.count() == 1 && recolored[0] == id8, "takeRecolorIds")
+var recolored = g8.processRecolorIds()
+expect(recolored.count() == 1 && recolored[0] == id8, "processRecolorIds")
 
 var show8 = Show()
 var buf8 = Buf()

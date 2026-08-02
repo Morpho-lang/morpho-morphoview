@@ -8,7 +8,7 @@
  * - PointCloud / LineSet primitives
  * - display() creates GraphicsEntry, enabling pose information to be decoupled from the item
  * - Show can now clear display list
- * - Graphics.move via Broadcaster.notify; View is Listener
+ * - Scene is Graphics with Broadcaster (move / recolor); View is Listener
  */
 
 import constants
@@ -694,7 +694,8 @@ class GraphicsEntry {
   }
 }
 
-/** Events from Graphics (Broadcaster). Typed subclasses enable multiple dispatch. */
+/** Events from Scene (Broadcaster). Typed subclasses enable multiple dispatch.
+ *  Named GraphicsEvent* for continuity with the Graphics entry model. */
 class GraphicsEvent {
   init(id) {
     self.id = id
@@ -713,17 +714,16 @@ class GraphicsEventRecolored is GraphicsEvent {
   batchKey() { return GraphicsEventRecolored }
 }
 
-class Graphics with Broadcaster {
+/** Static displaylist container. Accepted by Show / View.open / View.update.
+ *  For live mutation (move / recolor / batch) use Scene. */
+class Graphics {
   init(title = nil, background = nil) {
-    self._broadcasterInit()
     self.displaylist = [] // GraphicsEntry list
     self._nextid = 1
     self.title = title
     if (!self.title) self.title="Morpho" // Title to show
     self.background = background
     if (!self.background) self.background = Black
-    // kind → { graphicsId → true }; drained by takeDirtyIds
-    self._dirty = Dictionary()
   }
 
   /** Look up an entry by Graphics-owned id; nil if missing. */
@@ -734,44 +734,12 @@ class Graphics with Broadcaster {
     return nil
   }
 
-  /** Drain pending ids for `kind` ("moved" / "recolored") in displaylist order. */
-  takeDirtyIds(kind) {
-    var ids = []
-    if (!self._dirty.contains(kind)) return ids
-    var pending = self._dirty[kind]
-    for (e in self.displaylist) {
-      if (pending.contains(e.id)) ids.append(e.id)
-    }
-    self._dirty[kind] = Dictionary()
-    return ids
-  }
-
-  _markDirty(kind, id, event) {
-    var pending = Dictionary()
-    if (self._dirty.contains(kind)) pending = self._dirty[kind]
-    pending[id] = true
-    self._dirty[kind] = pending
-    self.notify(event)
-  }
-
-  takeMovedIds() { return self.takeDirtyIds("moved") }
-  takeRecolorIds() { return self.takeDirtyIds("recolored") }
-
-  _markMoved(id) {
-    self._markDirty("moved", id, GraphicsEventMoved(id))
-  }
-
-  _markRecolor(id) {
-    self._markDirty("recolored", id, GraphicsEventRecolored(id))
-  }
-
-  /** Allocate id and append a GraphicsEntry; returns the id. */
-  _append(item, position=nil, scale=nil, rotate=nil, color=nil, notify=true) {
+  /** Allocate id and append a GraphicsEntry; returns the id. No events. */
+  _append(item, position=nil, scale=nil, rotate=nil, color=nil) {
     var id = self._nextid
     self._nextid += 1
     self.displaylist.append(GraphicsEntry(id, item, position=position, scale=scale,
                                           rotate=rotate, color=color))
-    if (notify) self.notify(GraphicsEventDefined(id))
     return id
   }
 
@@ -801,6 +769,76 @@ class Graphics with Broadcaster {
     var unit = Sphere([0, 0, 0], 1, color=item.color, maxrefine=item.maxrefine,
                       filter=item.filter, transmit=item.transmit)
     return self._append(unit, position=position, scale=scl, rotate=rotate, color=item.color)
+  }
+
+  /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
+   *  Entry records are copied (item refs shared); no Defined notifications. */
+  add(right) {
+    var g = Graphics()
+    g.title = self.title
+    g.background = self.background
+    g._nextid = self._nextid
+    for (el in self.displaylist) {
+      var e = GraphicsEntry(el.id, el.item, position=el.position, scale=el.scale,
+                            rotate=el.rotate, color=el.color)
+      e.flat = el.flat
+      g.displaylist.append(e)
+    }
+    for (el in right.displaylist) {
+      g._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate,
+                color=el.color)
+    }
+    return g
+  }
+}
+
+/** Live Graphics: Broadcaster + move / recolor / batch. Scene is Graphics, so
+ *  Show and View accept Scene wherever Graphics is expected. */
+class Scene is Graphics with Broadcaster {
+  init(title = nil, background = nil) {
+    super.init(title=title, background=background)
+    self._broadcasterInit()
+    // kind → { graphicsId → true }; processed (cleared) by processPendingIds
+    // (named _pendingIds to avoid clashing with Broadcaster._pending)
+    self._pendingIds = Dictionary()
+  }
+
+  /** Allocate id, append entry, optionally notify Defined. */
+  _append(item, position=nil, scale=nil, rotate=nil, color=nil, notify=true) {
+    var id = super._append(item, position=position, scale=scale, rotate=rotate, color=color)
+    if (notify) self.notify(GraphicsEventDefined(id))
+    return id
+  }
+
+  /** Return pending ids for `kind` ("moved" / "recolored") in displaylist order and clear them. */
+  processPendingIds(kind) {
+    var ids = []
+    if (!self._pendingIds.contains(kind)) return ids
+    var pending = self._pendingIds[kind]
+    for (e in self.displaylist) {
+      if (pending.contains(e.id)) ids.append(e.id)
+    }
+    self._pendingIds[kind] = Dictionary()
+    return ids
+  }
+
+  _markPending(kind, id, event) {
+    var pending = Dictionary()
+    if (self._pendingIds.contains(kind)) pending = self._pendingIds[kind]
+    pending[id] = true
+    self._pendingIds[kind] = pending
+    self.notify(event)
+  }
+
+  processMovedIds() { return self.processPendingIds("moved") }
+  processRecolorIds() { return self.processPendingIds("recolored") }
+
+  _markMoved(id) {
+    self._markPending("moved", id, GraphicsEventMoved(id))
+  }
+
+  _markRecolor(id) {
+    self._markPending("recolored", id, GraphicsEventRecolored(id))
   }
 
   /** Update scale=/rotate= only; omitted kwargs leave that component unchanged. */
@@ -833,10 +871,9 @@ class Graphics with Broadcaster {
     return true
   }
 
-  /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
-   *  Entry records are copied (item refs shared); no Defined notifications. */
+  /** Union as Scene. Entry copies; no Defined notifications. */
   add(right) {
-    var g = Graphics()
+    var g = Scene()
     g.title = self.title
     g.background = self.background
     g._nextid = self._nextid

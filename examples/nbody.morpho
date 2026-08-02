@@ -1,5 +1,5 @@
 // N-body soft-sphere yardstick — shared unit Sphere mesh, many draw slots.
-// Soft repulsion + Brownian diffusion; translucent spheres; batched g.move/recolor.
+// Soft repulsion + Brownian diffusion; translucent spheres; batched Scene.move/recolor.
 //
 //   morpho6 examples/nbody.morpho
 //
@@ -45,7 +45,7 @@ var vel = Matrix(3, nBodies)
 var rad = []
 var ids = []
 
-var g = Graphics(title="N-body", background=Color(0.08, 0.09, 0.11))
+var g = Scene(title="N-body", background=Color(0.08, 0.09, 0.11))
 var protoLo = Sphere([0, 0, 0], 1, color=White, maxrefine=1, transmit=glass)
 var protoHi = Sphere([0, 0, 0], 1, color=White, maxrefine=2, transmit=glass)
 
