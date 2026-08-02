@@ -1,14 +1,14 @@
-/* Graphics
+/* Graphics / Scene / Show
  *
  * History:
  * 1/7/25 Redirect error output to /dev/null to suppress errors on macOS
  * 1/2/26 Windows compatibility
  * 7/31/26 Additional features to support new morphoview:
- * - View class to enable communication between the viewer and the application
  * - PointCloud / LineSet primitives
  * - display() creates GraphicsEntry, enabling pose information to be decoupled from the item
  * - Show can now clear display list
- * - Scene is Graphics with Broadcaster (move / recolor); View is Listener
+ * - Scene is Graphics with Broadcaster (move / recolor)
+ * Live View sessions live in morphoview.morpho (Listener over ZMQ).
  */
 
 import constants
@@ -1212,12 +1212,13 @@ class Show {
     self._launch(g)
   }
 
-  /** Fire-and-forget: temp file + morphoview -t. */
+  /** Fire-and-forget: temp file + morphoview -t (viewer unlinks the file on exit). */
   _launch(g) {
     var isWindows = System.platform()=="windows"
     var tempFolder = (isWindows ? "${System.homefolder()}\\AppData\\local\\Temp" : "/tmp")
     var fname = self._randomAlphanumString(10)
-    var out = File("${tempFolder}/morpho${fname}.draw", "w")
+    var path = "${tempFolder}/morpho${fname}.draw"
+    var out = File(path, "w")
     var bin = _morphoViewBin()
 
     self.write(g, out)
@@ -1225,10 +1226,10 @@ class Show {
     out.close()
 
     if (isWindows) {
-      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${tempFolder}/morpho${fname}.draw' -WindowStyle Hidden\"")
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}' -WindowStyle Hidden\"")
     } else {
       // 1/7/25 Redirect error output to /dev/null
-      system("\"${bin}\" -t ${tempFolder}/morpho${fname}.draw > /dev/null 2>&1 &")
+      system("\"${bin}\" -t ${path} > /dev/null 2>&1 &")
     }
   }
 

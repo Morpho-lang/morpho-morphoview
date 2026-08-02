@@ -19,6 +19,28 @@ import xgraphics
 import broadcast
 
 var _vwopnfl = Error("VwOpnFl", "View failed to open morphoview session.")
+var _vwemitfl = Error("VwEmitFl", "View failed to emit commands to morphoview.")
+
+/** Pairwise-merge join — O(n log n) copies vs O(n²) for repeated String +=. */
+fn _joinLines(lines) {
+  if (lines.count() == 0) return ""
+  var cur = lines
+  while (cur.count() > 1) {
+    var nxt = []
+    var i = 0
+    while (i < cur.count()) {
+      if (i + 1 < cur.count()) {
+        nxt.append(String(cur[i], cur[i + 1]))
+        i += 2
+      } else {
+        nxt.append(cur[i])
+        i += 1
+      }
+    }
+    cur = nxt
+  }
+  return cur[0]
+}
 
 class View with Listener {
   init(connecttimeout=5000, pollms=100) {
@@ -29,7 +51,7 @@ class View with Listener {
     self.poller = nil
     self.closed = true
     self.gotOk = false
-    self.cmdBuf = ""
+    self.cmdLines = []
     self.graphics = nil
     self.show = nil
   }
@@ -40,9 +62,21 @@ class View with Listener {
     if (!self.open(g)) _vwopnfl.throw()
   }
 
-  /** Show.write sink — appends a trailing newline per line. */
+  /** Show.write sink — buffers lines; joined once at send. */
   write(line) {
-    self.cmdBuf += "${line}\n"
+    self.cmdLines.append("${line}\n")
+  }
+
+  _takeCommands() {
+    var s = _joinLines(self.cmdLines)
+    self.cmdLines = []
+    return s
+  }
+
+  _sendWait(commands) {
+    self.gotOk = false
+    self._send(commands)
+    return self._waitOk()
   }
 
   /** Bind, spawn viewer, send first chunk, wait for ok. */
@@ -55,62 +89,44 @@ class View with Listener {
     self._spawn()
     self.poller = ZMQPoller(self.sock)
     self.closed = false
-    self.gotOk = false
-    self._send(commands)
-    return self._waitOk()
+    return self._sendWait(commands)
   }
 
-  open(Graphics g) { return self._openModel(g) }
+  open(Graphics g) { return self._applyModel(g) }
 
   open(Scene g) {
-    var ok = self._openModel(g)
+    var ok = self._applyModel(g)
     if (ok) self.listen(g)
     return ok
   }
 
-  /** Send another chunk and wait for ok. */
   update(commands) {
     if (self.closed) return false
-    self.gotOk = false
-    self._send(commands)
-    return self._waitOk()
+    return self._sendWait(commands)
   }
 
-  update(Graphics g) { return self._updateModel(g) }
+  update(Graphics g) { return self._applyModel(g, replace=true) }
 
   update(Scene g) {
-    var ok = self._updateModel(g)
+    var ok = self._applyModel(g, replace=true)
     if (ok) self.listen(g)
     return ok
   }
 
-  _openModel(Graphics g) {
-    if (!isnil(self.graphics)) self._detach(self.graphics)
-    self.show = Show()
-    self.cmdBuf = ""
-    self.show.write(g, self)
-    var ok = self.open(self.cmdBuf)
+  /** Serialize then open/update; commit model only after success. */
+  _applyModel(Graphics g, replace=false) {
+    if (replace && self.closed) return false
+    var show = Show()
+    if (replace) show.replace = true
+    self.cmdLines = []
+    show.write(g, self)
+    var ok = false
+    if (replace) ok = self.update(self._takeCommands())
+    else ok = self.open(self._takeCommands())
     if (ok) {
+      if (!isnil(self.graphics)) self._detach(self.graphics)
+      self.show = show
       self.graphics = g
-    } else {
-      self.show = nil
-    }
-    return ok
-  }
-
-  _updateModel(Graphics g) {
-    if (self.closed) return false
-    if (!isnil(self.graphics)) self._detach(self.graphics)
-    self.show = Show()
-    self.show.replace = true
-    self.cmdBuf = ""
-    self.show.write(g, self)
-    var ok = self.update(self.cmdBuf)
-    if (ok) {
-      self.graphics = g
-    } else {
-      self.graphics = nil
-      self.show = nil
     }
     return ok
   }
@@ -121,71 +137,66 @@ class View with Listener {
   /** Clear draws (D) and re-issue draw ASCII without U S. */
   redraw(commands) {
     if (self.closed) return false
-    self.gotOk = false
     var body = commands
     if (isnil(body)) body = ""
-    if (body.count() == 0 || body[0] != "D") {
-      body = "D\n${body}"
-    }
-    self._send(body)
-    return self._waitOk()
+    if (body.count() == 0 || body[0] != "D") body = "D\n${body}"
+    return self._sendWait(body)
+  }
+
+  _live() { return !self.closed && !isnil(self.show) }
+
+  _ids(ev) {
+    if (isnil(ev.ids) || ev.ids.count() == 0) return [ev.id]
+    return ev.ids
   }
 
   receive(Graphics g, GraphicsEventDefined ev) {
-    if (self.closed || isnil(self.show)) return
+    if (!self._live()) return
     var entry = g.findEntry(ev.id)
     if (isnil(entry)) return
     self._tryEmit("defined id ${ev.id}", fn () { self.show.writeEntry(entry, self) })
   }
 
   receive(Graphics g, GraphicsEventMoved ev) {
-    if (self.closed || isnil(self.show)) return
-    var ids = ev.ids
-    if (isnil(ids) || ids.count() == 0) ids = [ev.id]
+    if (!self._live()) return
     self._tryEmit("moved", fn () {
-      for (id in ids) self.show.emitEntryPose(g, id, self)
+      for (id in self._ids(ev)) self.show.emitEntryPose(g, id, self)
     })
   }
 
   receive(Graphics g, GraphicsEventRecolored ev) {
-    if (self.closed || isnil(self.show)) return
-    var ids = ev.ids
-    if (isnil(ids) || ids.count() == 0) ids = [ev.id]
+    if (!self._live()) return
     self._tryEmit("recolored", fn () {
-      for (id in ids) self.show.emitEntryRecolor(g, id, self)
+      for (id in self._ids(ev)) self.show.emitEntryRecolor(g, id, self)
     })
   }
 
   receive(Graphics g, GraphicsEventRemoved ev) {
-    if (self.closed || isnil(self.show)) return
+    if (!self._live()) return
     self._tryEmit("removed id ${ev.id}", fn () { self.show.emitEntryRemove(ev.id, self) })
   }
 
   receive(Graphics g, GraphicsEventReplaced ev) {
-    if (self.closed || isnil(self.show)) return
+    if (!self._live()) return
     self._tryEmit("replaced id ${ev.id}", fn () {
       if (!self.show.emitEntryReplace(g, ev.id, self)) return
     })
   }
 
-  /** Fill cmdBuf via @p emit; send if non-empty. Warn on transport failure (not on empty). */
+  /** Run @p emit into the buffer; send if non-empty. Warn on transport failure. */
   _tryEmit(label, emit) {
-    self.cmdBuf = ""
+    self.cmdLines = []
     emit()
-    if (self.cmdBuf.count() == 0) return
-    self.gotOk = false
-    self._send(self.cmdBuf)
-    if (!self._waitOk()) print "morphoview: failed to emit ${label}"
+    if (self.cmdLines.count() == 0) return
+    if (!self._sendWait(self._takeCommands())) _vwemitfl.warning("failed to emit ${label}")
   }
 
-  /** Fill cmdBuf via @p emit, send if non-empty, wait for ok. */
+  /** Run @p emit into the buffer; send if non-empty and wait for ok. */
   _emitAndWait(emit) {
-    self.cmdBuf = ""
+    self.cmdLines = []
     emit()
-    if (self.cmdBuf.count() == 0) return false
-    self.gotOk = false
-    self._send(self.cmdBuf)
-    return self._waitOk()
+    if (self.cmdLines.count() == 0) return false
+    return self._sendWait(self._takeCommands())
   }
 
   /** Swap item and push same-length vertices (U V). Use replace for new connectivity. */
@@ -208,8 +219,7 @@ class View with Listener {
     if (self.closed || isnil(self.poller)) return nil
     var t = self.pollms
     if (!isnil(timeoutms)) t = timeoutms
-    var ready = self.poller.wait(t)
-    if (!ready) return nil
+    if (!self.poller.wait(t)) return nil
     return self._handle(self.sock.receive())
   }
 
@@ -229,7 +239,7 @@ class View with Listener {
     }
   }
 
-  /** Stop the viewer; idempotent. Prefers Q, then pkill. Clears transport so reopen works. */
+  /** Stop the viewer; idempotent. Prefers Q, then process kill. */
   close() {
     if (!isnil(self.graphics)) self._detach(self.graphics)
     self.graphics = nil
@@ -254,9 +264,11 @@ class View with Listener {
   /** Drop ZMQ state so a later open() is not blocked by a stale sock. */
   _resetTransport() {
     self.closed = true
+    if (!isnil(self.sock)) self.sock.unbind()
     self.sock = nil
     self.ep = nil
     self.poller = nil
+    self.cmdLines = []
   }
 
   _bind() {
@@ -274,9 +286,7 @@ class View with Listener {
     }
   }
 
-  _send(commands) {
-    self.sock.send(commands)
-  }
+  _send(commands) { self.sock.send(commands) }
 
   _waitOk() {
     var waited = 0
@@ -307,7 +317,7 @@ class View with Listener {
       self.gotOk = true
     } else if (msg == "window.closed") {
       self.closed = true
-    } else if (msg.count() >= 3 && msg[0]=="e" && msg[1]=="r" && msg[2]=="r") {
+    } else if (msg.count() >= 3 && msg.substring(0, 3) == "err") {
       print "morphoview: ${msg}"
       self._kill()
       self.closed = true
@@ -315,9 +325,13 @@ class View with Listener {
     return msg
   }
 
+  /** Best-effort kill of the morphoview peer for this endpoint. */
   _kill() {
     if (isnil(self.ep)) return
-    if (System.platform()=="windows") return
-    system("pkill -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
+    if (System.platform()=="windows") {
+      system("powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'morphoview' -and $_.CommandLine -like '*-c*${self.ep}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"")
+    } else {
+      system("pkill -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
+    }
   }
 }

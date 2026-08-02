@@ -71,6 +71,12 @@ static void command_sticky_applyctx_reset(void) {
     g_applyctx_ready=false;
 }
 
+/** Clear sticky apply context if it still points at @p s (e.g. Escape teardown). */
+void command_invalidate_scene(scene *s) {
+    if (!g_applyctx_ready || !s) return;
+    if (g_applyctx.scene == s) command_sticky_applyctx_reset();
+}
+
 /* -------------------------------------------------------
  * Allocation / free
  * ------------------------------------------------------- */

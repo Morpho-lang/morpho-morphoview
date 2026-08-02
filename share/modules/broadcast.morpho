@@ -32,10 +32,7 @@ class Broadcaster {
   }
 
   subscribe(listener) {
-    for (l in self.listeners) {
-      if (l == listener) return
-    }
-    self.listeners.append(listener)
+    if (!self.listeners.contains(listener)) self.listeners.append(listener)
   }
 
   unsubscribe(listener) {
@@ -46,15 +43,21 @@ class Broadcaster {
     self._batchDepth += 1
   }
 
+  /** Flush pending when outermost batch ends. Nested notify during flush is
+   *  re-queued (depth held > 0) and drained before returning. */
   endBatch() {
     if (self._batchDepth <= 0) return
     self._batchDepth -= 1
     if (self._batchDepth > 0) return
-    var pending = self._pending
-    self._pending = []
-    self._pendingByKey = Dictionary()
-    for (event in pending) {
-      self._deliver(event)
+    while (self._pending.count() > 0) {
+      var pending = self._pending
+      self._pending = []
+      self._pendingByKey = Dictionary()
+      self._batchDepth += 1
+      for (event in pending) {
+        self._deliver(event)
+      }
+      self._batchDepth -= 1
     }
   }
 
@@ -84,8 +87,10 @@ class Broadcaster {
     }
   }
 
+  /** Snapshot listeners so receive may subscribe/unsubscribe safely. */
   _deliver(event) {
-    for (l in self.listeners) {
+    var ls = self.listeners.clone()
+    for (l in ls) {
       l.receive(self, event)
     }
   }

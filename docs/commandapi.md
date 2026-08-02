@@ -14,12 +14,12 @@ producer → command_parse / command_enqueue → queue
                               scene / display / GL
 ```
 
-1. **Parse** (`command_parse`) — lex an ASCII buffer and **enqueue** only. Does not open windows or mutate GL. On success, appends a trailing `MVCMD_PREPARE`. On failure, clears the queue.
+1. **Parse** (`command_parse`) — lex an ASCII buffer and **enqueue** only. Does not open windows or mutate GL. On success, appends a trailing `MVCMD_PREPARE`. On failure, discards only that chunk’s staged IR; previously enqueued batches stay.
 2. **Enqueue** (`command_enqueue`) — takes ownership of an `mv_command`. If the queue was empty, calls `command_wake()`.
 3. **Wake** (`command_wake`) — `glfwPostEmptyEvent()`, so a blocked `glfwWaitEvents` can run.
 4. **Process** (`command_process`) — apply every queued command in order on the **caller** thread, then free them. Returns the number applied. On apply failure, frees the remainder and stops.
 
-`main` processes once after loading a file (bootstrap, so windows exist), then `display_loop` processes again after each `glfwWaitEvents` (live updates). With `-b`/`-c`, an I/O thread also enqueues via ZMQ while the loop runs.
+`main` processes once after loading a file (bootstrap, so windows exist), then starts `-b`/`-c` listening (after file parse, so staging is not concurrent), then `display_loop` processes again after each `glfwWaitEvents` (live updates). With `-b`/`-c`, an I/O thread also enqueues via ZMQ while the loop runs.
 
 **Invariant:** only the main/GLFW thread calls `command_process` and touches GL. The command queue is mutex-protected so the I/O thread can `command_enqueue` safely; `command_wake` posts an empty GLFW event.
 
@@ -169,7 +169,7 @@ An I/O thread owns the socket. Each received string is an ASCII command chunk (`
 | `err …` | Parse failed |
 | `window.closed` | Last display window closed (also after `Q` with no windows) |
 
-Morpho helper: `import morphoview` then `View()` / `open` / `update` / `poll` / `wait` / `close` in [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho). `View.close()` sends `Q` and waits for `window.closed` (falls back to `pkill` only if the peer hangs).
+Morpho helper: `import morphoview` then `View()` / `open` / `update` / `poll` / `wait` / `close` in [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho). `View.close()` sends `Q` and waits for `window.closed` (falls back to process kill only if the peer hangs). `Show(g)` uses morphoview `-t`, which unlinks the temp `.draw` file when the viewer exits.
 
 `open` / `update` accept either an ASCII string or a `Graphics` object. Graphics is serialized by the package’s prototype `Show` (same visitor as graphics.morpho) into this command language; `View.write` is the File-compatible sink, so the serializer never knows about ZMQ. `Show(g)` remains fire-and-forget (temp file + `-t`). Live scene replace uses `U S <id>` (also what `update(Graphics)` emits).
 

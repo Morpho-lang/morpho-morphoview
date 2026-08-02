@@ -52,7 +52,7 @@ Not a full scene graph. Richer than an append-only displaylist:
 **Define** (geometry once): `o` / `v` / `p|l|f`  
 **Draw** (place with transform): `i` / `s` / `t` / `r` / `m` + `d`
 
-Re-issuing `d` today only **appends**. To refresh draws without wiping geometry:
+Re-issuing `d` for an existing OBJECT or TEXT draw-slot **updates in place** (matrix replace; optional no-matrix update preserves pose for recolor). To wipe and rebuild draws without clearing geometry:
 
 | Command | Effect | Status |
 |---------|--------|--------|

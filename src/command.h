@@ -358,4 +358,7 @@ bool command_parse(char *in);
 void command_initialize(void);
 void command_finalize(void);
 
+/** Clear sticky apply context if it still points at @p s (e.g. Escape teardown). */
+void command_invalidate_scene(scene *s);
+
 #endif /* command_h */

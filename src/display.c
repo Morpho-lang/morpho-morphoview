@@ -42,6 +42,7 @@ void display_add(display *d) {
 
 /** Frees data attached to a display */
 void display_free(display *d) {
+    command_invalidate_scene(d->s);
     scene_free(d->s);
     /* GL resources are cleared in display_loop before the window is destroyed */
     if (d->window) {
@@ -261,7 +262,10 @@ display *display_open(scene *s) {
      * Share with an existing window so multi-window GL objects behave reliably. */
     windowref *share = (opendisplays!=NULL) ? opendisplays->window : NULL;
     window = glfwCreateWindow(DISPLAY_DEFAULTWIDTH, DISPLAY_DEFAULTHEIGHT, DISPLAY_DEFAULTTITLE, NULL, share);
-    if (!window) return NULL;
+    if (!window) {
+        free(new);
+        return NULL;
+    }
 
     new->width=DISPLAY_DEFAULTWIDTH;
     new->aspectRatio=((float) DISPLAY_DEFAULTWIDTH)/((float) DISPLAY_DEFAULTHEIGHT);
