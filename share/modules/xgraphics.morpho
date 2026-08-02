@@ -786,16 +786,16 @@ class Graphics {
     return id
   }
 
-  /** Append a non-Sphere item (identity SRT). Returns Graphics-owned id.
-   *  Morpho: defaults are keyword-only, so pose uses the 2-arg overload below. */
+  /** Append a non-Sphere item (identity SRT). Returns Graphics-owned id, or false. */
   display(item, color=nil, flat=nil) {
-    if (!isobject(item)) return nil
+    if (!isobject(item)) return false
     return self._append(item, color=color, flat=flat)
   }
 
-  /** Non-Sphere with pose: 2nd positional position + scale=/rotate=/color=/flat=. */
+  /** Non-Sphere with pose: 2nd positional position + scale=/rotate=/color=/flat=.
+   *  Returns Graphics-owned id, or false. */
   display(item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    if (!isobject(item)) return nil
+    if (!isobject(item)) return false
     return self._append(item, position=position, scale=scale, rotate=rotate,
                         color=color, flat=flat)
   }
@@ -896,7 +896,7 @@ class Scene is Graphics with Broadcaster {
     return true
   }
 
-  /** Replace entry item; SRT unchanged. */
+  /** Replace entry item; SRT unchanged. Full redefine in the viewer (not same-length U V). */
   replace(id, item) {
     var e = self.findEntry(id)
     if (isnil(e) || !isobject(item)) return false
@@ -912,6 +912,15 @@ class Scene is Graphics with Broadcaster {
     e.item = _unitsphere(item)
     if (isnil(e.color)) e.color = item.color
     self.notify(GraphicsEventReplaced(id))
+    return true
+  }
+
+  /** Same-length mesh swap: set `entry.item` only (no event). Pair with `View.refreshMesh`
+   *  or use `View.morph`. Connectivity changes need `replace`. */
+  morph(id, item) {
+    var e = self.findEntry(id)
+    if (isnil(e) || !isobject(item)) return false
+    e.item = item
     return true
   }
 

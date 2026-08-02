@@ -15,7 +15,7 @@
  *    v.update(g)                // Graphics/Scene replace via `U S` + rebind
  *    v.redraw(posecommands)     // `D` + redraw draws (no geometry wipe)
  *    // After View(scene): scene.move / recolor drive pose-only `d` / `C`
- *    // refreshMesh(id) — same-length U V for a TriangleComplex entry
+ *    // morph(id, item) / refreshMesh(id) — same-length U V (vs replace)
  *    v.poll(timeoutMs=0)
  *    v.wait(sessionTimeOut=1500)
  *    v.close()
@@ -219,9 +219,17 @@ class View with Listener {
     self._waitOk()
   }
 
+  /** Set entry item and push same-length vertices (`U V`). For connectivity
+   *  changes use Scene.replace (full redefine). Returns false on failure. */
+  morph(graphicsId, item) {
+    if (self.closed || isnil(self.graphics)) return false
+    if (!self.graphics.morph(graphicsId, item)) return false
+    return self.refreshMesh(graphicsId)
+  }
+
   /** Push same-length vertex data for a TriangleComplex entry (`U V`).
    *  Layout must match how the object was defined (`xn` / `xnc`).
-   *  Call after mutating `entry.item` in place (fixed connectivity). */
+   *  Call after `Scene.morph` or in-place mutation of `entry.item` (fixed connectivity). */
   refreshMesh(graphicsId) {
     if (self.closed || isnil(self.show) || isnil(self.graphics)) return false
     self.cmdBuf = ""

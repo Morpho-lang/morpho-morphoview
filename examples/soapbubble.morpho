@@ -1,6 +1,6 @@
 // Soap-bubble: start as an ellipsoid, relax to a sphere under
 // constant-volume area minimization (CG + penalty, one step per frame).
-// Live mesh updates via View.refreshMesh (U V).
+// Live mesh updates via View.morph (same-length U V).
 //
 //   morpho6 examples/soapbubble.morpho
 //
@@ -71,9 +71,8 @@ fn meshFaces(mesh, color, transmit=nil) {
   return TriangleComplex(nvert, norm, ncol, tri, transmit=transmit)
 }
 
-fn syncMesh(g, v, meshId, mesh) {
-  g.findEntry(meshId).item = meshFaces(mesh, film, transmit=transmit)
-  return v.refreshMesh(meshId)
+fn syncMesh(v, meshId, mesh) {
+  return v.morph(meshId, meshFaces(mesh, film, transmit=transmit))
 }
 
 /** Project every vertex onto the axis-aligned ellipsoid with semi-axes rx,ry,rz. */
@@ -136,7 +135,7 @@ if (!v.closed) {
   for (i in 1..Nsteps) {
     if (v.closed) break
     if (!gd.iterate()) break
-    if (!syncMesh(g, v, meshId, mesh)) break
+    if (!syncMesh(v, meshId, mesh)) break
     v.poll(timeoutMs=0)
     if (mod(i, muEvery) == 0) pad.setPenalty(pad.penalty()*muMul)
     System.sleep(frameSleep)

@@ -256,6 +256,25 @@ expect(g10.findEntry(id10).item == tc2, "item replaced")
 expect(g10.findEntry(id10).scale == 2, "SRT unchanged on replace")
 expect(cap10.events.count() == 1 && cap10.events[0] == GraphicsEventReplaced, "Replaced event")
 
+/* ---- morph (same-length item swap, no event) vs replace ---- */
+var gMorph = Scene()
+var capMorph = Capture()
+capMorph.listen(gMorph)
+var idM = gMorph.display(tc)
+expect(capMorph.events.count() == 1, "display Defined")
+var tcMorph = TriangleComplex(
+  Matrix([[0, 1.1, 0], [0, 0, 1.1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+expect(gMorph.morph(idM, tcMorph), "morph ok")
+expect(gMorph.findEntry(idM).item == tcMorph, "morph sets item")
+expect(capMorph.events.count() == 1, "morph does not notify")
+expect(!gMorph.morph(999, tcMorph), "morph missing id fails")
+expect(!gMorph.morph(idM, 1), "morph bad item fails")
+expect(gMorph.display(1) == false, "display non-object returns false")
+
 var show9 = Show()
 var buf9 = Buf()
 show9.write(g9, buf9)

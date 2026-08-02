@@ -221,16 +221,16 @@ Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEvent
 
 **Locked — must fix (bugs):**
 
-1. **Draw-slot id for world-baked visits** — `visit(TriangleComplex)` (and PointCloud/LineSet identity draws that synthesize `GraphicsEntry(0,…)`) must emit `d <graphicsEntryId> <viewerObjectId>` when `_currentEntry` is set, not `d <viewerObjectId>`. Same for any baked path that reaches `emitEntryDraw` under an entry. Mixed Sphere + Cylinder scenes must not collide slots.
-2. **`U V` / `refreshMesh` float layout** — emit vertex layout must match how the object was defined (`xn` vs `xnc`). Prefer matching both paths; if opaque `xnc` morph is deferred, `refreshMesh` / `emitEntryVertices` must return `false` (or throw) rather than report success while the viewer drops the batch.
+1. **Draw-slot id for world-baked visits** — ✅ `visit(TriangleComplex)` (and PointCloud/LineSet under an entry) emit `d <graphicsEntryId> <viewerObjectId>` when `_currentEntry` is set.
+2. **`U V` / `refreshMesh` float layout** — ✅ emit matches define (`xn` / `xnc`); unknown layout returns `false` (no silent drop).
 3. **Pending ids vs multiple listeners** — ✅ `GraphicsEventMoved` / `Recolored` carry `ids`; Broadcaster coalesce calls optional `event.coalesce(previous)` so the surviving event merges payloads. No side-channel bag; every listener reads `ev.ids`.
 4. **Moved fallback** — ✅ if no mapped ids, skip (do not `D` + empty redraw). Relies on (1) so unmapped baked ids are rare.
 
 **Locked — API polish (same pass if small; else follow immediately):**
 
 5. **`display` kwargs** — ✅ `color=` / `flat=` on `display` (and Sphere overloads); boing / nbody updated.
-6. **Named morph path** — public `Scene`/`View` name for same-length vertex push (e.g. keep `refreshMesh` but document; or `updateVertices(id)`) distinct from `replace` (full redefine). soapbubble should not need `findEntry.item =` as the only efficient path — either document that pairing or add `Scene.morph(id, item)` that sets item + notifies a dedicated event / calls through View.
-7. **Failure convention** — `display` returns `false` (or keep `nil` but document) consistently with mutators; optional: document that Cylinder/Arrow/Text `move`/`remove` remain limited until 5e/5f.
+6. **Named morph path** — ✅ `Scene.morph(id, item)` sets item; `View.morph` sets + `U V`. Distinct from `replace`. soapbubble uses `View.morph`.
+7. **Failure convention** — ✅ `display` returns `false` (not `nil`) on bad input; mutators stay `true`/`false`. Documented: Cylinder/Arrow/Text limits until 5e/5f.
 
 **Out of scope for 5dx:** unit Cylinder/Arrow (5e); Text slots (5f); binary transport; COLOR-draw coalescing in the viewer (note only — unbounded `C` appends on live recolor); formal dependents (5g).
 

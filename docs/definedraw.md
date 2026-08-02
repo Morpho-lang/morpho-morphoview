@@ -38,7 +38,10 @@ Not a full scene graph. Richer than an append-only displaylist:
 
 - Stable **ids** from `display` (returned Int on the entry). Not on mesh primitives — same value may be displayed twice under two ids.
 - Entry **SRT** owns presentation pose (`position` as Matrix 3-vector / `scale` / `rotate` as fields on the entry); `Show` places from the entry only. API accepts list or Matrix for position and coerces to Matrix. Keep SRT fields (not one 4×4). `Sphere`s store as **unit** item + pose on entry (Phase 5c). `move` (on Scene): position always sets absolute `entry.position`; omitted scale/rotate leave components unchanged.
-- Small **mutation API** on Scene: `move`, `recolor`, `remove`, `replace`; `beginBatch`/`endBatch` on Broadcaster
+- Small **mutation API** on Scene: `move`, `recolor`, `remove`, `replace`, `morph`; `beginBatch`/`endBatch` on Broadcaster
+- **`morph` vs `replace`:** `Scene.morph` / `View.morph` / `View.refreshMesh` — same-length vertex push (`U V`). `replace` — full redefine (new connectivity / type). Prefer `View.morph(id, item)` when a listener is attached.
+- **Return values:** `display` returns a Graphics id (`Int`) or `false`; mutators (`move` / `recolor` / `remove` / `replace` / `morph`) return `true`/`false`. Lookups (`findEntry`) still use `nil` when missing.
+- **Until Phase 5e / 5f:** `Cylinder` / `Arrow` bake world-space meshes (pose via entry still works after 5dx.1 draw-slot fix); `Text` is not draw-slot driven — `move` / `remove` do not update text like mesh slots.
 - **Listeners** (`broadcast` module) + typed events (`GraphicsEventDefined` / `Moved` / `Recolored` / `Removed` / `Replaced`)
 - `open(g)` uses one `Show.write` then listens if `g` is a Scene; `update(g)` full replace + rebind
 
