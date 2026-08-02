@@ -22,6 +22,8 @@ class Capture with Listener {
   _kind(GraphicsEventDefined ev) { return GraphicsEventDefined }
   _kind(GraphicsEventMoved ev) { return GraphicsEventMoved }
   _kind(GraphicsEventRecolored ev) { return GraphicsEventRecolored }
+  _kind(GraphicsEventRemoved ev) { return GraphicsEventRemoved }
+  _kind(GraphicsEventReplaced ev) { return GraphicsEventReplaced }
 }
 
 /* ---- Scene is Graphics; static Graphics has no move ---- */
@@ -192,5 +194,88 @@ for (line in bufRecolor.lines) {
   if (line == "d ${id8}") hasPoseD = true
 }
 expect(hasC && hasPoseD, "recolor emits C and d <id>")
+
+/* ---- remove / replace (Phase 5d) ---- */
+var g9 = Scene()
+var id9a = g9.display(tc, [0, 0, 0])
+var id9b = g9.display(tc, [1, 0, 0])
+var cap9 = Capture()
+cap9.listen(g9)
+expect(g9.remove(id9a), "remove ok")
+expect(isnil(g9.findEntry(id9a)), "entry gone")
+expect(!isnil(g9.findEntry(id9b)), "other entry kept")
+expect(cap9.events.count() == 1 && cap9.events[0] == GraphicsEventRemoved, "Removed event")
+expect(!g9.remove(id9a), "remove missing fails")
+
+var g10 = Scene()
+var id10 = g10.display(tc, [0, 0, 0], scale=2)
+var cap10 = Capture()
+cap10.listen(g10)
+var tc2 = TriangleComplex(
+  Matrix([[0, 2, 0], [0, 0, 2], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[0, 0, 0], [1, 1, 1], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+expect(g10.replace(id10, tc2), "replace ok")
+expect(g10.findEntry(id10).item == tc2, "item replaced")
+expect(g10.findEntry(id10).scale == 2, "SRT unchanged on replace")
+expect(cap10.events.count() == 1 && cap10.events[0] == GraphicsEventReplaced, "Replaced event")
+
+var show9 = Show()
+var buf9 = Buf()
+show9.write(g9, buf9)
+expect(show9.objectMap.contains(id9b), "remaining mapped")
+var bufRm = Buf()
+expect(show9.emitEntryRemove(id9b, bufRm), "emitEntryRemove")
+var hasXD = false
+var hasXO = false
+for (line in bufRm.lines) {
+  if (line == "X D ${id9b}") hasXD = true
+  if (line.count() >= 3 && line[0] == "X" && line[2] == "O") hasXO = true
+}
+expect(hasXD && hasXO, "remove emits X D and X O for last user")
+expect(!show9.objectMap.contains(id9b), "map cleared after remove emit")
+
+var show10 = Show()
+var buf10w = Buf()
+show10.write(g10, buf10w)
+expect(show10.objectMap.contains(id10), "mapped before replace emit")
+var bufRep = Buf()
+expect(show10.emitEntryReplace(g10, id10, bufRep), "emitEntryReplace")
+var hasXD = false
+var hasDefine = false
+for (line in bufRep.lines) {
+  if (line == "X D ${id10}") hasXD = true
+  if (line.count() >= 1 && line[0] == "o") hasDefine = true
+}
+expect(hasXD && hasDefine, "replace drops slot then redefines")
+expect(show10.objectMap.contains(id10), "replace remaps entry")
+
+/* ---- shared Sphere remove: X D only while other users remain ---- */
+var g11 = Scene()
+var sUnit = Sphere([0, 0, 0], 1, color=Red, maxrefine=1)
+var id11a = g11.display(sUnit, [0, 0, 0], scale=0.4)
+var id11b = g11.display(sUnit, [1, 0, 0], scale=0.4)
+var show11 = Show()
+var buf11 = Buf()
+show11.write(g11, buf11)
+expect(show11.objectMap[id11a] == show11.objectMap[id11b], "spheres share viewer o")
+var sharedVid = show11.objectMap[id11a]
+var bufRmA = Buf()
+show11.emitEntryRemove(id11a, bufRmA)
+var hasXOa = false
+for (line in bufRmA.lines) {
+  if (line == "X O ${sharedVid}") hasXOa = true
+}
+expect(!hasXOa, "shared sphere remove skips X O while sibling remains")
+expect(show11.objectMap.contains(id11b), "sibling still mapped")
+var bufRmB = Buf()
+show11.emitEntryRemove(id11b, bufRmB)
+var hasXOb = false
+for (line in bufRmB.lines) {
+  if (line == "X O ${sharedVid}") hasXOb = true
+}
+expect(hasXOb, "last shared sphere user emits X O")
 
 print "ok"

@@ -154,7 +154,8 @@ class View with Listener {
     return self._waitOk()
   }
 
-  // GraphicsEventDefined → define+draw; Moved → pose `d`; Recolored → `C` + `d`.
+  // GraphicsEventDefined → define+draw; Moved → pose `d`; Recolored → `C` + `d`;
+  // Removed → X D (+ X O if last user); Replaced → sphere-cache refresh or remove+rewrite.
   receive(Graphics g, GraphicsEventDefined ev) {
     if (self.closed || isnil(self.show)) return
     var entry = g.findEntry(ev.id)
@@ -196,6 +197,26 @@ class View with Listener {
     for (id in ids) {
       if (self.show.emitEntryRecolor(g, id, self)) any = true
     }
+    if (self.cmdBuf.count() == 0) return
+    self.gotOk = false
+    self._send(self.cmdBuf)
+    self._waitOk()
+  }
+
+  receive(Graphics g, GraphicsEventRemoved ev) {
+    if (self.closed || isnil(self.show)) return
+    self.cmdBuf = ""
+    self.show.emitEntryRemove(ev.id, self)
+    if (self.cmdBuf.count() == 0) return
+    self.gotOk = false
+    self._send(self.cmdBuf)
+    self._waitOk()
+  }
+
+  receive(Graphics g, GraphicsEventReplaced ev) {
+    if (self.closed || isnil(self.show)) return
+    self.cmdBuf = ""
+    if (!self.show.emitEntryReplace(g, ev.id, self)) return
     if (self.cmdBuf.count() == 0) return
     self.gotOk = false
     self._send(self.cmdBuf)

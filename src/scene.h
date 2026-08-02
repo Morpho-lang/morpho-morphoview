@@ -170,6 +170,14 @@ void scene_clearlight(scene *s);
 void scene_setbackground(scene *s, float r, float g, float b);
 
 gobject *scene_addobject(scene *s, int id);
+/** Clear one object's geometry (format/elements/vertexdata); keep id and draws. */
+bool scene_clearobject(scene *s, int id);
+/** Remove object and all OBJECT draws with matching object id. */
+bool scene_deleteobject(scene *s, int id);
+/** Remove one OBJECT draw-slot by drawid; leave the object. */
+bool scene_deletedraw(scene *s, int drawid);
+/** Overwrite vertex floats in place; requires n == vertexdata.length. */
+bool scene_replacevertices(scene *s, int id, const float *data, int n);
 int scene_adddata(scene *s, float *data, int count);
 int scene_addindex(scene *s, int *data, int count);
 /** Take ownership of *datap (malloc/realloc); nulls *datap. Adopts without

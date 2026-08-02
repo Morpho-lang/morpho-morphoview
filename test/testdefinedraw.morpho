@@ -1,4 +1,5 @@
-// Smoke: define once, D+redraw, pose-only `d`, then draw-slot instancing.
+// Smoke: define once, D+redraw, pose-only `d`, draw-slots, then Phase 5d
+// object/draw update-delete ops.
 // Expect: prints "ok" then exits.
 // Requires: morphoview on PATH, morpho-zeromq, display.
 //
@@ -18,6 +19,10 @@ var redraw = load("command/definedraw-redraw")
 var pose = load("command/definedraw-pose-update")
 var slots = load("command/definedraw-drawslots")
 var slotsPose = load("command/definedraw-drawslots-pose")
+var updObj = load("command/definedraw-update-object")
+var delObj = load("command/definedraw-delete-object")
+var delDraw = load("command/definedraw-delete-draw")
+var updVerts = load("command/definedraw-update-vertices")
 
 var v = View()
 if (!v.open(once)) {
@@ -38,6 +43,27 @@ if (!v.update(pose)) {
   System.exit()
 }
 
+// Phase 5d: same-length vertex morph (original object 2).
+if (!v.update(updVerts)) {
+  print "update vertices failed"
+  v.close()
+  System.exit()
+}
+
+// Phase 5d: redefine object 2 geometry via U O + v/f + draw.
+if (!v.update(updObj)) {
+  print "update object failed"
+  v.close()
+  System.exit()
+}
+
+// Phase 5d: delete object 3 (shadow) and its draws.
+if (!v.update(delObj)) {
+  print "delete object failed"
+  v.close()
+  System.exit()
+}
+
 v.close()
 
 // Two draw slots sharing one object; pose updates only slot 10.
@@ -48,6 +74,12 @@ if (!v2.open(slots)) {
 }
 if (!v2.update(slotsPose)) {
   print "drawslots pose failed"
+  v2.close()
+  System.exit()
+}
+// Phase 5d: delete one draw-slot; object and other slot remain.
+if (!v2.update(delDraw)) {
+  print "delete draw failed"
   v2.close()
   System.exit()
 }

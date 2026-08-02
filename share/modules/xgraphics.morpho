@@ -714,6 +714,18 @@ class GraphicsEventRecolored is GraphicsEvent {
   batchKey() { return GraphicsEventRecolored }
 }
 
+/** Entry removed from Scene (no coalesce — each id flushed). */
+class GraphicsEventRemoved is GraphicsEvent {}
+
+/** Entry item replaced (no coalesce — each id flushed). */
+class GraphicsEventReplaced is GraphicsEvent {}
+
+/** Unit Sphere for entry storage (pose lives on the GraphicsEntry). */
+fn _unitsphere(Sphere item) {
+  return Sphere([0, 0, 0], 1, color=item.color, maxrefine=item.maxrefine,
+                filter=item.filter, transmit=item.transmit)
+}
+
 /** Static displaylist container. Accepted by Show / View.open / View.update.
  *  For live mutation (move / recolor / batch) use Scene. */
 class Graphics {
@@ -758,17 +770,15 @@ class Graphics {
 
   /** Unit Sphere + entry SRT from authored center/r. */
   display(Sphere item) {
-    var unit = Sphere([0, 0, 0], 1, color=item.color, maxrefine=item.maxrefine,
-                      filter=item.filter, transmit=item.transmit)
-    return self._append(unit, position=item.center, scale=item.r, color=item.color)
+    return self._append(_unitsphere(item), position=item.center, scale=item.r,
+                        color=item.color)
   }
 
   /** Unit Sphere + pose args on the entry (sole pose authority). */
   display(Sphere item, position, scale=nil, rotate=nil) {
     var scl = isnil(scale) ? 1 : scale
-    var unit = Sphere([0, 0, 0], 1, color=item.color, maxrefine=item.maxrefine,
-                      filter=item.filter, transmit=item.transmit)
-    return self._append(unit, position=position, scale=scl, rotate=rotate, color=item.color)
+    return self._append(_unitsphere(item), position=position, scale=scl, rotate=rotate,
+                        color=item.color)
   }
 
   /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
@@ -792,7 +802,7 @@ class Graphics {
   }
 }
 
-/** Live Graphics: Broadcaster + move / recolor / batch. Scene is Graphics, so
+/** Live Graphics: Broadcaster + move / recolor / remove / replace / batch. Scene is Graphics, so
  *  Show and View accept Scene wherever Graphics is expected. */
 class Scene is Graphics with Broadcaster {
   init(title = nil, background = nil) {
@@ -868,6 +878,39 @@ class Scene is Graphics with Broadcaster {
     if (isnil(e)) return false
     e.color = color
     self._markRecolor(id)
+    return true
+  }
+
+  /** Remove an entry by Graphics-owned id; notifies Removed. */
+  remove(id) {
+    var next = []
+    var found = false
+    for (e in self.displaylist) {
+      if (e.id == id) found = true
+      else next.append(e)
+    }
+    if (!found) return false
+    self.displaylist = next
+    self.notify(GraphicsEventRemoved(id))
+    return true
+  }
+
+  /** Replace entry item; SRT unchanged. */
+  replace(id, item) {
+    var e = self.findEntry(id)
+    if (isnil(e) || !isobject(item)) return false
+    e.item = item
+    self.notify(GraphicsEventReplaced(id))
+    return true
+  }
+
+  /** Replace with unit Sphere (like display); keep entry SRT. */
+  replace(id, Sphere item) {
+    var e = self.findEntry(id)
+    if (isnil(e)) return false
+    e.item = _unitsphere(item)
+    if (isnil(e.color)) e.color = item.color
+    self.notify(GraphicsEventReplaced(id))
     return true
   }
 
@@ -1132,6 +1175,78 @@ class Show {
     self.entryColorId[graphicsId] = cid
     out.write("C ${cid}")
     out.write("d ${graphicsId}")
+    return true
+  }
+
+  /** How many Graphics entries map to this viewer object id. */
+  objectUserCount(viewerId) {
+    var n = 0
+    for (gid in self.objectMap) {
+      if (self.objectMap[gid] == viewerId) n += 1
+    }
+    return n
+  }
+
+  /** Drop Show maps for one Graphics entry id. */
+  forgetEntry(graphicsId) {
+    if (self.objectMap.contains(graphicsId)) self.objectMap.remove(graphicsId)
+    if (self.entryColorId.contains(graphicsId)) self.entryColorId.remove(graphicsId)
+    if (self.flatIds.contains(graphicsId)) self.flatIds.remove(graphicsId)
+  }
+
+  /** Drop meshCache keys that point at @p viewerId. */
+  _forgetMeshCacheFor(viewerId) {
+    var drop = []
+    for (key in self.meshCache) {
+      if (self.meshCache[key] == viewerId) drop.append(key)
+    }
+    for (key in drop) self.meshCache.remove(key)
+  }
+
+  /** Emit `X D` (+ `X O` if last user of the viewer object). */
+  emitEntryRemove(graphicsId, out) {
+    if (!self.objectMap.contains(graphicsId)) {
+      out.write("X D ${graphicsId}")
+      return true
+    }
+    var vid = self.objectMap[graphicsId]
+    out.write("X D ${graphicsId}")
+    self.forgetEntry(graphicsId)
+    if (self.objectUserCount(vid) == 0) {
+      out.write("X O ${vid}")
+      self._forgetMeshCacheFor(vid)
+    }
+    return true
+  }
+
+  /** Redefine a replaced entry: reuse shared Sphere `o` when possible; else remove + writeEntry. */
+  emitEntryReplace(graphic, graphicsId, out) {
+    var entry = graphic.findEntry(graphicsId)
+    if (isnil(entry)) return false
+    return self._emitReplace(entry, entry.item, out)
+  }
+
+  /** Shared Sphere: keep cached `o` when refine key matches; else drop + rewrite. */
+  _emitReplace(entry, Sphere item, out) {
+    var graphicsId = entry.id
+    var key = "sphere:${item.refinementlevel(entry.scale)}"
+    var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
+    if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
+      var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
+      self.entryColorId[graphicsId] = cid
+      out.write("C ${cid}")
+      self.emitEntryDraw(entry, out, viewerId=oldVid)
+      return true
+    }
+    self.emitEntryRemove(graphicsId, out)
+    self.writeEntry(entry, out)
+    return true
+  }
+
+  /** Unique mesh: drop old draw/object, then define+draw fresh. */
+  _emitReplace(entry, item, out) {
+    self.emitEntryRemove(entry.id, out)
+    self.writeEntry(entry, out)
     return true
   }
 

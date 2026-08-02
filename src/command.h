@@ -39,10 +39,13 @@
 #define COMMAND_EXPECTSTRING_MSG          "Expected a string."
 
 #define COMMAND_INVLDUPDATE                 "InvldUpd"
-#define COMMAND_INVLDUPDATE_MSG             "Unrecognized update target (expected S)."
+#define COMMAND_INVLDUPDATE_MSG             "Unrecognized update target (expected S, O, or V)."
 
 #define COMMAND_INVLDDELETE               "InvldDel"
-#define COMMAND_INVLDDELETE_MSG           "Unrecognized delete target (expected S)."
+#define COMMAND_INVLDDELETE_MSG           "Unrecognized delete target (expected S, O, or D)."
+
+#define COMMAND_INVLDVERTICES             "InvldVerts"
+#define COMMAND_INVLDVERTICES_MSG         "Vertex replace requires same length as existing object data."
 
 #define COMMAND_INVLDMATERIAL             "InvldMat"
 #define COMMAND_INVLDMATERIAL_MSG         "Unrecognized material (expected shaded or flat)."
@@ -60,7 +63,11 @@
 typedef enum {
     MVCMD_SCENE_CREATE,   /**< Create scene + open window (`S`) */
     MVCMD_UPDATE_SCENE,   /**< Clear + select existing scene (`U S`) */
+    MVCMD_UPDATE_OBJECT,  /**< Clear one object for redefine (`U O`) */
+    MVCMD_UPDATE_VERTICES,/**< Same-length vertex replace (`U V`) */
     MVCMD_CLOSE_SCENE,    /**< Close scene window (`X S`) */
+    MVCMD_DELETE_OBJECT,  /**< Delete object + its draws (`X O`) */
+    MVCMD_DELETE_DRAW,    /**< Delete one draw-slot (`X D`) */
     MVCMD_QUIT,           /**< Quit viewer (`Q`) */
     MVCMD_WINDOW_TITLE,   /**< Set window title (`W`) */
     MVCMD_BOUNDS,         /**< Set scene AABB (`B`) */
@@ -102,6 +109,28 @@ typedef struct {
     int id;
 } mv_cmd_update_scene;
 
+/** Clear one object's geometry for redefine; select it as current.
+ *  Language: `U O <id>`
+ *  @param id  Object identifier */
+typedef struct {
+    mv_command cmd;
+    int id;
+} mv_cmd_update_object;
+
+/** Same-length vertex replace for an object.
+ *  Language: `U V <id> ["format"] <floats...>`
+ *  @param id      Object identifier
+ *  @param format  Optional format string (transferred on apply; may be NULL)
+ *  @param data    Owned float blob (freed after apply)
+ *  @param length  Number of floats (must match existing vertexdata.length) */
+typedef struct {
+    mv_command cmd;
+    int id;
+    char *format;
+    float *data;
+    int length;
+} mv_cmd_update_vertices;
+
 /** Close the window for an existing scene.
  *  Language: `X S <id>`
  *  @param id  Scene identifier (must already exist) */
@@ -109,6 +138,22 @@ typedef struct {
     mv_command cmd;
     int id;
 } mv_cmd_close_scene;
+
+/** Delete one object and all OBJECT draws that reference it.
+ *  Language: `X O <id>`
+ *  @param id  Object identifier */
+typedef struct {
+    mv_command cmd;
+    int id;
+} mv_cmd_delete_object;
+
+/** Delete one draw-slot by draw id; leave the object.
+ *  Language: `X D <drawId>`
+ *  @param id  Draw-slot identifier */
+typedef struct {
+    mv_command cmd;
+    int id;
+} mv_cmd_delete_draw;
 
 /** Set the current display window title.
  *  Language: `W "<title>"`
@@ -258,22 +303,26 @@ typedef struct {
     float matrix[16];
 } mv_cmd_text;
 
-#define MVCMD_AS_SCENE(c)         ((mv_cmd_scene *) (c))
-#define MVCMD_AS_UPDATE_SCENE(c)  ((mv_cmd_update_scene *) (c))
-#define MVCMD_AS_CLOSE_SCENE(c)   ((mv_cmd_close_scene *) (c))
-#define MVCMD_AS_WINDOW(c)        ((mv_cmd_window *) (c))
-#define MVCMD_AS_BOUNDS(c)        ((mv_cmd_bounds *) (c))
-#define MVCMD_AS_LIGHT(c)         ((mv_cmd_light *) (c))
-#define MVCMD_AS_BACKGROUND(c)    ((mv_cmd_background *) (c))
-#define MVCMD_AS_OBJECT(c)        ((mv_cmd_object *) (c))
-#define MVCMD_AS_VERTICES(c)      ((mv_cmd_vertices *) (c))
-#define MVCMD_AS_ELEMENT(c)       ((mv_cmd_element *) (c))
-#define MVCMD_AS_COLOR(c)         ((mv_cmd_color *) (c))
-#define MVCMD_AS_SELECT_COLOR(c)  ((mv_cmd_select_color *) (c))
-#define MVCMD_AS_MATERIAL(c)      ((mv_cmd_material *) (c))
-#define MVCMD_AS_DRAW(c)          ((mv_cmd_draw *) (c))
-#define MVCMD_AS_FONT(c)          ((mv_cmd_font *) (c))
-#define MVCMD_AS_TEXT(c)          ((mv_cmd_text *) (c))
+#define MVCMD_AS_SCENE(c)            ((mv_cmd_scene *) (c))
+#define MVCMD_AS_UPDATE_SCENE(c)     ((mv_cmd_update_scene *) (c))
+#define MVCMD_AS_UPDATE_OBJECT(c)    ((mv_cmd_update_object *) (c))
+#define MVCMD_AS_UPDATE_VERTICES(c)  ((mv_cmd_update_vertices *) (c))
+#define MVCMD_AS_CLOSE_SCENE(c)      ((mv_cmd_close_scene *) (c))
+#define MVCMD_AS_DELETE_OBJECT(c)    ((mv_cmd_delete_object *) (c))
+#define MVCMD_AS_DELETE_DRAW(c)      ((mv_cmd_delete_draw *) (c))
+#define MVCMD_AS_WINDOW(c)           ((mv_cmd_window *) (c))
+#define MVCMD_AS_BOUNDS(c)           ((mv_cmd_bounds *) (c))
+#define MVCMD_AS_LIGHT(c)            ((mv_cmd_light *) (c))
+#define MVCMD_AS_BACKGROUND(c)       ((mv_cmd_background *) (c))
+#define MVCMD_AS_OBJECT(c)           ((mv_cmd_object *) (c))
+#define MVCMD_AS_VERTICES(c)         ((mv_cmd_vertices *) (c))
+#define MVCMD_AS_ELEMENT(c)          ((mv_cmd_element *) (c))
+#define MVCMD_AS_COLOR(c)            ((mv_cmd_color *) (c))
+#define MVCMD_AS_SELECT_COLOR(c)     ((mv_cmd_select_color *) (c))
+#define MVCMD_AS_MATERIAL(c)         ((mv_cmd_material *) (c))
+#define MVCMD_AS_DRAW(c)             ((mv_cmd_draw *) (c))
+#define MVCMD_AS_FONT(c)             ((mv_cmd_font *) (c))
+#define MVCMD_AS_TEXT(c)             ((mv_cmd_text *) (c))
 
 DECLARE_VARRAY(mv_commandptr, mv_command *);
 

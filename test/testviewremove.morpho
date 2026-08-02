@@ -1,0 +1,45 @@
+// Live Scene: open → replace / remove without U S.
+// Expect: prints "ok" then exits.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+//
+//   cd test && morpho6 testviewremove.morpho
+
+import morphoview
+import xgraphics
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn tri(s) {
+  return TriangleComplex(
+    Matrix([[-0.5*s, 0.5*s, 0], [-0.5*s, -0.5*s, 0.5*s], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Matrix([[1, 1, 1], [0.4, 0.4, 0.4], [0.1, 0.1, 0.1]]),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+var g = Scene()
+g.title = "remove/replace"
+var idKeep = g.display(tri(1), [-0.8, 0, 0], scale=1)
+var idGone = g.display(tri(1), [0.8, 0, 0], scale=1)
+
+var v = View(g)
+System.sleep(0.1)
+v.poll(timeoutMs=0)
+
+expect(g.replace(idKeep, tri(1.4)), "replace")
+System.sleep(0.05)
+v.poll(timeoutMs=0)
+
+expect(g.remove(idGone), "remove")
+System.sleep(0.05)
+v.poll(timeoutMs=0)
+
+expect(!v.closed, "session still open")
+if (!v.closed) v.close()
+print "ok"

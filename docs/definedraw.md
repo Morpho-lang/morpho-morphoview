@@ -11,7 +11,7 @@ A general Morpho “dependent object” framework is **out of scope** for now. S
 | **Graphics** | Static, id-bearing displaylist + `display` / `add`; accepted by `Show` / `View.open` |
 | **Scene is Graphics** | Live subclass: Broadcaster + `move` / `recolor` / batch; broadcasts to listeners |
 | **View** | Listener / presenter over ZMQ (one of possibly several) |
-| **Viewer** | Define/draw command protocol (`o`/`v`/`f`, `d`, `D`; later `U O` / `U V`) |
+| **Viewer** | Define/draw command protocol (`o`/`v`/`f`, `d`, `D`, `U O` / `U V`, `X O` / `X D`) |
 | **`Show(g)` / `update(Graphics)`** | Snapshot path (full serialize / `U S`) — fire-and-forget and occasional refresh |
 
 **Two equally valid uses:**
@@ -38,8 +38,8 @@ Not a full scene graph. Richer than an append-only displaylist:
 
 - Stable **ids** from `display` (returned Int on the entry). Not on mesh primitives — same value may be displayed twice under two ids.
 - Entry **SRT** owns presentation pose (`position` as Matrix 3-vector / `scale` / `rotate` as fields on the entry); `Show` places from the entry only. API accepts list or Matrix for position and coerces to Matrix. Keep SRT fields (not one 4×4). `Sphere`s store as **unit** item + pose on entry (Phase 5c). `move` (on Scene): position always sets absolute `entry.position`; omitted scale/rotate leave components unchanged.
-- Small **mutation API** on Scene: `move`, `recolor`; `beginBatch`/`endBatch` on Broadcaster; later replace/remove
-- **Listeners** (`broadcast` module) + typed events (`GraphicsEventDefined` / `Moved` / `Recolored`)
+- Small **mutation API** on Scene: `move`, `recolor`, `remove`, `replace`; `beginBatch`/`endBatch` on Broadcaster
+- **Listeners** (`broadcast` module) + typed events (`GraphicsEventDefined` / `Moved` / `Recolored` / `Removed` / `Replaced`)
 - `open(g)` uses one `Show.write` then listens if `g` is a Scene; `update(g)` full replace + rebind
 
 `Show` walks Graphics **entries** (Scene included). Phase 5c: `Sphere` → unit mesh via Show cache (key = refine bucket + material mode), draw with entry SRT; many entries may share one viewer `o`. Color/opacity via `C`, not baked vertices, so instances share geometry. `PointCloud` / `LineSet` use entry SRT. `Cylinder` / `Arrow` / `Text` stay world-baked until an orientation-in-transform cut.
@@ -56,7 +56,7 @@ Re-issuing `d` today only **appends**. To refresh draws without wiping geometry:
 | `D` | Clear displaylist only (objects / colors / fonts / pools kept) | Done |
 | then `C` / `M` / transforms / `d` | Rebuild draws | Existing |
 
-Sticky apply context lets follow-up chunks omit leading `S`. Per-object mesh edits later: `U O` / `U V` (Phase 5d).
+Sticky apply context lets follow-up chunks omit leading `S`. Per-object mesh edits: `U O` / `U V`; per-slot delete: `X D`; object delete: `X O` (Phase 5d).
 
 **Draw slots (Phase 5c):** each Graphics entry ↔ one displaylist slot (`d <drawId> [objectId]`; matrix + stamped uniform color). Pose/`recolor` update that slot; several slots may reference the same object id. No-matrix `d` preserves pose (recolor).
 
@@ -76,7 +76,7 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 2. **Viewer** — sticky context; `D`; prepare-safe redraw ✅
 3. **Graphics ↔ View** — `move`; listener registration; View translates events → commands ✅
 4. **Yardstick** — rewrite `examples/amigaball.morpho` via `g.move` (not full `U S`) ✅
-5. **Phase 5** — batching (5a), selective redraw (5b), Show emit (5c), `U O` / `U V` / `X O` (5d); dependents framework later (5e). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
+5. **Phase 5** — batching (5a), selective redraw (5b), Show emit (5c), `U O` / `U V` / `X O` / `X D` (5d) ✅; dependents framework later (5e). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
 ## Hand sequences / tests
 
 | File | Role | Runnable now? |
@@ -87,7 +87,10 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 | [`test/testdefinedraw.morpho`](../test/testdefinedraw.morpho) | `View.open` once + `View.redraw` | Yes |
 | [`test/testgraphicsmove.morpho`](../test/testgraphicsmove.morpho) | `move` / listeners / objectMap / recolor | Yes |
 | [`test/testviewmove.morpho`](../test/testviewmove.morpho) | Live `open` → `move` | Yes |
-| [`test/command/definedraw-drawslots`](../test/command/definedraw-drawslots) | Two draws of one `o` + pose one slot | Yes |
-| [`test/testspherecache.morpho`](../test/testspherecache.morpho) | Sphere mesh cache (one `o`, N `d`) | Yes |
+| [`test/command/definedraw-update-object`](../test/command/definedraw-update-object) | `U O` redefine + draw | Yes |
+| [`test/command/definedraw-update-vertices`](../test/command/definedraw-update-vertices) | Same-length `U V` | Yes |
+| [`test/command/definedraw-delete-object`](../test/command/definedraw-delete-object) | `X O` | Yes |
+| [`test/command/definedraw-delete-draw`](../test/command/definedraw-delete-draw) | `X D` one slot | Yes |
+| [`test/testviewremove.morpho`](../test/testviewremove.morpho) | Live `replace` / `remove` | Yes |
 
 Yardsticks: [`examples/amigaball.morpho`](../examples/amigaball.morpho) (TriangleComplex movers); [`examples/nbody.morpho`](../examples/nbody.morpho) (shared `Sphere`s + `move`/`recolor`).

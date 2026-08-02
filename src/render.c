@@ -458,6 +458,27 @@ renderobject *render_findrenderobjectwithid(varray_renderobject *list, int id) {
     return NULL;
 }
 
+/** Same-length vertex upload into an existing VBO (no full prepare). */
+bool render_updateobjectvertices(renderer *r, scene *s, int objectid) {
+    if (!r || !s) return false;
+    renderobject *robj = render_findrenderobjectwithid(&r->objects, objectid);
+    if (!robj || !robj->obj || robj->bufferindex < 0) return false;
+    if (robj->bufferindex >= (int) r->glbuffers.count) return false;
+    if (robj->obj->vertexdata.indx == SCENE_EMPTY || robj->obj->vertexdata.length <= 0)
+        return false;
+
+    renderglbuffers *b = &r->glbuffers.data[robj->bufferindex];
+    if (!b->buffer) return false;
+
+    glBindBuffer(GL_ARRAY_BUFFER, b->buffer);
+    glBufferSubData(GL_ARRAY_BUFFER,
+                    sizeof(GLfloat) * robj->voffset,
+                    sizeof(GLfloat) * (size_t) robj->obj->vertexdata.length,
+                    s->data.data + robj->obj->vertexdata.indx);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    return true;
+}
+
 /** Adds an id to an id list only if it is not present already */
 renderobject *render_addobject(varray_renderobject *list, gobject *obj) {
     renderobject *out = render_findrenderobject(list, obj);

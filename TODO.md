@@ -11,7 +11,7 @@ Work in this order. Later tracks depend on decisions from earlier ones.
 | # | Track | Status | Why now |
 |---|--------|--------|---------|
 | **1** | **Graphics prototype** (package `Show` / local Graphics model → upstream) | **Done** (package prototype) | Stable ids, entries, define vs draw, listener. Remaining: push settled pieces to morpho `graphics.morpho`. |
-| **2** | **Animation-friendly viewer + View API** | **Partial** | Through Phase 5c (draw-slots, Sphere cache, recolor, n-body). Remaining: [Phase 5d](docs/plan-graphics-view-listener.md) (`U O` / `U V` / `X O`). |
+| **2** | **Animation-friendly viewer + View API** | **Done** (Phase 5) | Through Phase 5d (`U O` / `U V` / `X O` / `X D`, remove/replace). Remaining Track 2: none; Track 3 next. |
 | **3** | **Binary / byte-buffer transport** | Later | Viewer can accept blobs sooner; real gain needs Morpho-side serialize + framing. Biggest on fat `v` / `U V` paths; redraw often avoids blobs entirely |
 
 Tried and deferred: making `View.update` async / drop-under-pressure. The old bottleneck was full `U S` reserialize; the live path is now `Scene.move` → listener → redraw (no per-frame `U S`).
@@ -38,9 +38,9 @@ Local prototype in [`xgraphics.morpho`](share/modules/xgraphics.morpho) (`Graphi
 - [x] `Scene is Graphics` — static Graphics container; live Scene subclass (Broadcaster + move/recolor)
 - [ ] Push settled pieces to morpho `graphics.morpho`
 
-### 2. Animation / composition infra — partial
+### 2. Animation / composition infra — done (Phase 5)
 
-Done (Phases 2–4):
+Done (Phases 2–5):
 
 1. [x] Persistent apply context across `command_process` batches (sticky scene)
 2. [x] `D` + display/move — re-issue draws for already-defined objects without resending `v`/`f` (v1: full `D` + all poses)
@@ -52,7 +52,7 @@ Remaining ([Phase 5](docs/plan-graphics-view-listener.md)):
 1. [x] **5a** — `beginBatch` / `endBatch` on Broadcaster (one Moved notify per frame)
 2. [x] **5b** — Selective pose redraw (in-place `d` matrix update; no full `D` every move)
 3. [x] **5c** — Draw-slot identity; unit Sphere + mesh cache + `C`/recolor; PointCloud/LineSet SRT; n-body yardstick
-4. **5d** — `U O <id>` / `X O <id>` / `U V <id>` + Graphics removed/replaced events
+4. [x] **5d** — `U O <id>` / `X O <id>` / `X D <drawId>` / `U V <id>` + Graphics remove/replace events
 
 ### 3. Binary transport (later)
 
@@ -70,7 +70,7 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 - [x] `update(Graphics)` — serialize with `U S` replace, then update (occasional refresh; see above)
 - [x] `redraw(commands)` — `D` + redraw draws (tests / escape hatch)
 - [x] `write(line)` — File-compatible sink for `Show.write(g, out)`
-- [x] Listener `receive` for `GraphicsEventDefined` / `GraphicsEventMoved`
+- [x] Listener `receive` for Defined / Moved / Recolored / Removed / Replaced
 - [x] `poll(timeoutMs)` — non-blocking / short wait; return event or `nil`
 - [x] `wait(sessionTimeOut=0)` — convenience loop until closed / timeout
 - [x] `close()` — idempotent cleanup
@@ -78,7 +78,9 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 - [x] `beginBatch` / `endBatch` via Broadcaster mixin (Phase 5a)
 - [x] Phase 5b — selective pose redraw (in-place `d`; `emitEntryPose`)
 - [x] Phase 5c — draw-slot identity; unit Sphere + cache + recolor; n-body example
-- [ ] Phase 5d — `U O` / `U V` / `X O`### Show / Graphics prototype (upstream candidate) — track 1 done
+- [x] Phase 5d — `U O` / `U V` / `X O` / `X D`; `Scene.remove` / `replace`
+
+### Show / Graphics prototype (upstream candidate) — track 1 done
 
 `Show` lives in [`xgraphics.morpho`](share/modules/xgraphics.morpho):
 
@@ -87,8 +89,9 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 - [x] `replace` / `sceneId` — preamble emits `U S` vs `S` for live updates
 - [x] `GraphicsEntry` + `display` / `move`; Show walks entries
 - [x] PointCloud / LineSet
-- [x] Broadcaster events (`GraphicsEventDefined` / `Moved`)
+- [x] Broadcaster events (`GraphicsEventDefined` / `Moved` / `Recolored` / `Removed` / `Replaced`)
 - [x] Phase 5c — draw-slots; unit Sphere + entry SRT; mesh cache; `recolor`; PointCloud/LineSet SRT; n-body
+- [x] Phase 5d — `remove` / `replace`; Show `emitEntryRemove` / `emitEntryReplace`
 - [ ] Push settled pieces to morpho `graphics.morpho`
 
 ## Framing / camera
@@ -104,8 +107,8 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 - [x] Phase 2c: transparent depth sort (object centroid, far→near)
 - [x] Graphics `transmit`/`filter` → View uniform alpha (POVRay-style; Color API later)
 - [x] Sticky apply context + `D` + display/move (Phases 2–3)
-- [ ] Object update/delete (`U O` / `X O`) — **Phase 5d**
-- [ ] `U V` vertex replace — **Phase 5d**
+- [x] Object update/delete (`U O` / `X O` / `X D`) — Phase 5d
+- [x] `U V` vertex replace — Phase 5d
 - [ ] Binary / byte-buffer vertex transport — **track 3**
 - [ ] Pick / view / click events
 
@@ -118,8 +121,8 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 | `U S <id>` | Done | Clear scene `id` in place (keep window); select as current; following `o`/`v`/`l`/`d` refill |
 | `D` | Done | Clear displaylist only; keep objects / colors / fonts / pools |
 | Draw-slot pose/color | Done (Phase 5c) | Per-instance matrix + albedo (many draws → one `o`) |
-| `U O <id>` | Phase 5d | Clear/redefine one object in the current scene |
-| `U V <objid>` | Phase 5d | Replace vertex blob only (morph targets / pointwise edits) |
+| `U O <id>` | Done (Phase 5d) | Clear/redefine one object in the current scene |
+| `U V <objid>` | Done (Phase 5d) | Replace vertex blob only (same length; `glBufferSubData` when prepared) |
 
 `S` stays find-or-create/select. Replace is always explicit via `U`, so re-selecting a scene cannot wipe it by accident. Full-scene `U S` remains the supported high-level path for occasional `update(Graphics)` snapshots.
 
@@ -158,7 +161,8 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 
 | Command | Status | Intent |
 |---------|--------|--------|
-| `X O <id>` | Phase 5d | Delete object from current scene |
+| `X O <id>` | Done (Phase 5d) | Delete object from current scene (+ its draws) |
+| `X D <drawId>` | Done (Phase 5d) | Delete one draw-slot; leave the object |
 | `X S <id>` | Done | Close scene / window |
 | `Q` | Done | Quit viewer cleanly (prefer over Morpho-side `pkill`) |
 
@@ -192,7 +196,7 @@ Small viewer-only polish can land anytime; strategic sequence is Graphics (done)
 **Strategic projects** (ordered):
 
 - [x] **Track 1** — Graphics prototype (stable ids; define vs draw; listener) — package done; upstream push still open
-- [ ] **Track 2 remainder** — Phase 5d: `U O` / `U V` / `X O`
+- [x] **Track 2** — Phase 5 animation ops including 5d (`U O` / `U V` / `X O` / `X D`)
 - [ ] **Track 3** — Binary / byte-buffer vertex transport (viewer IR already accepts blobs; Morpho needs serialize + ZMQ framing)
 
 ## Demos / tests
@@ -221,10 +225,12 @@ Small viewer-only polish can land anytime; strategic sequence is Graphics (done)
 - [x] Live `open` → `move`: [`test/testviewmove.morpho`](test/testviewmove.morpho)
 - [x] Live Scene yardstick (define-once + `g.move`): [`examples/amigaball.morpho`](examples/amigaball.morpho)
 - [x] Phase 5c n-body yardstick (many shared `Sphere`s + `g.move` / `recolor`): [`examples/nbody.morpho`](examples/nbody.morpho)
+- [x] Phase 5d command fixtures: update-object / update-vertices / delete-object / delete-draw (via [`test/testdefinedraw.morpho`](test/testdefinedraw.morpho))
+- [x] Phase 5d live remove/replace: [`test/testviewremove.morpho`](test/testviewremove.morpho)
 
 ## Notes
 
-- Sticky `command_applyctx` persists across `command_process` batches, so follow-up chunks (redraw / later `U O` / `U V`) may omit a leading `S` / `U S`.
+- Sticky `command_applyctx` persists across `command_process` batches, so follow-up chunks (redraw / `U O` / `U V` / `X O` / `X D`) may omit a leading `S` / `U S`.
 - Package `Show` prototypes the upstream split: fire-and-forget (`Show(g)` / `-t`) vs serialize-to-delegate (`Show().write(g, out)`). `View` is the live duplex path and a `write` sink.
 - ASCII float emission uses 3 significant figures (`Show.fmt` / `%0.3g`) to keep the string path smaller until binary vertex transport (track 3) exists.
-- Phase 5a/5b: `beginBatch`/`endBatch` coalesce Moved; View pose-only `d` replaces matrices in place (no full `D` every frame). Phase 5c: draw-slot identity for many draws → one `o`, plus per-slot recolor.
+- Phase 5a/5b: `beginBatch`/`endBatch` coalesce Moved; View pose-only `d` replaces matrices in place (no full `D` every frame). Phase 5c: draw-slot identity for many draws → one `o`, plus per-slot recolor. Phase 5d: `U O`/`U V`/`X O`/`X D` plus Scene `remove`/`replace`.

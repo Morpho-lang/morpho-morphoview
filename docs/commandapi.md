@@ -47,7 +47,11 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 |------|-------|---------|
 | `MVCMD_SCENE_CREATE` | `S <id> <dim>` | Scene id, dimension (2 or 3) |
 | `MVCMD_UPDATE_SCENE` | `U S <id>` | Clear existing scene in place; select as current |
+| `MVCMD_UPDATE_OBJECT` | `U O <id>` | Clear one object’s geometry for redefine |
+| `MVCMD_UPDATE_VERTICES` | `U V <id> ["format"] <floats…>` | Same-length vertex replace |
 | `MVCMD_CLOSE_SCENE` | `X S <id>` | Close scene window (same teardown as Escape) |
+| `MVCMD_DELETE_OBJECT` | `X O <id>` | Delete object + OBJECT draws referencing it |
+| `MVCMD_DELETE_DRAW` | `X D <drawId>` | Delete one draw-slot; leave the object |
 | `MVCMD_QUIT` | `Q` | Request close of all windows / quit viewer |
 | `MVCMD_WINDOW_TITLE` | `W "<title>"` | Owned title string |
 | `MVCMD_BOUNDS` | `B <xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; requests camera refit |
@@ -76,8 +80,8 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | Letter | Arguments | Notes |
 |--------|-----------|-------|
 | `S` | `<id> <dim>` | Create or select scene; open window if needed (does not clear) |
-| `U` | `S <id>` | Clear scene `id` in place and select it (window kept); see also `TODO.md` for `U O` / `U V` |
-| `X` | `S <id>` | Close scene `id` / its window; see also `TODO.md` for `X O` |
+| `U` | `S <id>` \| `O <id>` \| `V <id> …` | `U S` clear scene; `U O` clear object for redefine; `U V` same-length vertex replace |
+| `X` | `S <id>` \| `O <id>` \| `D <drawId>` | `X S` close scene; `X O` delete object (+ draws); `X D` delete one draw-slot |
 | `Q` | — | Quit viewer (close all windows); Morpho `View.close` sends this |
 | `W` | `"<title>"` | Set current window title |
 | `B` | `<xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; next prepare refits unless the user moved the camera |
@@ -174,5 +178,5 @@ Morpho helper: `import morphoview` then `View()` / `open` / `update` / `poll` / 
 Morpho `Graphics` is a displaylist container, not a scene graph. Serializer object ids are ephemeral per write.
 
 - **Occasional refresh** — `View.open(Graphics)` / `update(Graphics)` → full `U S` reserialize. This is the supported high-level path for “new snapshot” / update-on-demand. Do not expect it to be cheap when most of the scene is static.
-- **Efficient animation / composition** — see priority sequence in [`TODO.md`](../TODO.md): **Graphics prototype** (stable ids, define vs display, instancing) → **animation viewer ops** (sticky context, display/move, then `U O` / `U V` / `X O`) → **binary transport**. The command language already splits object definition (`o`/`v`/`f`) from display (`d` + transforms); display-move is likely the first high-leverage viewer piece once Graphics clarifies the Morpho API.
+- **Efficient animation / composition** — see priority sequence in [`TODO.md`](../TODO.md): **Graphics prototype** (stable ids, define vs display, instancing) → **animation viewer ops** (sticky context, display/move, `U O` / `U V` / `X O` / `X D`) → **binary transport**. The command language already splits object definition (`o`/`v`/`f`) from display (`d` + transforms).
 - **Stress demo** — `examples/amigaball.morpho` exercises full replace under animation load on purpose.

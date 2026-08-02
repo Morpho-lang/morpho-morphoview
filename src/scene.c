@@ -353,8 +353,14 @@ scene *scene_find(int id) {
  * Add
  * ------------------------------------------------------- */
 
-/** Adds an object to a scene */
+/* Forward decl — used by scene_addobject before the Find section. */
+gobject *scene_getgobjectfromid(scene *s, int id);
+
+/** Adds an object to a scene, or returns the existing object with this id. */
 gobject *scene_addobject(scene *s, int id) {
+    gobject *existing = scene_getgobjectfromid(s, id);
+    if (existing) return existing;
+
     gobject obj;
     obj.id=id;
     obj.vertexdata.format=NULL;
@@ -364,6 +370,85 @@ gobject *scene_addobject(scene *s, int id) {
 
     varray_gobjectadd(&s->objectlist, &obj, 1);
     return &s->objectlist.data[s->objectlist.count-1];
+}
+
+/** Clear one object's geometry; keep id and any draws that reference it. */
+bool scene_clearobject(scene *s, int id) {
+    gobject *obj = scene_getgobjectfromid(s, id);
+    if (!s || !obj) return false;
+    if (obj->vertexdata.format) {
+        free(obj->vertexdata.format);
+        obj->vertexdata.format = NULL;
+    }
+    varray_gelementclear(&obj->elements);
+    varray_gelementinit(&obj->elements);
+    obj->vertexdata.indx = SCENE_EMPTY;
+    obj->vertexdata.length = SCENE_EMPTY;
+    return true;
+}
+
+/** Remove OBJECT draws whose object id matches. */
+static void scene_purgedrawsforobject(scene *s, int objectid) {
+    unsigned int w = 0;
+    for (unsigned int i = 0; i < s->displaylist.count; i++) {
+        gdraw *drw = &s->displaylist.data[i];
+        if (drw->type == OBJECT && drw->id == objectid) continue;
+        if (w != i) s->displaylist.data[w] = *drw;
+        w++;
+    }
+    s->displaylist.count = w;
+}
+
+/** Remove object and all OBJECT draws that reference it. */
+bool scene_deleteobject(scene *s, int id) {
+    if (!s) return false;
+    unsigned int i;
+    for (i = 0; i < s->objectlist.count; i++) {
+        if (s->objectlist.data[i].id == id) break;
+    }
+    if (i >= s->objectlist.count) return false;
+
+    gobject *obj = &s->objectlist.data[i];
+    if (obj->vertexdata.format) {
+        free(obj->vertexdata.format);
+        obj->vertexdata.format = NULL;
+    }
+    varray_gelementclear(&obj->elements);
+
+    scene_purgedrawsforobject(s, id);
+
+    for (unsigned int j = i + 1; j < s->objectlist.count; j++) {
+        s->objectlist.data[j - 1] = s->objectlist.data[j];
+    }
+    s->objectlist.count--;
+    return true;
+}
+
+/** Remove one OBJECT draw-slot by drawid. */
+bool scene_deletedraw(scene *s, int drawid) {
+    if (!s) return false;
+    unsigned int i;
+    for (i = 0; i < s->displaylist.count; i++) {
+        gdraw *drw = &s->displaylist.data[i];
+        if (drw->type == OBJECT && drw->drawid == drawid) break;
+    }
+    if (i >= s->displaylist.count) return false;
+
+    for (unsigned int j = i + 1; j < s->displaylist.count; j++) {
+        s->displaylist.data[j - 1] = s->displaylist.data[j];
+    }
+    s->displaylist.count--;
+    return true;
+}
+
+/** Overwrite vertex floats in place; requires same length. */
+bool scene_replacevertices(scene *s, int id, const float *data, int n) {
+    gobject *obj = scene_getgobjectfromid(s, id);
+    if (!s || !obj || !data || n <= 0) return false;
+    if (obj->vertexdata.indx == SCENE_EMPTY || obj->vertexdata.length != n)
+        return false;
+    memcpy(&s->data.data[obj->vertexdata.indx], data, sizeof(float) * (size_t) n);
+    return true;
 }
 
 /** Add vertex data to a scene; returns the starting index of the data */

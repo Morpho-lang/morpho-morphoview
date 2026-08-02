@@ -114,7 +114,7 @@ g.move(shadow, [x,0.02,z], scale=shadowR)
 
 - **Id map:** View session owns `graphicsId → viewerObjectId` (on the live `Show` instance: `objectMap`, plus `entryColorId` / `flatIds`). `open(g)` builds it from one `Show.write` — no fake N `defined` events.
 - **Mid-session `display`:** notifies `GraphicsEventDefined`; View emits define+draw via `Show.writeEntry`.
-- **Events:** `GraphicsEventDefined`, `GraphicsEventMoved` (`removed` / `replaced` later).
+- **Events:** `GraphicsEventDefined`, `GraphicsEventMoved`, `GraphicsEventRecolored`, `GraphicsEventRemoved`, `GraphicsEventReplaced`.
 - **On `moved`:** pose-only `d` via `emitEntryPose` (Phase 5b); fall back to `D` + `emitPoseDraws` if unmapped.
 
 **Steps:**
@@ -193,19 +193,20 @@ g.endBatch()            # one coalesced Moved
 
 **Contract:** Graphics entry id = viewer draw-slot id (`d <drawId> [objectId]`); color stamped on slot from `C`; unit Sphere + Show mesh cache by refine level; `Graphics.recolor` + `GraphicsEventRecolored`; Cylinder/Arrow/Text still world-baked.
 
-#### Phase 5d — `U O` / `U V` / `X O`
+#### Phase 5d — `U O` / `U V` / `X O` / `X D` ✅
 
-Viewer command language + minimal Graphics/View wiring:
+Viewer command language + Graphics/View wiring:
 
 | Command | Intent |
 |---------|--------|
 | `U O <id>` | Clear/redefine one object in the current scene |
 | `X O <id>` | Delete one object (+ its draws) |
+| `X D <drawId>` | Delete one draw-slot; leave the object |
 | `U V <id>` | Same-length vertex replace + `glBufferSubData` where possible |
 
-Graphics: `removed` / `replaced` events (deferred from Phase 3). View maps events → commands. Full `update(Graphics)` / `U S` unchanged.
+Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEventReplaced`. View maps Removed → `X D` (+ `X O` if last user of the viewer object); Replaced → sphere-cache refresh when possible, else remove + re-`writeEntry`. Full `update(Graphics)` / `U S` unchanged. `U O` remains for low-level same-id refill.
 
-**Done when:** command fixtures exist; optional Morpho smoke for redefine/delete. Not required for pose animation.
+**Done when:** command fixtures exist; Morpho smoke for redefine/delete. Not required for pose animation.
 
 #### Phase 5e — Formal Morpho dependents (backlog only)
 

@@ -93,6 +93,10 @@ void command_free(mv_command *cmd) {
             free(MVCMD_AS_VERTICES(cmd)->format);
             free(MVCMD_AS_VERTICES(cmd)->data);
             break;
+        case MVCMD_UPDATE_VERTICES:
+            free(MVCMD_AS_UPDATE_VERTICES(cmd)->format);
+            free(MVCMD_AS_UPDATE_VERTICES(cmd)->data);
+            break;
         case MVCMD_ELEMENT:
             free(MVCMD_AS_ELEMENT(cmd)->indices);
             break;
@@ -210,6 +214,56 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             return true;
         }
 
+        case MVCMD_UPDATE_OBJECT: {
+            mv_cmd_update_object *c = MVCMD_AS_UPDATE_OBJECT(cmd);
+            if (!ctx->scene) {
+                fprintf(stderr, "morphoview: No current scene for U O.\n");
+                return false;
+            }
+            if (!scene_clearobject(ctx->scene, c->id)) {
+                fprintf(stderr, "morphoview: No object with id '%i'.\n", c->id);
+                return false;
+            }
+            ctx->cobject = scene_getgobjectfromid(ctx->scene, c->id);
+            scene_markchanged(ctx->scene);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
+            }
+            return true;
+        }
+
+        case MVCMD_UPDATE_VERTICES: {
+            mv_cmd_update_vertices *c = MVCMD_AS_UPDATE_VERTICES(cmd);
+            if (!ctx->scene) {
+                fprintf(stderr, "morphoview: No current scene for U V.\n");
+                return false;
+            }
+            gobject *obj = scene_getgobjectfromid(ctx->scene, c->id);
+            if (!obj) {
+                fprintf(stderr, "morphoview: No object with id '%i'.\n", c->id);
+                return false;
+            }
+            if (!scene_replacevertices(ctx->scene, c->id, c->data, c->length)) {
+                fprintf(stderr, "morphoview: U V length mismatch for object '%i'.\n", c->id);
+                return false;
+            }
+            if (c->format) {
+                if (obj->vertexdata.format) free(obj->vertexdata.format);
+                obj->vertexdata.format = c->format;
+                c->format = NULL;
+            }
+            /* Prefer in-place GL upload; fall back to full prepare if unprepared. */
+            bool uploaded = false;
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                uploaded = render_updateobjectvertices(&ctx->display->render,
+                                                       ctx->scene, c->id);
+            }
+            if (!uploaded) command_touchscene(ctx);
+            return true;
+        }
+
         case MVCMD_CLOSE_SCENE: {
             mv_cmd_close_scene *c = MVCMD_AS_CLOSE_SCENE(cmd);
             scene *s = scene_find(c->id);
@@ -225,6 +279,46 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 ctx->scene = NULL;
                 ctx->display = NULL;
                 ctx->cobject = NULL;
+            }
+            return true;
+        }
+
+        case MVCMD_DELETE_OBJECT: {
+            mv_cmd_delete_object *c = MVCMD_AS_DELETE_OBJECT(cmd);
+            if (!ctx->scene) {
+                fprintf(stderr, "morphoview: No current scene for X O.\n");
+                return false;
+            }
+            int curid = (ctx->cobject) ? ctx->cobject->id : SCENE_EMPTY;
+            if (!scene_deleteobject(ctx->scene, c->id)) {
+                fprintf(stderr, "morphoview: No object with id '%i'.\n", c->id);
+                return false;
+            }
+            /* objectlist may have shifted — re-resolve or clear. */
+            ctx->cobject = (curid != SCENE_EMPTY && curid != c->id)
+                ? scene_getgobjectfromid(ctx->scene, curid) : NULL;
+            scene_markchanged(ctx->scene);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
+            }
+            return true;
+        }
+
+        case MVCMD_DELETE_DRAW: {
+            mv_cmd_delete_draw *c = MVCMD_AS_DELETE_DRAW(cmd);
+            if (!ctx->scene) {
+                fprintf(stderr, "morphoview: No current scene for X D.\n");
+                return false;
+            }
+            if (!scene_deletedraw(ctx->scene, c->id)) {
+                fprintf(stderr, "morphoview: No draw with id '%i'.\n", c->id);
+                return false;
+            }
+            scene_markchanged(ctx->scene);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
             }
             return true;
         }
@@ -528,6 +622,7 @@ tokendefn mvtokens[] = {
     { "d",          MVTOKEN_DRAW                  , NULL },
     { "D",          MVTOKEN_CLEAR_DISPLAY         , NULL },
     { "o",          MVTOKEN_OBJECT                , NULL },
+    { "O",          MVTOKEN_OBJECT                , NULL },
     { "p",          MVTOKEN_POINTS                , NULL },
     { "l",          MVTOKEN_LINES                 , NULL },
     { "f",          MVTOKEN_FACETS                , NULL },
@@ -543,6 +638,7 @@ tokendefn mvtokens[] = {
     { "t",          MVTOKEN_TRANSLATE             , NULL },
     { "T",          MVTOKEN_TEXT                  , NULL },
     { "v",          MVTOKEN_VERTICES              , NULL },
+    { "V",          MVTOKEN_VERTICES              , NULL },
     { "W",          MVTOKEN_WINDOW                , NULL },
     { "B",          MVTOKEN_BOUNDS                , NULL },
     { "L",          MVTOKEN_LIGHT                 , NULL },
@@ -1159,50 +1255,131 @@ bool command_parsescene(parser *p, void *out) {
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
-/** `U S <id>` — clear and select an existing scene. */
+/** `U S|O|V ...` — update scene, object, or vertices. */
 bool command_parseupdate(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
     int id;
 
-    if (!parse_checktokenadvance(p, MVTOKEN_SCENE)) {
-        parse_error(p, true, COMMAND_INVLDUPDATE);
-        return false;
+    if (parse_checktokenadvance(p, MVTOKEN_SCENE)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        mv_cmd_update_scene *cmd = command_new(MVCMD_UPDATE_SCENE, sizeof(mv_cmd_update_scene));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        ctx->has_scene=true;
+        ctx->has_object=false;
+        return command_enqueue_owned(p, &cmd->cmd);
     }
 
-    PARSE_CHECK(command_parseinteger(p, &id));
+    if (parse_checktokenadvance(p, MVTOKEN_OBJECT)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
 
-    mv_cmd_update_scene *cmd = command_new(MVCMD_UPDATE_SCENE, sizeof(mv_cmd_update_scene));
-    if (!cmd) {
-        parse_error(p, true, ERROR_ALLOCATIONFAILED);
-        return false;
+        mv_cmd_update_object *cmd = command_new(MVCMD_UPDATE_OBJECT, sizeof(mv_cmd_update_object));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        /* Sticky scene at apply; allow following v/f in this chunk. */
+        ctx->has_scene=true;
+        ctx->has_object=true;
+        return command_enqueue_owned(p, &cmd->cmd);
     }
-    cmd->id=id;
-    ctx->has_scene=true;
-    ctx->has_object=false;
 
-    return command_enqueue_owned(p, &cmd->cmd);
+    if (parse_checktokenadvance(p, MVTOKEN_VERTICES)) {
+        char *format=NULL;
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        if (parse_checktoken(p, MVTOKEN_STRING)) {
+            PARSE_CHECK(command_parsestring(p, &format));
+        }
+
+        unsigned int n = command_countnumbersahead(p, false);
+        float *data = NULL;
+        unsigned int written = 0;
+
+        if (n>0) {
+            data = malloc(sizeof(float)*n);
+            if (!data) {
+                free(format);
+                parse_error(p, true, ERROR_ALLOCATIONFAILED);
+                return false;
+            }
+            if (!command_parsefloatsinto(p, data, n, &written)) {
+                free(format);
+                free(data);
+                return false;
+            }
+        }
+
+        mv_cmd_update_vertices *cmd = command_new(MVCMD_UPDATE_VERTICES, sizeof(mv_cmd_update_vertices));
+        if (!cmd) {
+            free(format);
+            free(data);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        cmd->format=format;
+        cmd->length=(int) written;
+        cmd->data=data;
+        ctx->has_scene=true;
+        return command_enqueue_owned(p, &cmd->cmd);
+    }
+
+    parse_error(p, true, COMMAND_INVLDUPDATE);
+    return false;
 }
 
-/** `X S <id>` — close the window for an existing scene. */
+/** `X S|O|D <id>` — close scene, delete object, or delete draw-slot. */
 bool command_parsedelete(parser *p, void *out) {
-    (void) out;
+    command_parsectx *ctx = (command_parsectx *) out;
     int id;
 
-    if (!parse_checktokenadvance(p, MVTOKEN_SCENE)) {
-        parse_error(p, true, COMMAND_INVLDDELETE);
-        return false;
+    if (parse_checktokenadvance(p, MVTOKEN_SCENE)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        mv_cmd_close_scene *cmd = command_new(MVCMD_CLOSE_SCENE, sizeof(mv_cmd_close_scene));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        return command_enqueue_owned(p, &cmd->cmd);
     }
 
-    PARSE_CHECK(command_parseinteger(p, &id));
+    if (parse_checktokenadvance(p, MVTOKEN_OBJECT)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
 
-    mv_cmd_close_scene *cmd = command_new(MVCMD_CLOSE_SCENE, sizeof(mv_cmd_close_scene));
-    if (!cmd) {
-        parse_error(p, true, ERROR_ALLOCATIONFAILED);
-        return false;
+        mv_cmd_delete_object *cmd = command_new(MVCMD_DELETE_OBJECT, sizeof(mv_cmd_delete_object));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        /* Sticky scene at apply; allow following o/v/f in this chunk (replace path). */
+        ctx->has_scene=true;
+        return command_enqueue_owned(p, &cmd->cmd);
     }
-    cmd->id=id;
 
-    return command_enqueue_owned(p, &cmd->cmd);
+    if (parse_checktokenadvance(p, MVTOKEN_CLEAR_DISPLAY)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        mv_cmd_delete_draw *cmd = command_new(MVCMD_DELETE_DRAW, sizeof(mv_cmd_delete_draw));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        ctx->has_scene=true;
+        return command_enqueue_owned(p, &cmd->cmd);
+    }
+
+    parse_error(p, true, COMMAND_INVLDDELETE);
+    return false;
 }
 
 /** `Q` — quit the viewer. */
@@ -1547,6 +1724,7 @@ void command_initialize(void) {
     morpho_defineerror(COMMAND_EXPECTSTRING, ERROR_PARSE, COMMAND_EXPECTSTRING_MSG);
     morpho_defineerror(COMMAND_INVLDUPDATE, ERROR_PARSE, COMMAND_INVLDUPDATE_MSG);
     morpho_defineerror(COMMAND_INVLDDELETE, ERROR_PARSE, COMMAND_INVLDDELETE_MSG);
+    morpho_defineerror(COMMAND_INVLDVERTICES, ERROR_PARSE, COMMAND_INVLDVERTICES_MSG);
     morpho_defineerror(COMMAND_INVLDMATERIAL, ERROR_PARSE, COMMAND_INVLDMATERIAL_MSG);
     morpho_defineerror(COMMAND_INVLDCOLOR, ERROR_PARSE, COMMAND_INVLDCOLOR_MSG);
     morpho_defineerror(COMMAND_INVLDLIGHT, ERROR_PARSE, COMMAND_INVLDLIGHT_MSG);
