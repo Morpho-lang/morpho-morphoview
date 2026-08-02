@@ -337,6 +337,23 @@ void render_preparefonts(renderer *r, scene *scene) {
 
 /** Prepares text for display */
 void render_preparetext(renderer *r, scene *s, gdraw *drw, GLuint *carray) {
+    (void) carray;
+
+    /* Per-draw-slot uniform albedo when stamped (Phase 5f). */
+    if (drw->colorid != SCENE_EMPTY) {
+        gcolor *color = scene_getcolorfromid(s, drw->colorid);
+        if (color) {
+            renderinstruction cins = { .instruction = RCOLOR, .obj = NULL };
+            int ncomp = (color->components == 4) ? 4 : 3;
+            for (int k = 0; k < 3; k++)
+                cins.data.color.rgba[k] = s->data.data[color->indx + k];
+            cins.data.color.rgba[3] =
+                (ncomp == 4) ? s->data.data[color->indx + 3] : 1.0f;
+            cins.data.color.use_uniform = 1;
+            varray_renderinstructionwrite(&r->renderlist, cins);
+        }
+    }
+
     /* Change the model matrix if provided */
     if (drw->matindx!=SCENE_EMPTY) {
         renderinstruction ins = { .instruction = RMODEL,

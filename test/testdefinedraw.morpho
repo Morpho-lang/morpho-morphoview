@@ -23,6 +23,9 @@ var updObj = load("command/definedraw-update-object")
 var delObj = load("command/definedraw-delete-object")
 var delDraw = load("command/definedraw-delete-draw")
 var updVerts = load("command/definedraw-update-vertices")
+var textSlots = load("command/definedraw-text-slots")
+var textPose = load("command/definedraw-text-pose")
+var textDel = load("command/definedraw-text-delete")
 
 var v = View()
 if (!v.open(once)) {
@@ -84,4 +87,22 @@ if (!v2.update(delDraw)) {
   System.exit()
 }
 v2.wait(sessiontimeout=1500)
+
+// Phase 5f: text draw-slots — define, pose via `d`, delete via `X D`.
+var v3 = View()
+if (!v3.open(textSlots)) {
+  print "text slots open failed"
+  System.exit()
+}
+if (!v3.update(textPose)) {
+  print "text pose failed"
+  v3.close()
+  System.exit()
+}
+if (!v3.update(textDel)) {
+  print "text delete failed"
+  v3.close()
+  System.exit()
+}
+v3.wait(sessiontimeout=1500)
 print "ok"

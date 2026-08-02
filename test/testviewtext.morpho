@@ -1,0 +1,32 @@
+// Live Scene: Text define-once + move + remove (Phase 5f).
+// Expect: prints "ok" then exits.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+//
+//   cd test && morpho6 testviewtext.morpho
+
+import morphoview
+import xgraphics
+import color
+
+var g = Scene()
+g.title = "text-move"
+var id = g.display(Text("morpho", [0, 0, 0], color=White))
+var id2 = g.display(Text("view", [0.8, 0, 0], color=Red))
+
+var v = View(g)
+
+for (i in 1...8) {
+  if (v.closed) break
+  g.move(id, [0.05*Float(i), 0.1*sin(0.4*Float(i)), 0])
+  g.move(id2, [0.8, 0.1*cos(0.4*Float(i)), 0])
+  System.sleep(0.05)
+  v.poll(timeoutms=0)
+}
+
+if (!v.closed) {
+  g.remove(id2)
+  System.sleep(0.1)
+  v.poll(timeoutms=0)
+  v.close()
+}
+print "ok"

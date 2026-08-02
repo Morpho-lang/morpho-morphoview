@@ -259,22 +259,20 @@ Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEvent
 
 **Done when:** many cylinders (and arrows) share one or two viewer `o`s; `g.move` updates pose without resending `v`/`f`; tests cover define-once + move + remove. ✅ [`test/testcylinderarrow.morpho`](../test/testcylinderarrow.morpho), [`test/testviewcylinder.morpho`](../test/testviewcylinder.morpho), [`examples/vectors.morpho`](../examples/vectors.morpho).
 
-#### Phase 5f — Text draw-slots (move / remove / update)
+#### Phase 5f — Text draw-slots (move / remove / update) ✅
 
-**Why:** `visit(Text)` bakes `item.posn` / `dirn` / `vertical` into `t`/`m`/`T` and does not `_recordObject`, so `move` / `remove` do not drive Text like mesh draw-slots.
+**Why:** `visit(Text)` baked `item.posn` / `dirn` / `vertical` into `t`/`m`/`T` and did not `_recordObject`, so `move` / `remove` did not drive Text like mesh draw-slots.
 
-**Locked (proposed):**
+**Locked:**
 
-- Graphics entry id ↔ viewer text draw-slot (or equivalent id tracked in `objectMap` / a parallel text map).
-- Store unit/default text pose on the entry: `position` from `posn` (and optionally orientation from `dirn`/`vertical` → entry `rotate` or a retained `m`); `Show` emits `T` with entry transform, not only baked `item.posn`.
-- `g.move(id, …)` → in-place pose update for that text slot (viewer: replace text draw matrix, analogous to mesh `d`).
-- `g.remove(id)` → delete that text draw (`X D` or text-specific delete if required).
-- String / font / size change → `replace` (remove + redefine) in the first cut; optional later in-place `T` content update if cheap.
-- Recolor: stamp color on the text draw if the viewer path allows; else redefine.
+- Graphics entry id ↔ viewer text draw-slot (`T <drawId> <fontid> "…"`; legacy `T <fontid> "…"` still appends).
+- `display(Text)` lifts `posn` → entry `position`; item kept at origin. Orientation from `dirn`/`vertical` stays on the item (`m` at emit).
+- `g.move(id, …)` → in-place pose update via `d <drawId>` (TEXT slots accepted).
+- `g.remove(id)` → `X D` only (no `X O`).
+- String / font / size change → `replace` (remove + redefine).
+- Recolor: stamp `colorid` on the TEXT draw (`C` + `d`).
 
-**Out of scope for 5f:** Cylinder/Arrow (5e); rich text layout.
-
-**Done when:** live session can `display(Text)` → `move` → `remove` without full `U S`; smoke test + small example or fixture.
+**Done when:** live session can `display(Text)` → `move` → `remove` without full `U S`. ✅ [`test/testtextslot.morpho`](../test/testtextslot.morpho), [`test/testviewtext.morpho`](../test/testviewtext.morpho), [`examples/flyingtext.morpho`](../examples/flyingtext.morpho), command fixtures via [`testdefinedraw.morpho`](../test/testdefinedraw.morpho).
 
 #### Phase 5g — Formal Morpho dependents (backlog only)
 

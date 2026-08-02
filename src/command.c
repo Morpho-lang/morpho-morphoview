@@ -487,9 +487,11 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 drw = scene_findobjectdraw(ctx->scene, c->drawid);
 
             if (drw) {
-                if (c->has_objectid) scene_setobjectdrawobject(drw, objectid);
-                /* Ensure legacy draws get a stable drawid for later pose updates. */
-                if (drw->drawid == SCENE_EMPTY) drw->drawid = c->drawid;
+                if (drw->type == OBJECT) {
+                    if (c->has_objectid) scene_setobjectdrawobject(drw, objectid);
+                    /* Ensure legacy draws get a stable drawid for later pose updates. */
+                    if (drw->drawid == SCENE_EMPTY) drw->drawid = c->drawid;
+                }
                 scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
                                        c->has_matrix ? c->matrix : NULL, stamp);
             } else {
@@ -516,12 +518,40 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 return false;
             }
 
-            int tid=scene_addtext(ctx->scene, c->fontid, c->string);
-            c->string=NULL; /* transferred to scene */
+            int stamp = ctx->current_colorid;
+            const float *matrix = c->has_matrix ? c->matrix : NULL;
 
-            int matindx=SCENE_EMPTY;
+            if (c->drawid != SCENE_EMPTY) {
+                gdraw *drw = scene_finddrawbydrawid(ctx->scene, c->drawid);
+                if (drw && drw->type == TEXT) {
+                    /* In-place content + pose/color update for an existing slot. */
+                    gtext *txt = &ctx->scene->textlist.data[drw->id];
+                    free(txt->text);
+                    txt->text = c->string;
+                    c->string = NULL;
+                    txt->fontid = c->fontid;
+                    text_prepare(scene_getfontfromid(ctx->scene, c->fontid),
+                                 txt->text);
+                    scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
+                                           matrix, stamp);
+                    command_touchscene(ctx);
+                    return true;
+                }
+
+                int tid = scene_addtext(ctx->scene, c->fontid, c->string);
+                c->string = NULL; /* transferred to scene */
+                scene_addtextdraw(ctx->scene, c->drawid, tid, matrix, stamp);
+                command_touchscene(ctx);
+                return true;
+            }
+
+            /* Legacy: append TEXT draw with no draw-slot id. */
+            int tid = scene_addtext(ctx->scene, c->fontid, c->string);
+            c->string = NULL; /* transferred to scene */
+
+            int matindx = SCENE_EMPTY;
             if (c->has_matrix) {
-                matindx=scene_adddata(ctx->scene, c->matrix, 16);
+                matindx = scene_adddata(ctx->scene, c->matrix, 16);
             }
             scene_adddraw(ctx->scene, TEXT, tid, matindx);
             command_touchscene(ctx);
@@ -1536,11 +1566,22 @@ bool command_parsefont(parser *p, void *out) {
 
 bool command_parsetext(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
+    int first;
     int fontid;
-    char *string=NULL;
+    int drawid = SCENE_EMPTY;
+    char *string = NULL;
 
-    PARSE_CHECK(command_parseinteger(p, &fontid));
-    PARSE_CHECK(command_parsestring(p, &string));
+    PARSE_CHECK(command_parseinteger(p, &first));
+    if (parse_checktoken(p, MVTOKEN_INTEGER)) {
+        /* T <drawId> <fontid> "..." */
+        drawid = first;
+        PARSE_CHECK(command_parseinteger(p, &fontid));
+        PARSE_CHECK(command_parsestring(p, &string));
+    } else {
+        /* Legacy: T <fontid> "..." */
+        fontid = first;
+        PARSE_CHECK(command_parsestring(p, &string));
+    }
 
     mv_cmd_text *cmd = command_new(MVCMD_TEXT, sizeof(mv_cmd_text));
     if (!cmd) {
@@ -1548,12 +1589,13 @@ bool command_parsetext(parser *p, void *out) {
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
         return false;
     }
-    cmd->fontid=fontid;
-    cmd->string=string;
-    cmd->has_matrix=ctx->modelchanged;
+    cmd->drawid = drawid;
+    cmd->fontid = fontid;
+    cmd->string = string;
+    cmd->has_matrix = ctx->modelchanged;
     if (ctx->modelchanged) {
         memcpy(cmd->matrix, ctx->model, sizeof(float)*16);
-        ctx->modelchanged=false;
+        ctx->modelchanged = false;
     }
 
     return command_enqueue_owned(p, &cmd->cmd);

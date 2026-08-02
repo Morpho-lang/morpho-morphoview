@@ -424,13 +424,14 @@ bool scene_deleteobject(scene *s, int id) {
     return true;
 }
 
-/** Remove one OBJECT draw-slot by drawid. */
+/** Remove one OBJECT or TEXT draw-slot by drawid. */
 bool scene_deletedraw(scene *s, int drawid) {
     if (!s) return false;
     unsigned int i;
     for (i = 0; i < s->displaylist.count; i++) {
         gdraw *drw = &s->displaylist.data[i];
-        if (drw->type == OBJECT && drw->drawid == drawid) break;
+        if ((drw->type == OBJECT || drw->type == TEXT) &&
+            drw->drawid == drawid) break;
     }
     if (i >= s->displaylist.count) return false;
 
@@ -598,12 +599,13 @@ void scene_adddraw(scene *scene, gdrawtype type, int id, int matindx) {
     varray_gdrawwrite(&scene->displaylist, d);
 }
 
-/** OBJECT draw with drawid, or NULL. */
+/** OBJECT or TEXT draw with drawid, or NULL. */
 gdraw *scene_finddrawbydrawid(scene *s, int drawid) {
     if (!s) return NULL;
     for (unsigned int i = 0; i < s->displaylist.count; i++) {
         gdraw *drw = &s->displaylist.data[i];
-        if (drw->type == OBJECT && drw->drawid == drawid) return drw;
+        if ((drw->type == OBJECT || drw->type == TEXT) &&
+            drw->drawid == drawid) return drw;
     }
     return NULL;
 }
@@ -638,10 +640,26 @@ gdraw *scene_addobjectdraw(scene *s, int drawid, int objectid,
     return &s->displaylist.data[s->displaylist.count - 1];
 }
 
+/** Create TEXT draw slot. */
+gdraw *scene_addtextdraw(scene *s, int drawid, int textindex,
+                         const float *matrix, int colorid) {
+    if (!s) return NULL;
+    int matindx = SCENE_EMPTY;
+    if (matrix) {
+        float tmp[16];
+        memcpy(tmp, matrix, sizeof(tmp));
+        matindx = scene_adddata(s, tmp, 16);
+    }
+    gdraw d = { .type = TEXT, .id = textindex, .drawid = drawid,
+                .colorid = colorid, .matindx = matindx };
+    varray_gdrawwrite(&s->displaylist, d);
+    return &s->displaylist.data[s->displaylist.count - 1];
+}
+
 /** Update matrix and/or color; leave matrix alone when !has_matrix. */
 bool scene_updateobjectdraw(scene *s, gdraw *drw, bool has_matrix,
                             const float *matrix, int colorid) {
-    if (!s || !drw || drw->type != OBJECT) return false;
+    if (!s || !drw || (drw->type != OBJECT && drw->type != TEXT)) return false;
     if (has_matrix) {
         if (!matrix) {
             drw->matindx = SCENE_EMPTY;

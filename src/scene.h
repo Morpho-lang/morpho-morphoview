@@ -113,8 +113,8 @@ typedef enum {
 typedef struct {
     gdrawtype type;
     int id;       /**< Object/color/text id, or SCENE_SHADE_* for SHADE */
-    int drawid;   /**< OBJECT: draw-slot id (Graphics entry id); else unused */
-    int colorid;  /**< OBJECT: stamped uniform color id, or SCENE_EMPTY */
+    int drawid;   /**< OBJECT/TEXT: draw-slot id (Graphics entry id); else unused */
+    int colorid;  /**< OBJECT/TEXT: stamped uniform color id, or SCENE_EMPTY */
     int matindx;  /**< Model matrix, or material coeffs (ka kd ks n) for SHADE */
 } gdraw;
 
@@ -174,7 +174,7 @@ gobject *scene_addobject(scene *s, int id);
 bool scene_clearobject(scene *s, int id);
 /** Remove object and all OBJECT draws with matching object id. */
 bool scene_deleteobject(scene *s, int id);
-/** Remove one OBJECT draw-slot by drawid; leave the object. */
+/** Remove one OBJECT or TEXT draw-slot by drawid; leave the object/text pool. */
 bool scene_deletedraw(scene *s, int drawid);
 /** Overwrite vertex floats in place; requires n == vertexdata.length. */
 bool scene_replacevertices(scene *s, int id, const float *data, int n);
@@ -190,7 +190,7 @@ textfont *scene_getfontfromid(scene *s, int fontid);
 int scene_addtext(scene *s, int fontid, char *text);
 int scene_addcolor(scene *s, int colorid, int length, int components, int indx);
 void scene_adddraw(scene *scene, gdrawtype type, int id, int matindx);
-/** OBJECT draw with @p drawid, or NULL. */
+/** OBJECT or TEXT draw with @p drawid, or NULL. */
 gdraw *scene_finddrawbydrawid(scene *s, int drawid);
 /** First OBJECT draw with object id @p objectid (legacy 5b), or NULL. */
 gdraw *scene_findobjectdraw(scene *s, int objectid);
@@ -198,7 +198,10 @@ gdraw *scene_findobjectdraw(scene *s, int objectid);
  *  @p matrix may be NULL (identity). @p colorid may be SCENE_EMPTY. */
 gdraw *scene_addobjectdraw(scene *s, int drawid, int objectid,
                            const float *matrix, int colorid);
-/** Update matrix and/or color on an existing OBJECT draw.
+/** Create TEXT draw slot @p drawid referencing textlist index @p textindex. */
+gdraw *scene_addtextdraw(scene *s, int drawid, int textindex,
+                         const float *matrix, int colorid);
+/** Update matrix and/or color on an existing OBJECT or TEXT draw.
  *  If @p has_matrix, replace matrix; otherwise leave matrix unchanged.
  *  If @p colorid != SCENE_EMPTY, stamp it. Returns false if draw missing. */
 bool scene_updateobjectdraw(scene *s, gdraw *drw, bool has_matrix,

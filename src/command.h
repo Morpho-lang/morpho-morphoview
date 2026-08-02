@@ -290,13 +290,17 @@ typedef struct {
 } mv_cmd_font;
 
 /** Add a text string and queue it for drawing, optionally with a model matrix.
- *  Language: `T <fontid> "<string>"` (matrix baked from transforms at parse time)
+ *  Language: `T <fontid> "<string>"` (legacy append) or
+ *  `T <drawId> <fontid> "<string>"` (text draw-slot; create or update).
+ *  Matrix baked from transforms at parse time.
+ *  @param drawid      Draw-slot id, or SCENE_EMPTY for legacy append-only
  *  @param fontid      Font identifier previously loaded with `F`
  *  @param string      Owned text; transferred into the scene on apply
  *  @param has_matrix  Whether @p matrix is valid
  *  @param matrix      Column-major 4×4 model transform when @p has_matrix is true */
 typedef struct {
     mv_command cmd;
+    int drawid;
     int fontid;
     char *string;
     bool has_matrix;

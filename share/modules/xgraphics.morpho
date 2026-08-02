@@ -648,6 +648,13 @@ class Text {
 
 }
 
+/** Copy Text with origin posn — pose lives on the GraphicsEntry (Phase 5f). */
+fn _textAtOrigin(Text item) {
+  return Text(item.string, [0, 0, 0], dirn=item.dirn, vertical=item.vertical,
+              size=item.size, font=item.font, color=item.color,
+              filter=item.filter, transmit=item.transmit)
+}
+
 class Font {
   init (name, size, id=nil) {
     self.name = name 
@@ -945,6 +952,19 @@ class Graphics {
                              color=color, flat=flat)
   }
 
+  /** Text: lift authored posn onto the entry; item kept at origin. */
+  display(Text item, color=nil, flat=nil) {
+    var col = isnil(color) ? item.color : color
+    return self._append(_textAtOrigin(item), position=item.posn, color=col, flat=flat)
+  }
+
+  /** Text + explicit pose on the entry (sole pose authority for move). */
+  display(Text item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
+    var col = isnil(color) ? item.color : color
+    return self._append(_textAtOrigin(item), position=position, scale=scale,
+                        rotate=rotate, color=col, flat=flat)
+  }
+
   /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
    *  Entry records are copied (item refs shared); no Defined notifications. */
   add(right) {
@@ -1048,6 +1068,16 @@ class Scene is Graphics with Broadcaster {
   replace(id, Cylinder item) { return self._replaceUnit(id, _unitCylinder(item)) }
   replace(id, Arrow item) { return self._replaceUnit(id, _unitArrow(item)) }
 
+  /** Replace Text content/orientation; entry SRT unchanged (string/font via redefine). */
+  replace(id, Text item) {
+    var e = self.findEntry(id)
+    if (isnil(e)) return false
+    e.item = _textAtOrigin(item)
+    if (isnil(e.color)) e.color = item.color
+    self.notify(GraphicsEventReplaced(id))
+    return true
+  }
+
   /** Same-length mesh swap: set entry.item only. Pair with View.refreshMesh or View.morph.
    *  Connectivity changes need replace. */
   morph(id, item) {
@@ -1130,6 +1160,7 @@ class Show {
     self.objectMap = Dictionary()    // graphicsId → viewer object id
     self.entryColorId = Dictionary() // graphicsId → color id when draw needs `C`
     self.flatIds = Dictionary()      // graphicsId → true if draw needs `M flat`
+    self.textIds = Dictionary()      // graphicsId → true if TEXT draw-slot (no `X O`)
     self.vertexLayout = Dictionary() // graphicsId → "xn" | "xnc" (TriangleComplex)
     self.meshCache = Dictionary()    // mesh key → viewer object id (shared geometry)
     self._currentEntry = nil
@@ -1260,10 +1291,24 @@ class Show {
     }
   }
 
-  /** Re-issue draws for all mapped entries after `D` (entry SRT). */
+  /** Record a TEXT draw-slot (objectMap sentinel = graphicsId; never emit `X O`). */
+  _recordText(colorid=nil) {
+    var entry = self._currentEntry
+    if (isnil(entry) || entry.id == 0) return
+    self.objectMap[entry.id] = entry.id
+    self.textIds[entry.id] = true
+    if (!isnil(colorid)) self.entryColorId[entry.id] = colorid
+  }
+
+  /** Re-issue draws for all mapped entries after `D` (entry SRT).
+   *  TEXT slots need a full `T` redefine (string is not recoverable from `d`). */
   emitPoseDraws(graphic, out) {
     for (entry in graphic.displaylist) {
       if (!self.objectMap.contains(entry.id)) continue
+      if (self.textIds.contains(entry.id)) {
+        self.writeEntry(entry, out)
+        continue
+      }
       var vid = self.objectMap[entry.id]
       var needFlat = self.flatIds.contains(entry.id)
       if (needFlat) out.write("M flat")
@@ -1280,6 +1325,11 @@ class Show {
     if (!self.objectMap.contains(graphicsId)) return false
     var entry = graphic.findEntry(graphicsId)
     if (isnil(entry)) return false
+    if (self.textIds.contains(graphicsId)) {
+      self._emitTextTransforms(entry, entry.item, out)
+      out.write("d ${graphicsId}")
+      return true
+    }
     self.emitEntryDraw(entry, out)
     return true
   }
@@ -1340,6 +1390,7 @@ class Show {
     if (self.objectMap.contains(graphicsId)) self.objectMap.remove(graphicsId)
     if (self.entryColorId.contains(graphicsId)) self.entryColorId.remove(graphicsId)
     if (self.flatIds.contains(graphicsId)) self.flatIds.remove(graphicsId)
+    if (self.textIds.contains(graphicsId)) self.textIds.remove(graphicsId)
     if (self.vertexLayout.contains(graphicsId)) self.vertexLayout.remove(graphicsId)
   }
 
@@ -1352,8 +1403,9 @@ class Show {
     for (key in drop) self.meshCache.remove(key)
   }
 
-  /** Emit `X D` (+ `X O` if last user of the viewer object). */
+  /** Emit `X D` (+ `X O` if last user of a shared mesh object). Text never emits `X O`. */
   emitEntryRemove(graphicsId, out) {
+    var isText = self.textIds.contains(graphicsId)
     if (!self.objectMap.contains(graphicsId)) {
       out.write("X D ${graphicsId}")
       return true
@@ -1361,7 +1413,7 @@ class Show {
     var vid = self.objectMap[graphicsId]
     out.write("X D ${graphicsId}")
     self.forgetEntry(graphicsId)
-    if (self.objectUserCount(vid) == 0) {
+    if (!isText && self.objectUserCount(vid) == 0) {
       out.write("X O ${vid}")
       self._forgetMeshCacheFor(vid)
     }
@@ -1751,13 +1803,14 @@ class Show {
   }
 
   visit(Text item, out) {
+    /* Bare Text (no entry): legacy append `T <fontid> "…"` with item.posn baked. */
     var font = item.font
     if (!font) font = self.defaultFontName()
-    var id = self.findFontId(font, item.size, out)
+    var fid = self.findFontId(font, item.size, out)
 
     if (item.color) {
-      var id = self.addColor(item.color, out)
-      out.write("C ${id}")
+      var cid = self.addColor(item.color, out)
+      out.write("C ${cid}")
     }
 
     out.write("i")
@@ -1768,7 +1821,34 @@ class Show {
       out.write(str)
     }
     out.write("t ${self.fmt(item.posn[0])} ${self.fmt(item.posn[1])} ${self.fmt(item.posn[2])}")
-    out.write("T ${id} \"${item.string}\"")
+    out.write("T ${fid} \"${item.string}\"")
+  }
+
+  /** Entry SRT (+ optional dirn/vertical `m`) before `T` / pose `d`. */
+  _emitTextTransforms(entry, Text item, out) {
+    out.write("i")
+    var scl = entry.scale
+    if (ismatrix(scl) || islist(scl)) {
+      out.write("s ${self.fmt(scl[0])} ${self.fmt(scl[1])} ${self.fmt(scl[2])}")
+    } else if (scl != 1) {
+      out.write("s ${self.fmt(scl)}")
+    }
+    if (!isnil(entry.rotate)) {
+      var r = entry.rotate
+      if (!(abs(r[0]) < 1e-8)) {
+        out.write("r ${self.fmt(r[0])} ${self.fmt(r[1])} ${self.fmt(r[2])} ${self.fmt(r[3])}")
+      }
+    }
+    var m = item.transformationMatrix()
+    if (m) {
+      var str = "m"
+      for (i in 0..3) for (j in 0..3) str+=" "+self.fmt(m[i,j])
+      out.write(str)
+    }
+    var p = entry.position
+    if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
+      out.write("t ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}")
+    }
   }
 
   write(graphic, out) {
@@ -1776,6 +1856,7 @@ class Show {
     self.objectMap = Dictionary()
     self.entryColorId = Dictionary()
     self.flatIds = Dictionary()
+    self.textIds = Dictionary()
     self.vertexLayout = Dictionary()
     self.meshCache = Dictionary()
 
@@ -1789,10 +1870,24 @@ class Show {
     self.visitEntry(entry, entry.item, out)
   }
 
-  /** Default: world-baked item, identity draw (Text/Tube/…). */
+  /** Default: world-baked item, identity draw (Tube/…). */
   visitEntry(entry, item, out) {
     self._currentEntry = entry
     self.visit(item, out)
+    self._currentEntry = nil
+  }
+
+  /** Text draw-slot: entry pose + `T <entryId> <fontId> "…"`. */
+  visitEntry(entry, Text item, out) {
+    self._currentEntry = entry
+    var font = item.font
+    if (!font) font = self.defaultFontName()
+    var fid = self.findFontId(font, item.size, out)
+    var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
+    out.write("C ${cid}")
+    self._emitTextTransforms(entry, item, out)
+    out.write("T ${entry.id} ${fid} \"${item.string}\"")
+    self._recordText(colorid=cid)
     self._currentEntry = nil
   }
 

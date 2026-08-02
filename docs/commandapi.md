@@ -63,10 +63,10 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_COLOR` | `c <id> <r g b [a]>...` | Color id; RGB triples or RGBA quads |
 | `MVCMD_SELECT_COLOR` | `C <id>` | Active color id (uniform albedo for subsequent geometry/text) |
 | `MVCMD_MATERIAL` | `M flat` / `M shaded [ka kd [ks [n]]]` | Shade mode + Phong coeffs |
-| `MVCMD_DRAW` | `d <id>` | Object id; optional baked 4×4 matrix. If an OBJECT draw for `@p id` already exists, **replaces its matrix** instead of appending. |
+| `MVCMD_DRAW` | `d <drawId> [objectId]` | Draw-slot id; optional object id + baked 4×4. If an OBJECT or TEXT draw for `@p drawId` already exists, **replaces its matrix** (and stamps color) instead of appending. |
 | `MVCMD_CLEAR_DISPLAY` | `D` | Clear displaylist only (objects/colors/fonts/pools kept) |
 | `MVCMD_FONT` | `F <id> "<path>" <size>` | Font id, path, size |
-| `MVCMD_TEXT` | `T <fontid> "<string>"` | Font id, string; optional matrix |
+| `MVCMD_TEXT` | `T <fontid> "<string>"` \| `T <drawId> <fontid> "<string>"` | Legacy append, or text draw-slot create/update; optional matrix |
 | `MVCMD_PREPARE` | *(none — appended by parse)* | Upload **changed** scenes to GL (scenes touched by this batch) |
 
 `S` is find-or-create: a new id opens a window; a repeated id selects that scene as current (does **not** clear). `U S` clears an existing scene’s contents while keeping its window, then selects it. `D` clears only the displaylist (draws) for the current sticky scene — objects, colors, fonts, and data pools remain. Apply context is **sticky across ZMQ/file batches**, so follow-up chunks may omit a leading `S` and still target the last selected scene. `X S` marks that scene’s window for close (loop tears it down). `Q` marks every window for close; if none are open and the listener is active, emits `window.closed` and stops. `MVCMD_PREPARE` calls `display_prepareall()`, which resets GL geometry then uploads only scenes marked changed (scenes touched by this batch). It auto-computes the scene AABB when no explicit `B` was given and fits the camera on first prepare (or after `B`) unless the user has already moved the view. Untouched open displays are left alone (avoids redundant GL rebuilds when several windows are open).
@@ -93,10 +93,10 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `c` | `<id> <r g b [a]>...` | Define color table entry (RGB or RGBA) |
 | `C` | `<id>` | Select uniform color for subsequent geometry and text |
 | `M` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Material: unlit or OpenGL/VTK Phong (default ka=kd=0.5, ks=0) |
-| `d` | `<drawId>` \| `<drawId> <objectId>` | Draw slot `drawId` referencing object (defaults to `drawId` if one arg). Matrix from prior transforms. Updates existing slot by `drawId` (legacy: first object id match). Stamps current `C` onto the slot. No-matrix update preserves pose (recolor). |
+| `d` | `<drawId>` \| `<drawId> <objectId>` | Draw slot `drawId` referencing object (defaults to `drawId` if one arg). Also updates an existing TEXT slot by `drawId` (pose/color). Matrix from prior transforms. Stamps current `C` onto the slot. No-matrix update preserves pose (recolor). |
 | `D` | — | Clear displaylist only; keep objects/colors/fonts/pools (sticky scene) |
 | `F` | `<id> "<path>" <size>` | Load font |
-| `T` | `<fontid> "<string>"` | Draw text (matrix like `d`) |
+| `T` | `<fontid> "<string>"` \| `<drawId> <fontid> "<string>"` | Legacy append text, or text draw-slot create/update (matrix like `d`) |
 
 ### Materials and color
 

@@ -41,11 +41,11 @@ Not a full scene graph. Richer than an append-only displaylist:
 - Small **mutation API** on Scene: `move`, `recolor`, `remove`, `replace`, `morph`; `beginBatch`/`endBatch` on Broadcaster
 - **`morph` vs `replace`:** `Scene.morph` / `View.morph` / `View.refreshMesh` — same-length vertex push (`U V`). `replace` — full redefine (new connectivity / type). Prefer `View.morph(id, item)` when a listener is attached.
 - **Return values:** `display` returns a Graphics id (`Int`) or `false`; mutators (`move` / `recolor` / `remove` / `replace` / `morph`) return `true`/`false`. Lookups (`findEntry`) still use `nil` when missing.
-- **Until Phase 5f:** `Text` is not draw-slot driven — `move` / `remove` do not update text like mesh slots.
+- **Phase 5f:** `Text` is draw-slot driven — `move` / `remove` / `recolor` update text like mesh slots; string/font via `replace`.
 - **Listeners** (`broadcast` module) + typed events (`GraphicsEventDefined` / `Moved` / `Recolored` / `Removed` / `Replaced`)
 - `open(g)` uses one `Show.write` then listens if `g` is a Scene; `update(g)` full replace + rebind
 
-`Show` walks Graphics **entries** (Scene included). Phase 5c: `Sphere` → unit mesh via Show cache (key = refine bucket + material mode), draw with entry SRT; many entries may share one viewer `o`. Color/opacity via `C`, not baked vertices, so instances share geometry. `PointCloud` / `LineSet` use entry SRT. **Phase 5e:** same pattern for `Cylinder` / `Arrow` (unit shaft ± tip, start→end as SRT; viewer `s sx sy sz`). **Phase 5f:** `Text` on draw-slots so `move` / `remove` work (string/font via `replace` first cut).
+`Show` walks Graphics **entries** (Scene included). Phase 5c: `Sphere` → unit mesh via Show cache (key = refine bucket + material mode), draw with entry SRT; many entries may share one viewer `o`. Color/opacity via `C`, not baked vertices, so instances share geometry. `PointCloud` / `LineSet` use entry SRT. **Phase 5e:** same pattern for `Cylinder` / `Arrow` (unit shaft ± tip, start→end as SRT; viewer `s sx sy sz`). **Phase 5f:** `Text` on draw-slots (`T <drawId> <fontid> "…"`) so `move` / `remove` work (string/font via `replace`).
 
 ## Viewer protocol
 
@@ -81,7 +81,7 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 2. **Viewer** — sticky context; `D`; prepare-safe redraw ✅
 3. **Graphics ↔ View** — `move`; listener registration; View translates events → commands ✅
 4. **Yardstick** — rewrite `examples/boing.morpho` via `g.move` (not full `U S`) ✅
-5. **Phase 5** — 5a–5e ✅; **5f** Text slots; dependents later (**5g**). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
+5. **Phase 5** — 5a–5f ✅; dependents later (**5g**). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
 ## Hand sequences / tests
 
 | File | Role | Runnable now? |
