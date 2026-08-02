@@ -80,14 +80,8 @@ fn _asPosition(p) {
 /** Coerce scale: nil → 1; scalar; or 3-vector Matrix (non-uniform). */
 fn _asScale(s) {
   if (isnil(s)) return 1
-  if (ismatrix(s)) {
-    if (s.count() == 1) return s[0]
-    return s.clone()
-  }
-  if (islist(s)) {
-    if (s.count() == 1) return s[0]
-    return Matrix(s)
-  }
+  if (ismatrix(s)) return s.clone()
+  if (islist(s)) return Matrix(s)
   return s
 }
 
@@ -842,6 +836,18 @@ fn _unitArrow(Arrow item) {
                color=item.color, filter=item.filter, transmit=item.transmit)
 }
 
+/** Show mesh-cache key for a unit primitive (entry.scale used by Sphere refine). */
+fn _meshKey(Sphere item, entry) { return "sphere:${item._refinementLevel(entry.scale)}" }
+fn _meshKey(Cylinder item, entry) { return "cylinder:${item.n}" }
+fn _meshKey(Arrow item, entry) { return "arrow:${item.n}:${item.aspectratio}" }
+
+/** Unit TriangleComplex for a cached mesh define. */
+fn _unitTri(Sphere item, entry) {
+  return item.toTriangleComplex(scale=false, radiusforrefine=entry.scale)
+}
+fn _unitTri(Cylinder item, entry) { return item.toTriangleComplex(unit=true) }
+fn _unitTri(Arrow item, entry) { return item.toTriangleComplex(unit=true) }
+
 /** Static displaylist container. Accepted by Show / View.open / View.update.
  *  For live mutation (move / recolor / batch) use Scene. */
 class Graphics {
@@ -873,6 +879,22 @@ class Graphics {
     return id
   }
 
+  /** Unit item + explicit pose (color defaults to item.color). */
+  _displayUnit(unitItem, position, scale=nil, rotate=nil, color=nil, flat=nil) {
+    var scl = isnil(scale) ? 1 : scale
+    var col = isnil(color) ? unitItem.color : color
+    return self._append(unitItem, position=position, scale=scl, rotate=rotate,
+                        color=col, flat=flat)
+  }
+
+  /** Unit shaft item + SRT from start→end; false if degenerate. */
+  _displaySegment(unitItem, start, end, aspectratio, color=nil, flat=nil) {
+    var srt = _segmentSRT(start, end, aspectratio)
+    if (isnil(srt)) return false
+    return self._displayUnit(unitItem, srt[0], scale=srt[1], rotate=srt[2],
+                             color=color, flat=flat)
+  }
+
   /** Append a non-Sphere item (identity SRT). Returns Graphics-owned id, or false. */
   display(item, color=nil, flat=nil) {
     if (!isobject(item)) return false
@@ -889,51 +911,38 @@ class Graphics {
 
   /** Unit Sphere + entry SRT from authored center/r. */
   display(Sphere item, color=nil, flat=nil) {
-    var col = isnil(color) ? item.color : color
-    return self._append(_unitSphere(item), position=item.center, scale=item.r,
-                        color=col, flat=flat)
+    return self._displayUnit(_unitSphere(item), item.center, scale=item.r,
+                             color=color, flat=flat)
   }
 
   /** Unit Sphere + pose args on the entry (sole pose authority). */
   display(Sphere item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    var scl = isnil(scale) ? 1 : scale
-    var col = isnil(color) ? item.color : color
-    return self._append(_unitSphere(item), position=position, scale=scl, rotate=rotate,
-                        color=col, flat=flat)
+    return self._displayUnit(_unitSphere(item), position, scale=scale, rotate=rotate,
+                             color=color, flat=flat)
   }
 
   /** Unit Cylinder + entry SRT from authored start→end. */
   display(Cylinder item, color=nil, flat=nil) {
-    var srt = _segmentSRT(item.start, item.end, item.aspectratio)
-    if (isnil(srt)) return false
-    var col = isnil(color) ? item.color : color
-    return self._append(_unitCylinder(item), position=srt[0], scale=srt[1], rotate=srt[2],
-                        color=col, flat=flat)
+    return self._displaySegment(_unitCylinder(item), item.start, item.end,
+                                item.aspectratio, color=color, flat=flat)
   }
 
   /** Unit Cylinder + pose args on the entry (sole pose authority). */
   display(Cylinder item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    var scl = isnil(scale) ? 1 : scale
-    var col = isnil(color) ? item.color : color
-    return self._append(_unitCylinder(item), position=position, scale=scl, rotate=rotate,
-                        color=col, flat=flat)
+    return self._displayUnit(_unitCylinder(item), position, scale=scale, rotate=rotate,
+                             color=color, flat=flat)
   }
 
   /** Unit Arrow + entry SRT from authored start→end. */
   display(Arrow item, color=nil, flat=nil) {
-    var srt = _segmentSRT(item.start, item.end, item.aspectratio)
-    if (isnil(srt)) return false
-    var col = isnil(color) ? item.color : color
-    return self._append(_unitArrow(item), position=srt[0], scale=srt[1], rotate=srt[2],
-                        color=col, flat=flat)
+    return self._displaySegment(_unitArrow(item), item.start, item.end,
+                                item.aspectratio, color=color, flat=flat)
   }
 
   /** Unit Arrow + pose args on the entry (sole pose authority). */
   display(Arrow item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    var scl = isnil(scale) ? 1 : scale
-    var col = isnil(color) ? item.color : color
-    return self._append(_unitArrow(item), position=position, scale=scl, rotate=rotate,
-                        color=col, flat=flat)
+    return self._displayUnit(_unitArrow(item), position, scale=scale, rotate=rotate,
+                             color=color, flat=flat)
   }
 
   /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
@@ -1025,35 +1034,19 @@ class Scene is Graphics with Broadcaster {
     return true
   }
 
-  /** Replace with unit Sphere (like display); keep entry SRT. */
-  replace(id, Sphere item) {
+  /** Store unit item on entry; keep SRT; copy item.color if entry has none. */
+  _replaceUnit(id, unitItem) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    e.item = _unitSphere(item)
-    if (isnil(e.color)) e.color = item.color
+    e.item = unitItem
+    if (isnil(e.color)) e.color = unitItem.color
     self.notify(GraphicsEventReplaced(id))
     return true
   }
 
-  /** Replace with unit Cylinder (like display); keep entry SRT. */
-  replace(id, Cylinder item) {
-    var e = self.findEntry(id)
-    if (isnil(e)) return false
-    e.item = _unitCylinder(item)
-    if (isnil(e.color)) e.color = item.color
-    self.notify(GraphicsEventReplaced(id))
-    return true
-  }
-
-  /** Replace with unit Arrow (like display); keep entry SRT. */
-  replace(id, Arrow item) {
-    var e = self.findEntry(id)
-    if (isnil(e)) return false
-    e.item = _unitArrow(item)
-    if (isnil(e.color)) e.color = item.color
-    self.notify(GraphicsEventReplaced(id))
-    return true
-  }
+  replace(id, Sphere item) { return self._replaceUnit(id, _unitSphere(item)) }
+  replace(id, Cylinder item) { return self._replaceUnit(id, _unitCylinder(item)) }
+  replace(id, Arrow item) { return self._replaceUnit(id, _unitArrow(item)) }
 
   /** Same-length mesh swap: set entry.item only. Pair with View.refreshMesh or View.morph.
    *  Connectivity changes need replace. */
@@ -1220,23 +1213,6 @@ class Show {
     self.visitGeneric(item, out)
   }
 
-  visit(Cylinder item, out) {
-    var len = (item.end - item.start).norm()
-    if (!(len > 1e-8)) return // also rejects NaN
-    self.visitGeneric(item, out)
-  }
-
-  visit(Arrow item, out) {
-    var len = (item.end - item.start).norm()
-    if (!(len > 1e-8)) return
-    self.visitGeneric(item, out)
-  }
-
-  visit(Sphere item, out) {
-    // Prefer visitEntry(Sphere); this path bakes without the mesh cache.
-    self.visitGeneric(item, out)
-  }
-
   /** Emit i/s/r/t/d. With viewerid: d <graphicsId> <viewerid> (or d <viewerid> if entry.id==0).
    *  Without viewerid: d <graphicsId> (pose-only). */
   emitEntryDraw(entry, out, viewerid=nil) {
@@ -1399,55 +1375,30 @@ class Show {
     return self._emitReplace(entry, entry.item, out)
   }
 
-  /** Shared Sphere: keep cached `o` when refine key matches; else drop + rewrite. */
+  /** Reuse cached unit `o` when key still matches; else remove + rewrite. */
+  _emitCachedReplace(entry, item, key, out) {
+    var graphicsId = entry.id
+    var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
+    if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
+      var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
+      self.entryColorId[graphicsId] = cid
+      out.write("C ${cid}")
+      self.emitEntryDraw(entry, out, viewerid=oldVid)
+      return true
+    }
+    self.emitEntryRemove(graphicsId, out)
+    self.writeEntry(entry, out)
+    return true
+  }
+
   _emitReplace(entry, Sphere item, out) {
-    var graphicsId = entry.id
-    var key = "sphere:${item._refinementLevel(entry.scale)}"
-    var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
-    if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
-      var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
-      self.entryColorId[graphicsId] = cid
-      out.write("C ${cid}")
-      self.emitEntryDraw(entry, out, viewerid=oldVid)
-      return true
-    }
-    self.emitEntryRemove(graphicsId, out)
-    self.writeEntry(entry, out)
-    return true
+    return self._emitCachedReplace(entry, item, _meshKey(item, entry), out)
   }
-
-  /** Shared Cylinder: keep cached `o` when n key matches; else drop + rewrite. */
   _emitReplace(entry, Cylinder item, out) {
-    var graphicsId = entry.id
-    var key = "cylinder:${item.n}"
-    var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
-    if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
-      var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
-      self.entryColorId[graphicsId] = cid
-      out.write("C ${cid}")
-      self.emitEntryDraw(entry, out, viewerid=oldVid)
-      return true
-    }
-    self.emitEntryRemove(graphicsId, out)
-    self.writeEntry(entry, out)
-    return true
+    return self._emitCachedReplace(entry, item, _meshKey(item, entry), out)
   }
-
-  /** Shared Arrow: keep cached `o` when n+aspectratio key matches; else drop + rewrite. */
   _emitReplace(entry, Arrow item, out) {
-    var graphicsId = entry.id
-    var key = "arrow:${item.n}:${item.aspectratio}"
-    var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
-    if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
-      var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
-      self.entryColorId[graphicsId] = cid
-      out.write("C ${cid}")
-      self.emitEntryDraw(entry, out, viewerid=oldVid)
-      return true
-    }
-    self.emitEntryRemove(graphicsId, out)
-    self.writeEntry(entry, out)
-    return true
+    return self._emitCachedReplace(entry, item, _meshKey(item, entry), out)
   }
 
   /** Unique mesh: drop old draw/object, then define+draw fresh. */
@@ -1845,74 +1796,31 @@ class Show {
     self._currentEntry = nil
   }
 
-  /** Unit sphere mesh (cached by refine level) + entry SRT + `C` color. */
-  visitEntry(entry, Sphere item, out) {
+  /** Unit mesh from cache + entry SRT + `C` (Sphere / Cylinder / Arrow). */
+  _visitUnitMesh(entry, item, out) {
     self._currentEntry = entry
-    var n = item._refinementLevel(entry.scale)
-    var key = "sphere:${n}"
+    var key = _meshKey(item, entry)
     var vid
     if (self.meshCache.contains(key)) {
       vid = self.meshCache[key]
     } else {
-      var tri = item.toTriangleComplex(scale=false, radiusforrefine=entry.scale)
-      if (!isnil(item.filter)) tri.filter = item.filter
-      if (!isnil(item.transmit)) tri.transmit = item.transmit
-      vid = self.defineXnTriangleComplex(tri, out)
-      self.meshCache[key] = vid
-    }
-    var alpha = self.opacity(item)
-    var cid = self.addRgb(self.entryRgb(entry), alpha, out)
-    out.write("C ${cid}")
-    self._recordObject(vid, colorid=cid)
-    self.emitEntryDraw(entry, out, viewerid=vid)
-    self._currentEntry = nil
-  }
-
-  /** Unit cylinder mesh (cached by face count) + entry SRT + `C` color. */
-  visitEntry(entry, Cylinder item, out) {
-    self._currentEntry = entry
-    var key = "cylinder:${item.n}"
-    var vid
-    if (self.meshCache.contains(key)) {
-      vid = self.meshCache[key]
-    } else {
-      var tri = item.toTriangleComplex(unit=true)
+      var tri = _unitTri(item, entry)
       if (isnil(tri)) { self._currentEntry = nil; return }
       if (!isnil(item.filter)) tri.filter = item.filter
       if (!isnil(item.transmit)) tri.transmit = item.transmit
       vid = self.defineXnTriangleComplex(tri, out)
       self.meshCache[key] = vid
     }
-    var alpha = self.opacity(item)
-    var cid = self.addRgb(self.entryRgb(entry), alpha, out)
+    var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
     out.write("C ${cid}")
     self._recordObject(vid, colorid=cid)
     self.emitEntryDraw(entry, out, viewerid=vid)
     self._currentEntry = nil
   }
 
-  /** Unit arrow mesh (cached by n + aspectratio) + entry SRT + `C` color. */
-  visitEntry(entry, Arrow item, out) {
-    self._currentEntry = entry
-    var key = "arrow:${item.n}:${item.aspectratio}"
-    var vid
-    if (self.meshCache.contains(key)) {
-      vid = self.meshCache[key]
-    } else {
-      var tri = item.toTriangleComplex(unit=true)
-      if (isnil(tri)) { self._currentEntry = nil; return }
-      if (!isnil(item.filter)) tri.filter = item.filter
-      if (!isnil(item.transmit)) tri.transmit = item.transmit
-      vid = self.defineXnTriangleComplex(tri, out)
-      self.meshCache[key] = vid
-    }
-    var alpha = self.opacity(item)
-    var cid = self.addRgb(self.entryRgb(entry), alpha, out)
-    out.write("C ${cid}")
-    self._recordObject(vid, colorid=cid)
-    self.emitEntryDraw(entry, out, viewerid=vid)
-    self._currentEntry = nil
-  }
+  visitEntry(entry, Sphere item, out) { self._visitUnitMesh(entry, item, out) }
+  visitEntry(entry, Cylinder item, out) { self._visitUnitMesh(entry, item, out) }
+  visitEntry(entry, Arrow item, out) { self._visitUnitMesh(entry, item, out) }
 
   /** PointCloud: define once, draw with entry SRT. */
   visitEntry(entry, PointCloud item, out) {
