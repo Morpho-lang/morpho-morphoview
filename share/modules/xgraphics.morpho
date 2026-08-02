@@ -3,7 +3,7 @@
  * History:
  * 1/7/25 Redirect error output to /dev/null to suppress errors on macOS
  * 1/2/26 Windows compatibility
- * 7/31/26 Additional features to support new morphoview: 
+ * 7/31/26 Additional features to support new morphoview:
  * - View class to enable communication between the viewer and the application
  * - PointCloud / LineSet primitives
  * - display() creates GraphicsEntry, enabling pose information to be decoupled from the item
@@ -40,7 +40,7 @@ fn _rotation(theta, axis) {
 }
 
 /** Generates a vector normal to a given vector but of arbitrary orientation */
-fn _normalvector(vec) {
+fn _normalVector(vec) {
   var order = [abs(vec[0]), abs(vec[1]), abs(vec[2])].order()
   var out=vec.clone()
   out[order[0]]=0
@@ -50,7 +50,7 @@ fn _normalvector(vec) {
 }
 
 /* 3d cross product */
-fn _cross3d(a, b) {
+fn _cross3D(a, b) {
   return Matrix([ a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0] ])
 }
 
@@ -71,7 +71,7 @@ fn _orthogonalize(m) {
 }
 
 /** Coerce list or Matrix to a stored position Matrix (3-vector). nil → origin. */
-fn _asposition(p) {
+fn _asPosition(p) {
   if (isnil(p)) return Matrix([0, 0, 0])
   if (ismatrix(p)) return p.clone()
   return Matrix(p)
@@ -97,6 +97,7 @@ class TriangleComplex {
 
 }
 
+
 /** Draws a cylinder
   @param[in] start - start point
   @param[in] end - end point
@@ -116,7 +117,7 @@ class Cylinder {
     self.transmit = transmit
   }
 
-  totrianglecomplex() {
+  toTriangleComplex() {
     var aspectratio = self.aspectratio
     var n = self.n
 
@@ -135,7 +136,7 @@ class Cylinder {
     if (abs(length)<1e-8) return nil
     var ndx=dx/length
 
-    var px=_normalvector(dx)
+    var px=_normalVector(dx)
     var pxnorm=px.norm()
     if (abs(pxnorm)<1e-15) return
     px=0.5*length*aspectratio*px/pxnorm
@@ -232,12 +233,12 @@ class Sphere {
     self.transmit = transmit
   }
 
-  refinementlevel() {
-    return self.refinementlevel(self.r)
+  _refinementLevel() {
+    return self._refinementLevel(self.r)
   }
 
   /** Tessellation level from an effective display radius (entry.scale for unit spheres). */
-  refinementlevel(effectiveradius) {
+  _refinementLevel(effectiveradius) {
     var n = 0
     var r = effectiveradius
     while (r/(2^n)>0.1 && n<self.maxrefine) {
@@ -250,13 +251,13 @@ class Sphere {
   }
 
   /** @param scale if false, unit ball at origin (pose on Graphics entry).
-   *  @param radiusForRefine radius used only to pick tessellation (defaults to self.r). */
-  totrianglecomplex(scale=true, radiusForRefine=nil) {
+   *  @param radiusforrefine radius used only to pick tessellation (defaults to self.r). */
+  toTriangleComplex(scale=true, radiusforrefine=nil) {
     var center = self.center, r = self.r
     var col = self.color
     if (isnil(col)) col = [0.5,0.5,0.5]
-    var refineR = isnil(radiusForRefine) ? self.r : radiusForRefine
-    var n = self.refinementlevel(refineR)
+    var refineR = isnil(radiusforrefine) ? self.r : radiusforrefine
+    var n = self._refinementLevel(refineR)
 
     var v = _sphere[n].vertexmatrix().clone()
     var normals = _sphere[n].vertexmatrix().clone()
@@ -279,7 +280,6 @@ class Sphere {
     return TriangleComplex(v, normals, col, conn,
                            filter=self.filter, transmit=self.transmit)
   }
-
 }
 
 /** Draws an arrow
@@ -301,7 +301,7 @@ class Arrow {
     self.transmit = transmit
   }
 
-  totrianglecomplex () {
+  toTriangleComplex() {
     var aspectratio = self.aspectratio
     var n = self.n
 
@@ -319,7 +319,7 @@ class Arrow {
     var length = dx.norm()
     var ndx=dx/length
 
-    var px=_normalvector(dx)
+    var px=_normalVector(dx)
     var pxnorm=px.norm()
     if (abs(pxnorm)<1e-15) return
     px=0.5*length*aspectratio*px/pxnorm
@@ -400,7 +400,7 @@ class Arrow {
   @param[in] closed - whether to treat the point list as closed or not
   @param[in] color - Color of the sphere */
 class Tube {
-  normalvector(vec) { // Musn't take the abs for Tube
+  _shaftNormal(vec) { // no abs — unlike module _normalVector
     var order = [vec[0], vec[1], vec[2]].order()
     var out=vec.clone()
     out[order[0]]=0
@@ -421,7 +421,7 @@ class Tube {
     self.transmit = transmit
   }
 
-  totrianglecomplex() {
+  toTriangleComplex() {
     var n = self.n
     var col = self.color
     if (isnil(col)) col = [0.5,0.5,0.5]
@@ -463,7 +463,7 @@ class Tube {
    	for (k in 0...np) {
   		var px // Vertices are generated from a point plus this displacement
    		if (k==0) {
-  			px=self.normalvector(ndx[k])
+  			px=self._shaftNormal(ndx[k])
   		} else { // This aligns vertices generated from successive points
   			var dx=vertices.column((k-1)*n)-mat.column(k-1)
   			px=dx-dx.inner(ndx[k])*ndx[k]/ndx[k].norm()
@@ -561,7 +561,7 @@ class Text {
     self.transmit = transmit
   }
 
-  transformationmatrix() {
+  transformationMatrix() {
     if (!(ismatrix(self.dirn) || ismatrix(self.vertical))) return nil 
     var m = Matrix(4,4) 
     for (i in 0..3) m[i,i]=1
@@ -570,7 +570,7 @@ class Text {
     if (self.vertical) for (i in 0..2) m[i,1]=self.vertical[i]
 
     // Now set the final direction to the cross product of the two 
-    var zp = _cross3d(m.column(1),m.column(0)) 
+    var zp = _cross3D(m.column(1),m.column(0)) 
     for (i in 0..2) m[i,2]=zp[i]
 
     _orthogonalize(m)
@@ -593,9 +593,9 @@ class Font {
  **************************************** */
 
 /** Normalize inputs to a dim×n vertex matrix (points as columns). */
-fn _asvertexmatrix(Matrix pts) { return pts }
+fn _asVertexMatrix(Matrix pts) { return pts }
 
-fn _asvertexmatrix(pts) { // list of points
+fn _asVertexMatrix(pts) { // list of points
   return Matrix(pts).transpose()
 }
 
@@ -603,7 +603,7 @@ fn _asvertexmatrix(pts) { // list of points
   Optional uniform or per-vertex `color`. Emits viewer points (`p`), not spheres. */
 class PointCloud {
   init(position, color=nil, filter=nil, transmit=nil) {
-    self.position = _asvertexmatrix(position)
+    self.position = _asVertexMatrix(position)
     self.color = color
     self.filter = filter
     self.transmit = transmit
@@ -618,7 +618,7 @@ class PointCloud {
 class LineSet {
   // Polyline through successive vertices
   init(position, color=nil, closed=false, filter=nil, transmit=nil) {
-    self.position = _asvertexmatrix(position)
+    self.position = _asVertexMatrix(position)
     self.connectivity = nil
     self.color = color
     self.closed = closed
@@ -628,7 +628,7 @@ class LineSet {
 
   // Explicit segments
   init(position, connectivity, color=nil, closed=false, filter=nil, transmit=nil) {
-    self.position = _asvertexmatrix(position)
+    self.position = _asVertexMatrix(position)
     self.connectivity = connectivity
     self.color = color
     self.closed = closed
@@ -637,7 +637,7 @@ class LineSet {
   }
 
   /** Flat index list for GL_LINES: i0 j0 i1 j1 ... */
-  segmentindices() {
+  _segmentIndices() {
     var nv = self.position.dimensions()[1]
     var conn = self.connectivity
     var out = []
@@ -675,6 +675,7 @@ class LineSet {
     }
     return out
   }
+
 }
 
 /* **************************************
@@ -686,7 +687,7 @@ class GraphicsEntry {
   init(id, item, position=nil, scale=nil, rotate=nil, color=nil) {
     self.id = id
     self.item = item
-    self.position = _asposition(position)
+    self.position = _asPosition(position)
     self.scale = isnil(scale) ? 1 : scale
     self.rotate = rotate
     self.color = color             // presentation albedo (Sphere / recolor); nil → item
@@ -750,7 +751,7 @@ class GraphicsEventRemoved is GraphicsEvent {}
 class GraphicsEventReplaced is GraphicsEvent {}
 
 /** Unit Sphere for entry storage (pose lives on the GraphicsEntry). */
-fn _unitsphere(Sphere item) {
+fn _unitSphere(Sphere item) {
   return Sphere([0, 0, 0], 1, color=item.color, maxrefine=item.maxrefine,
                 filter=item.filter, transmit=item.transmit)
 }
@@ -760,7 +761,7 @@ fn _unitsphere(Sphere item) {
 class Graphics {
   init(title = nil, background = nil) {
     self.displaylist = [] // GraphicsEntry list
-    self._nextid = 1
+    self._nextId = 1
     self.title = title
     if (!self.title) self.title="Morpho" // Title to show
     self.background = background
@@ -777,8 +778,8 @@ class Graphics {
 
   /** Allocate id and append a GraphicsEntry; returns the id. No events. */
   _append(item, position=nil, scale=nil, rotate=nil, color=nil, flat=nil) {
-    var id = self._nextid
-    self._nextid += 1
+    var id = self._nextId
+    self._nextId += 1
     var e = GraphicsEntry(id, item, position=position, scale=scale,
                           rotate=rotate, color=color)
     if (!isnil(flat)) e.flat = flat
@@ -803,7 +804,7 @@ class Graphics {
   /** Unit Sphere + entry SRT from authored center/r. */
   display(Sphere item, color=nil, flat=nil) {
     var col = isnil(color) ? item.color : color
-    return self._append(_unitsphere(item), position=item.center, scale=item.r,
+    return self._append(_unitSphere(item), position=item.center, scale=item.r,
                         color=col, flat=flat)
   }
 
@@ -811,7 +812,7 @@ class Graphics {
   display(Sphere item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
     var scl = isnil(scale) ? 1 : scale
     var col = isnil(color) ? item.color : color
-    return self._append(_unitsphere(item), position=position, scale=scl, rotate=rotate,
+    return self._append(_unitSphere(item), position=position, scale=scl, rotate=rotate,
                         color=col, flat=flat)
   }
 
@@ -821,7 +822,7 @@ class Graphics {
     var g = Graphics()
     g.title = self.title
     g.background = self.background
-    g._nextid = self._nextid
+    g._nextId = self._nextId
     for (el in self.displaylist) {
       var e = GraphicsEntry(el.id, el.item, position=el.position, scale=el.scale,
                             rotate=el.rotate, color=el.color)
@@ -836,8 +837,7 @@ class Graphics {
   }
 }
 
-/** Live Graphics: Broadcaster + move / recolor / remove / replace / batch. Scene is Graphics, so
- *  Show and View accept Scene wherever Graphics is expected. */
+/** Live Graphics: Broadcaster + move / recolor / remove / replace / morph / batch. */
 class Scene is Graphics with Broadcaster {
   init(title = nil, background = nil) {
     super.init(title=title, background=background)
@@ -866,7 +866,7 @@ class Scene is Graphics with Broadcaster {
   move(id, position, scale=nil, rotate=nil) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    e.position = _asposition(position)
+    e.position = _asPosition(position)
     if (!isnil(scale)) e.scale = scale
     if (!isnil(rotate)) e.rotate = rotate
     self.notify(GraphicsEventMoved(id))
@@ -909,14 +909,14 @@ class Scene is Graphics with Broadcaster {
   replace(id, Sphere item) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    e.item = _unitsphere(item)
+    e.item = _unitSphere(item)
     if (isnil(e.color)) e.color = item.color
     self.notify(GraphicsEventReplaced(id))
     return true
   }
 
-  /** Same-length mesh swap: set `entry.item` only (no event). Pair with `View.refreshMesh`
-   *  or use `View.morph`. Connectivity changes need `replace`. */
+  /** Same-length mesh swap: set entry.item only. Pair with View.refreshMesh or View.morph.
+   *  Connectivity changes need replace. */
   morph(id, item) {
     var e = self.findEntry(id)
     if (isnil(e) || !isobject(item)) return false
@@ -929,7 +929,7 @@ class Scene is Graphics with Broadcaster {
     var g = Scene()
     g.title = self.title
     g.background = self.background
-    g._nextid = self._nextid
+    g._nextId = self._nextId
     for (el in self.displaylist) {
       var e = GraphicsEntry(el.id, el.item, position=el.position, scale=el.scale,
                             rotate=el.rotate, color=el.color)
@@ -950,7 +950,7 @@ class Scene is Graphics with Broadcaster {
 
 var _mvbin = nil
 
-fn _morphoviewbin() {
+fn _morphoViewBin() {
   if (!isnil(_mvbin)) return _mvbin
 
   var exe = (System.platform()=="windows" ? "morphoview.exe" : "morphoview")
@@ -1016,7 +1016,7 @@ class Show {
     var tempFolder = (isWindows ? "${System.homefolder()}\\AppData\\local\\Temp" : "/tmp")
     var fname = self._randomAlphanumString(10)
     var out = File("${tempFolder}/morpho${fname}.draw", "w")
-    var bin = _morphoviewbin()
+    var bin = _morphoViewBin()
 
     self.write(g, out)
 
@@ -1065,29 +1065,24 @@ class Show {
     return Float(x).format("%0.3g")
   }
 
-  /* The visit method for a generic `item`.
-
-  Here, we define this separate `visitGeneric` method that performs the intended generic task, and have the actual generic `visit` method call `visitGeneric`. This enables calls to the generic fallback from *within a specific implementation*.
-  For example, `visit(Cylinder)` can call `self.visitGeneric(item, out)` after a degenerate check; calling `self.visit(item, out)` would recurse on the typed overload.
-  */
+  /* Bake via item.toTriangleComplex(). Separate from visit(item) so typed overloads
+   * can fall back without recursing into themselves. */
   visitGeneric(item, out) {
-    var tri = item.totrianglecomplex()
+    var tri = item.toTriangleComplex()
     if (isnil(tri)) return // e.g. zero-length Cylinder/Arrow
-    // Most converters drop filter/transmit (Tube is the exception); copy from the source.
+    // Most converters drop filter/transmit (Tube keeps them); copy from source.
     if (!isnil(item.filter)) tri.filter = item.filter
     if (!isnil(item.transmit)) tri.transmit = item.transmit
     self.visit(tri, out)
   }
 
-  // Will be used by Tube (and other meshes with totrianglecomplex)
   visit(item, out) {
     self.visitGeneric(item, out)
   }
 
   visit(Cylinder item, out) {
-    // Skip degenerate shafts (zero/NaN length). `!(len > eps)` rejects NaN too.
     var len = (item.end - item.start).norm()
-    if (!(len > 1e-8)) return
+    if (!(len > 1e-8)) return // also rejects NaN
     self.visitGeneric(item, out)
   }
 
@@ -1098,16 +1093,13 @@ class Show {
   }
 
   visit(Sphere item, out) {
-    // Prefer visitEntry(Sphere); fallback bakes (no entry SRT / cache).
+    // Prefer visitEntry(Sphere); this path bakes without the mesh cache.
     self.visitGeneric(item, out)
   }
 
-  /** Emit i / s / r / t / d.
-   *  - viewerId set, entry.id ≠ 0 → `d <graphicsId> <viewerId>` (define/redraw)
-   *  - viewerId set, entry.id == 0 → `d <viewerId>` (no Graphics entry; raw bake only)
-   *  - viewerId nil → `d <graphicsId>` (pose-only update)
-   *  Callers under an entry must pass that entry (not GraphicsEntry(0,…)). */
-  emitEntryDraw(entry, out, viewerId=nil) {
+  /** Emit i/s/r/t/d. With viewerid: d <graphicsId> <viewerid> (or d <viewerid> if entry.id==0).
+   *  Without viewerid: d <graphicsId> (pose-only). */
+  emitEntryDraw(entry, out, viewerid=nil) {
     out.write("i")
     if (entry.scale != 1) out.write("s ${self.fmt(entry.scale)}")
     if (!isnil(entry.rotate)) {
@@ -1118,12 +1110,12 @@ class Show {
     if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
       out.write("t ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}")
     }
-    if (isnil(viewerId)) {
+    if (isnil(viewerid)) {
       out.write("d ${entry.id}")
     } else if (entry.id != 0) {
-      out.write("d ${entry.id} ${viewerId}")
+      out.write("d ${entry.id} ${viewerid}")
     } else {
-      out.write("d ${viewerId}")
+      out.write("d ${viewerid}")
     }
   }
 
@@ -1134,11 +1126,11 @@ class Show {
   }
 
   /** Record graphicsId → viewer id (and optional draw color / flat shade / layout). */
-  _recordObject(viewerId, colorId=nil, flat=false) {
+  _recordObject(viewerid, colorid=nil, flat=false) {
     var entry = self._currentEntry
     if (isnil(entry) || entry.id == 0) return
-    self.objectMap[entry.id] = viewerId
-    if (!isnil(colorId)) self.entryColorId[entry.id] = colorId
+    self.objectMap[entry.id] = viewerid
+    if (!isnil(colorid)) self.entryColorId[entry.id] = colorid
     if (flat) self.flatIds[entry.id] = true
     if (!isnil(self._lastVertexLayout)) {
       self.vertexLayout[entry.id] = self._lastVertexLayout
@@ -1155,7 +1147,7 @@ class Show {
       if (self.entryColorId.contains(entry.id)) {
         out.write("C ${self.entryColorId[entry.id]}")
       }
-      self.emitEntryDraw(entry, out, viewerId=vid)
+      self.emitEntryDraw(entry, out, viewerid=vid)
       if (needFlat) out.write("M shaded")
     }
   }
@@ -1212,10 +1204,10 @@ class Show {
   }
 
   /** How many Graphics entries map to this viewer object id. */
-  objectUserCount(viewerId) {
+  objectUserCount(viewerid) {
     var n = 0
     for (gid in self.objectMap) {
-      if (self.objectMap[gid] == viewerId) n += 1
+      if (self.objectMap[gid] == viewerid) n += 1
     }
     return n
   }
@@ -1228,11 +1220,11 @@ class Show {
     if (self.vertexLayout.contains(graphicsId)) self.vertexLayout.remove(graphicsId)
   }
 
-  /** Drop meshCache keys that point at @p viewerId. */
-  _forgetMeshCacheFor(viewerId) {
+  /** Drop meshCache keys that point at @p viewerid. */
+  _forgetMeshCacheFor(viewerid) {
     var drop = []
     for (key in self.meshCache) {
-      if (self.meshCache[key] == viewerId) drop.append(key)
+      if (self.meshCache[key] == viewerid) drop.append(key)
     }
     for (key in drop) self.meshCache.remove(key)
   }
@@ -1263,13 +1255,13 @@ class Show {
   /** Shared Sphere: keep cached `o` when refine key matches; else drop + rewrite. */
   _emitReplace(entry, Sphere item, out) {
     var graphicsId = entry.id
-    var key = "sphere:${item.refinementlevel(entry.scale)}"
+    var key = "sphere:${item._refinementLevel(entry.scale)}"
     var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
     if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
       var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
       self.entryColorId[graphicsId] = cid
       out.write("C ${cid}")
-      self.emitEntryDraw(entry, out, viewerId=oldVid)
+      self.emitEntryDraw(entry, out, viewerid=oldVid)
       return true
     }
     self.emitEntryRemove(graphicsId, out)
@@ -1300,9 +1292,9 @@ class Show {
     var vid = self.objectMap[entry.id]
     out.write("U V ${vid}")
     if (layout == "xnc") {
-      self._triangleComplexVertexFloats(item, out, includeColor=true)
+      self._triangleComplexVertexFloats(item, out, includecolor=true)
     } else if (layout == "xn") {
-      self._triangleComplexVertexFloats(item, out, includeColor=false)
+      self._triangleComplexVertexFloats(item, out, includecolor=false)
     } else {
       return false
     }
@@ -1342,13 +1334,13 @@ class Show {
     return self.colors[key]
   }
 
-  triangleComplexObjectData(item, out, includeColor=true) {
-    if (includeColor) {
+  triangleComplexObjectData(item, out, includecolor=true) {
+    if (includecolor) {
       out.write("v \"xnc\"")
     } else {
       out.write("v \"xn\"")
     }
-    self._triangleComplexVertexFloats(item, out, includeColor=includeColor)
+    self._triangleComplexVertexFloats(item, out, includecolor=includecolor)
 
     out.write("f")
     var f=item.connectivity
@@ -1372,7 +1364,7 @@ class Show {
   }
 
   /** Position + normal [+ color] float rows only (shared by define `v` and `U V`). */
-  _triangleComplexVertexFloats(item, out, includeColor=true) {
+  _triangleComplexVertexFloats(item, out, includecolor=true) {
     var x = item.position
     var n = item.normals
     var col = item.colors
@@ -1381,7 +1373,7 @@ class Show {
     var dim = dimensions[0]
     var nv = dimensions[1]
 
-    if (includeColor) {
+    if (includecolor) {
       if (ismatrix(col)) {
         if (col.dimensions()[1] > 1) localColor = true
       } else if (isobject(col) && !islist(col)) col = col.rgb(0)
@@ -1391,7 +1383,7 @@ class Show {
       var line = ""
       for (j in 0...dim) line += "${self.fmt(x[j,i])} "
       for (j in 0...dim) line += "${self.fmt(n[j,i])} "
-      if (includeColor) {
+      if (includecolor) {
         if (localColor) {
           for (j in 0...3) line += "${self.fmt(col[j,i])} "
         } else {
@@ -1408,7 +1400,7 @@ class Show {
     var id = self.uid()
     self._lastVertexLayout = "xn"
     out.write("o ${id}")
-    self.triangleComplexObjectData(item, out, includeColor=false)
+    self.triangleComplexObjectData(item, out, includecolor=false)
     return id
   }
 
@@ -1426,7 +1418,7 @@ class Show {
       self._lastVertexLayout = "xn"
       out.write("C ${cid}")
       out.write("o ${id}")
-      self.triangleComplexObjectData(item, out, includeColor=false)
+      self.triangleComplexObjectData(item, out, includecolor=false)
     } else {
       self._lastVertexLayout = "xnc"
       out.write("o ${id}")
@@ -1438,8 +1430,8 @@ class Show {
   /** From visitGeneric (baked Sphere/Cylinder/…): draw with `_currentEntry` when set. */
   visit(TriangleComplex item, out) {
     var vid = self.defineTriangleComplex(item, out)
-    self._recordObject(vid, colorId=self._lastColorId)
-    self.emitEntryDraw(self._drawEntry(item), out, viewerId=vid)
+    self._recordObject(vid, colorid=self._lastColorId)
+    self.emitEntryDraw(self._drawEntry(item), out, viewerid=vid)
   }
 
   /** Uniform RGB for PointCloud / LineSet color field. */
@@ -1448,7 +1440,7 @@ class Show {
   }
 
   /** Emit vertex positions (+ optional per-vertex color) for points/lines. */
-  pointLineVertexData(item, out, includeColor=true) {
+  pointLineVertexData(item, out, includecolor=true) {
     var x = item.position
     var col = item.color
     var localColor = false
@@ -1456,7 +1448,7 @@ class Show {
     var dim = dimensions[0]
     var nv = dimensions[1]
 
-    if (includeColor) {
+    if (includecolor) {
       if (ismatrix(col)) {
         if (col.dimensions()[1] > 1) localColor = true
       } else if (isobject(col) && !islist(col)) {
@@ -1471,7 +1463,7 @@ class Show {
     for (i in 0...nv) {
       var line = ""
       for (j in 0...dim) line += "${self.fmt(x[j,i])} "
-      if (includeColor) {
+      if (includecolor) {
         if (localColor) {
           for (j in 0...3) line += "${self.fmt(col[j,i])} "
         } else if (islist(col) || (isobject(col) && !ismatrix(col))) {
@@ -1499,10 +1491,10 @@ class Show {
       self._lastColorId = cid
       out.write("C ${cid}")
       out.write("o ${id}")
-      self.pointLineVertexData(item, out, includeColor=false)
+      self.pointLineVertexData(item, out, includecolor=false)
     } else {
       out.write("o ${id}")
-      self.pointLineVertexData(item, out, includeColor=true)
+      self.pointLineVertexData(item, out, includecolor=true)
     }
     var pline = "p"
     for (i in 0...nv) pline += " ${i}"
@@ -1515,7 +1507,7 @@ class Show {
     var id = self.uid()
     var alpha = self.opacity(item)
     var nv = item.position.dimensions()[1]
-    var segs = item.segmentindices()
+    var segs = item._segmentIndices()
     if (nv < 1 || segs.count() < 2) return nil
     self._lastColorId = nil
     var cid = nil
@@ -1524,10 +1516,10 @@ class Show {
       self._lastColorId = cid
       out.write("C ${cid}")
       out.write("o ${id}")
-      self.pointLineVertexData(item, out, includeColor=false)
+      self.pointLineVertexData(item, out, includecolor=false)
     } else {
       out.write("o ${id}")
-      self.pointLineVertexData(item, out, includeColor=true)
+      self.pointLineVertexData(item, out, includecolor=true)
     }
     var lline = "l"
     for (i in 0...segs.count()) lline += " ${segs[i]}"
@@ -1539,8 +1531,8 @@ class Show {
     out.write("M flat")
     var id = self.definePointCloud(item, out)
     if (isnil(id)) { out.write("M shaded"); return }
-    self._recordObject(id, colorId=self._lastColorId, flat=true)
-    self.emitEntryDraw(self._drawEntry(item), out, viewerId=id)
+    self._recordObject(id, colorid=self._lastColorId, flat=true)
+    self.emitEntryDraw(self._drawEntry(item), out, viewerid=id)
     out.write("M shaded")
   }
 
@@ -1548,8 +1540,8 @@ class Show {
     out.write("M flat")
     var id = self.defineLineSet(item, out)
     if (isnil(id)) { out.write("M shaded"); return }
-    self._recordObject(id, colorId=self._lastColorId, flat=true)
-    self.emitEntryDraw(self._drawEntry(item), out, viewerId=id)
+    self._recordObject(id, colorid=self._lastColorId, flat=true)
+    self.emitEntryDraw(self._drawEntry(item), out, viewerid=id)
     out.write("M shaded")
   }
 
@@ -1637,7 +1629,7 @@ class Show {
     }
 
     out.write("i")
-    var m = item.transformationmatrix()
+    var m = item.transformationMatrix()
     if (m) {
       var str = "m"
       for (i in 0..3) for (j in 0..3) str+=" "+self.fmt(m[i,j])
@@ -1675,13 +1667,13 @@ class Show {
   /** Unit sphere mesh (cached by refine level) + entry SRT + `C` color. */
   visitEntry(entry, Sphere item, out) {
     self._currentEntry = entry
-    var n = item.refinementlevel(entry.scale)
+    var n = item._refinementLevel(entry.scale)
     var key = "sphere:${n}"
     var vid
     if (self.meshCache.contains(key)) {
       vid = self.meshCache[key]
     } else {
-      var tri = item.totrianglecomplex(scale=false, radiusForRefine=entry.scale)
+      var tri = item.toTriangleComplex(scale=false, radiusforrefine=entry.scale)
       if (!isnil(item.filter)) tri.filter = item.filter
       if (!isnil(item.transmit)) tri.transmit = item.transmit
       vid = self.defineXnTriangleComplex(tri, out)
@@ -1690,8 +1682,8 @@ class Show {
     var alpha = self.opacity(item)
     var cid = self.addRgb(self.entryRgb(entry), alpha, out)
     out.write("C ${cid}")
-    self._recordObject(vid, colorId=cid)
-    self.emitEntryDraw(entry, out, viewerId=vid)
+    self._recordObject(vid, colorid=cid)
+    self.emitEntryDraw(entry, out, viewerid=vid)
     self._currentEntry = nil
   }
 
@@ -1701,8 +1693,8 @@ class Show {
     out.write("M flat")
     var vid = self.definePointCloud(item, out)
     if (!isnil(vid)) {
-      self._recordObject(vid, colorId=self._lastColorId, flat=true)
-      self.emitEntryDraw(entry, out, viewerId=vid)
+      self._recordObject(vid, colorid=self._lastColorId, flat=true)
+      self.emitEntryDraw(entry, out, viewerid=vid)
     }
     out.write("M shaded")
     self._currentEntry = nil
@@ -1714,8 +1706,8 @@ class Show {
     out.write("M flat")
     var vid = self.defineLineSet(item, out)
     if (!isnil(vid)) {
-      self._recordObject(vid, colorId=self._lastColorId, flat=true)
-      self.emitEntryDraw(entry, out, viewerId=vid)
+      self._recordObject(vid, colorid=self._lastColorId, flat=true)
+      self.emitEntryDraw(entry, out, viewerid=vid)
     }
     out.write("M shaded")
     self._currentEntry = nil
@@ -1728,8 +1720,8 @@ class Show {
     var flat = entry.flat
     if (flat) out.write("M flat")
     var vid = self.defineTriangleComplex(item, out)
-    self._recordObject(vid, colorId=self._lastColorId, flat=flat)
-    self.emitEntryDraw(entry, out, viewerId=vid)
+    self._recordObject(vid, colorid=self._lastColorId, flat=flat)
+    self.emitEntryDraw(entry, out, viewerid=vid)
     if (flat) out.write("M shaded")
     self._currentEntry = nil
   }

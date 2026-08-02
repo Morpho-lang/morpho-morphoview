@@ -75,8 +75,8 @@ Viewer IR already accepts float/index blobs; Morpho needs a binary serialize pat
 - [x] `redraw(commands)` — `D` + redraw draws (tests / escape hatch)
 - [x] `write(line)` — File-compatible sink for `Show.write(g, out)`
 - [x] Listener `receive` for Defined / Moved / Recolored / Removed / Replaced
-- [x] `poll(timeoutMs)` — non-blocking / short wait; return event or `nil`
-- [x] `wait(sessionTimeOut=0)` — convenience loop until closed / timeout
+- [x] `poll(timeoutms)` — non-blocking / short wait; return event or `nil`
+- [x] `wait(sessiontimeout=0)` — convenience loop until closed / timeout
 - [x] `close()` — idempotent cleanup
 - [x] Private helpers prefixed with `_`
 - [x] `beginBatch` / `endBatch` via Broadcaster mixin (Phase 5a)

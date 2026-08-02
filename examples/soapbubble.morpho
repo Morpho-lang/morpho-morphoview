@@ -117,7 +117,7 @@ var lv = VolumeEnclosed()
 
 var g = Scene(title="Soap bubble", background=Color(0.06, 0.07, 0.1))
 var meshId = g.display(meshFaces(mesh, film, transmit=transmit))
-var v = View(g, connectTimeOut=20000)
+var v = View(g, connecttimeout=20000)
 
 print "Ellipsoid: ${mesh.count(0)} verts, ${mesh.count(2)} faces, A=${la.total(mesh)}  V=${lv.total(mesh)}"
 
@@ -136,7 +136,7 @@ if (!v.closed) {
     if (v.closed) break
     if (!gd.iterate()) break
     if (!syncMesh(v, meshId, mesh)) break
-    v.poll(timeoutMs=0)
+    v.poll(timeoutms=0)
     if (mod(i, muEvery) == 0) pad.setPenalty(pad.penalty()*muMul)
     System.sleep(frameSleep)
   }
@@ -145,7 +145,7 @@ if (!v.closed) {
   var A1 = la.total(mesh)
   var R1 = (V1/(4/3*Pi))^(1/3)
   print "Relaxed: A=${A1}  sphere=${4*Pi*R1*R1}  V=${V1}"
-  v.wait(sessionTimeOut=8000)
+  v.wait(sessiontimeout=8000)
 }
 if (!v.closed) v.close()
 print "ok"

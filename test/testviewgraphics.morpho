@@ -36,7 +36,7 @@ if (!v.open(triangle(0))) {
     if (v.closed) break
     v.update(triangle(Float(i)*0.2))
     System.sleep(0.05)
-    v.poll(timeoutMs=0)
+    v.poll(timeoutms=0)
   }
   v.close()
   print "ok"

@@ -37,7 +37,7 @@ if (!v.open(triangle(0, "S 0 3\nW \"spin\"\n"))) {
     if (v.closed) break
     v.update(triangle(Float(i)*0.12, "U S 0\n"))
     System.sleep(0.03)
-    v.poll(timeoutMs=0)
+    v.poll(timeoutms=0)
   }
   v.close()
   print "ok"

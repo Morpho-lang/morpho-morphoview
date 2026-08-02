@@ -55,6 +55,6 @@ var v = View()
 if (!v.open(largeTetrahedron(40))) {
   print "open failed"
 } else {
-  v.wait(sessionTimeOut=6000)
+  v.wait(sessiontimeout=6000)
   print "ok"
 }

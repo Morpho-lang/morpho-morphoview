@@ -30,15 +30,15 @@ var idGone = g.display(tri(1), [0.8, 0, 0], scale=1)
 
 var v = View(g)
 System.sleep(0.1)
-v.poll(timeoutMs=0)
+v.poll(timeoutms=0)
 
 expect(g.replace(idKeep, tri(1.4)), "replace")
 System.sleep(0.05)
-v.poll(timeoutMs=0)
+v.poll(timeoutms=0)
 
 expect(g.remove(idGone), "remove")
 System.sleep(0.05)
-v.poll(timeoutMs=0)
+v.poll(timeoutms=0)
 
 expect(!v.closed, "session still open")
 if (!v.closed) v.close()

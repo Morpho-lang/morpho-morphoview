@@ -26,6 +26,6 @@ var v = View()
 if (!v.open(glassSpheres())) {
   print "open failed"
 } else {
-  v.wait(sessionTimeOut=8000)
+  v.wait(sessiontimeout=8000)
   print "ok"
 }

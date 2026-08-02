@@ -1,26 +1,17 @@
-/** MorphoView live session helper.
+/** Live morphoview session over ZMQ PAIR.
  *
- *  `View` is a duplex ZMQ PAIR session with morphoview (distinct from
- *  fire-and-forget `Show(g)` in xgraphics, which writes a temp file and
- *  launches `-t`).
+ *  Unlike Show(g) (temp file + morphoview -t), View keeps a duplex channel.
+ *  Drive it with poll / System.sleep — Morpho has no async runtime.
  *
- *  Morpho has no async runtime: keep the channel open and drive the loop
- *  with `poll` / `System.sleep`, or use `wait` as a convenience.
- *
- *    var v = View()
- *    v.open(commands)           // ASCII string
- *    v.open(g)                  // Graphics or Scene: Show.write once
- *    var v = View(scene)        // live: open Scene, then listen for move/recolor
- *    v.update(morecommands)     // e.g. chunk starting with `U S <id>`
- *    v.update(g)                // Graphics/Scene replace via `U S` + rebind
- *    v.redraw(posecommands)     // `D` + redraw draws (no geometry wipe)
- *    // After View(scene): scene.move / recolor drive pose-only `d` / `C`
- *    // morph(id, item) / refreshMesh(id) — same-length U V (vs replace)
- *    v.poll(timeoutMs=0)
- *    v.wait(sessionTimeOut=1500)
+ *    var v = View(scene)            // open + listen
+ *    v.open(commands)               // or ASCII chunk
+ *    scene.move(id, ...)            // → pose-only d / C
+ *    v.morph(id, item)              // same-length U V (vs replace)
+ *    v.poll(timeoutms=0)
+ *    v.wait(sessiontimeout=1500)
  *    v.close()
  *
- *  Requires: import zeromq  (morpho-zeromq package)
+ *  Requires morpho-zeromq.
  */
 
 import zeromq
@@ -29,14 +20,10 @@ import broadcast
 
 var _vwopnfl = Error("VwOpnFl", "View failed to open morphoview session.")
 
-/* **************************************
- * View — live duplex session
- **************************************** */
-
 class View with Listener {
-  init(connectTimeOut=5000, pollMs=100) {
-    self.connectTimeOut = connectTimeOut
-    self.pollMs = pollMs
+  init(connecttimeout=5000, pollms=100) {
+    self.connecttimeout = connecttimeout
+    self.pollms = pollms
     self.sock = nil
     self.ep = nil
     self.poller = nil
@@ -47,20 +34,18 @@ class View with Listener {
     self.show = nil
   }
 
-  // Open immediately (same as View() then open(g)). Scene → live listen;
-  // plain Graphics → set-and-forget. Throws if the session cannot open.
-  init(Graphics g, connectTimeOut=5000, pollMs=100) {
-    self.init(connectTimeOut=connectTimeOut, pollMs=pollMs)
+  /** Open immediately; throws if the session cannot start. */
+  init(Graphics g, connecttimeout=5000, pollms=100) {
+    self.init(connecttimeout=connecttimeout, pollms=pollms)
     if (!self.open(g)) _vwopnfl.throw()
   }
 
-  // File-compatible sink for Show.write(g, out): each line gets a trailing newline
-  // (Morpho File.write does the same).
+  /** Show.write sink — appends a trailing newline per line. */
   write(line) {
     self.cmdBuf += "${line}\n"
   }
 
-  // Bind, spawn morphoview, send the first command chunk, wait for `ok`.
+  /** Bind, spawn viewer, send first chunk, wait for ok. */
   open(commands) {
     if (!isnil(self.sock)) {
       print "morphoview: View already open"
@@ -75,17 +60,15 @@ class View with Listener {
     return self._waitOk()
   }
 
-  // Serialize Graphics via Show and open (no listener).
   open(Graphics g) { return self._openModel(g) }
 
-  // Serialize Scene, open, then listen for move/recolor/display.
   open(Scene g) {
     var ok = self._openModel(g)
     if (ok) self.listen(g)
     return ok
   }
 
-  // Send another command chunk and wait for `ok`.
+  /** Send another chunk and wait for ok. */
   update(commands) {
     if (self.closed) return false
     self.gotOk = false
@@ -93,17 +76,14 @@ class View with Listener {
     return self._waitOk()
   }
 
-  // Full `U S` replace (no listener).
   update(Graphics g) { return self._updateModel(g) }
 
-  // Full `U S` replace and rebind listener.
   update(Scene g) {
     var ok = self._updateModel(g)
     if (ok) self.listen(g)
     return ok
   }
 
-  // Show.write + open(commands); store model. Shared by Graphics/Scene open.
   _openModel(Graphics g) {
     if (!isnil(self.graphics)) self._detach(self.graphics)
     self.show = Show()
@@ -118,7 +98,6 @@ class View with Listener {
     return ok
   }
 
-  // Show.write with replace + update(commands); store model.
   _updateModel(Graphics g) {
     if (self.closed) return false
     if (!isnil(self.graphics)) self._detach(self.graphics)
@@ -136,13 +115,10 @@ class View with Listener {
     return ok
   }
 
-  // No-op for static Graphics; Scene overload unsubscribes.
   _detach(Graphics g) { }
-
   _detach(Scene g) { self.ignore(g) }
 
-  // Clear draws (`D`) and re-issue pose/draw ASCII without `U S`.
-  // Prepends `D` unless `commands` already starts with it.
+  /** Clear draws (D) and re-issue draw ASCII without U S. */
   redraw(commands) {
     if (self.closed) return false
     self.gotOk = false
@@ -155,8 +131,6 @@ class View with Listener {
     return self._waitOk()
   }
 
-  // GraphicsEventDefined → define+draw; Moved → pose `d`; Recolored → `C` + `d`;
-  // Removed → X D (+ X O if last user); Replaced → sphere-cache refresh or remove+rewrite.
   receive(Graphics g, GraphicsEventDefined ev) {
     if (self.closed || isnil(self.show)) return
     var entry = g.findEntry(ev.id)
@@ -177,7 +151,7 @@ class View with Listener {
     for (id in ids) {
       self.show.emitEntryPose(g, id, self)
     }
-    // Unmapped ids: skip (do not D + empty redraw — blanks the window).
+    // Unmapped ids: no-op (never D + empty redraw).
     if (self.cmdBuf.count() == 0) return
     self.gotOk = false
     self._send(self.cmdBuf)
@@ -189,9 +163,8 @@ class View with Listener {
     var ids = ev.ids
     if (isnil(ids) || ids.count() == 0) ids = [ev.id]
     self.cmdBuf = ""
-    var any = false
     for (id in ids) {
-      if (self.show.emitEntryRecolor(g, id, self)) any = true
+      self.show.emitEntryRecolor(g, id, self)
     }
     if (self.cmdBuf.count() == 0) return
     self.gotOk = false
@@ -219,17 +192,14 @@ class View with Listener {
     self._waitOk()
   }
 
-  /** Set entry item and push same-length vertices (`U V`). For connectivity
-   *  changes use Scene.replace (full redefine). Returns false on failure. */
+  /** Swap item and push same-length vertices (U V). Use replace for new connectivity. */
   morph(graphicsId, item) {
     if (self.closed || isnil(self.graphics)) return false
     if (!self.graphics.morph(graphicsId, item)) return false
     return self.refreshMesh(graphicsId)
   }
 
-  /** Push same-length vertex data for a TriangleComplex entry (`U V`).
-   *  Layout must match how the object was defined (`xn` / `xnc`).
-   *  Call after `Scene.morph` or in-place mutation of `entry.item` (fixed connectivity). */
+  /** Push U V for a TriangleComplex entry (layout must match define: xn / xnc). */
   refreshMesh(graphicsId) {
     if (self.closed || isnil(self.show) || isnil(self.graphics)) return false
     self.cmdBuf = ""
@@ -240,27 +210,25 @@ class View with Listener {
     return self._waitOk()
   }
 
-  // Wait briefly for one reply/event. Returns the message string, or nil.
-  // Default timeout is self.pollMs; use poll(timeoutMs=0) for a non-blocking check.
-  poll(timeoutMs=nil) {
+  /** One reply, or nil on timeout. poll(timeoutms=0) is non-blocking. */
+  poll(timeoutms=nil) {
     if (self.closed || isnil(self.poller)) return nil
-    var t = self.pollMs
-    if (!isnil(timeoutMs)) t = timeoutMs
+    var t = self.pollms
+    if (!isnil(timeoutms)) t = timeoutms
     var ready = self.poller.wait(t)
     if (!ready) return nil
     return self._handle(self.sock.receive())
   }
 
-  // Poll until the window closes, the peer dies, or sessionTimeOut ms elapse
-  // (0 = wait indefinitely for window.closed).
-  wait(sessionTimeOut=0) {
+  /** Spin until the window closes, or sessiontimeout ms (0 = forever). */
+  wait(sessiontimeout=0) {
     var waited = 0
     while (!self.closed) {
-      self.poll(timeoutMs=self.pollMs)
+      self.poll(timeoutms=self.pollms)
       if (self.closed) break
-      if (sessionTimeOut > 0) {
-        waited += self.pollMs
-        if (waited >= sessionTimeOut) {
+      if (sessiontimeout > 0) {
+        waited += self.pollms
+        if (waited >= sessiontimeout) {
           self.close()
           break
         }
@@ -268,7 +236,7 @@ class View with Listener {
     }
   }
 
-  // Best-effort stop of the viewer; idempotent. Prefers command `Q` over pkill.
+  /** Stop the viewer; idempotent. Prefers Q, then pkill. */
   close() {
     if (self.closed) return
     if (!isnil(self.graphics)) self._detach(self.graphics)
@@ -277,10 +245,10 @@ class View with Listener {
     if (!isnil(self.sock)) {
       self._send("Q")
       var waited = 0
-      while (!self.closed && waited < self.connectTimeOut) {
-        self.poll(timeoutMs=self.pollMs)
+      while (!self.closed && waited < self.connecttimeout) {
+        self.poll(timeoutms=self.pollms)
         if (self.closed) break
-        waited += self.pollMs
+        waited += self.pollms
       }
     }
     if (!self.closed) self._kill()
@@ -294,7 +262,7 @@ class View with Listener {
   }
 
   _spawn() {
-    var bin = _morphoviewbin()
+    var bin = _morphoViewBin()
     if (System.platform()=="windows") {
       system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-c', '${self.ep}'\"")
     } else {
@@ -306,15 +274,14 @@ class View with Listener {
     self.sock.send(commands)
   }
 
-  // Block (via poll) until `ok`, error/close, or connectTimeOut.
   _waitOk() {
     var waited = 0
     while (!self.closed && !self.gotOk) {
-      self.poll(timeoutMs=self.pollMs)
+      self.poll(timeoutms=self.pollms)
       if (self.gotOk) return true
       if (self.closed) return false
-      waited += self.pollMs
-      if (waited >= self.connectTimeOut) {
+      waited += self.pollms
+      if (waited >= self.connecttimeout) {
         print "morphoview: timed out waiting for ok"
         self._kill()
         self.closed = true
@@ -324,7 +291,6 @@ class View with Listener {
     return self.gotOk
   }
 
-  // Interpret one reply; update gotOk / closed. Returns msg (or nil if peer gone).
   _handle(msg) {
     if (!isstring(msg)) {
       self.closed = true

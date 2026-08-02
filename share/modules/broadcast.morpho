@@ -1,31 +1,23 @@
-/** Broadcaster / Listener mixins
+/** Broadcaster / Listener
  *
- *  Broadcasters send events to listeners that have subscribed to them. To use:
+ *    class Hub with Broadcaster { ... }
+ *    class Sink with Listener { ... }
  *
- *    class MyBroadcaster with Broadcaster { ... }
- *    class MyListener with Listener { ... }
+ *    sink.listen(hub)
+ *    hub.notify(event)          // → sink.receive(hub, event)
+ *    sink.ignore(hub)
  *
- *    listener.listen(broadcaster)
- *    broadcaster.notify(event)       // → listener.receive(broadcaster, event)
- *    listener.ignore(broadcaster)
+ *  Nested batches coalesce same-key events before delivery:
  *
- *  Batching (nested beginBatch/endBatch):
+ *    hub.beginBatch()
+ *    hub.notify(ev1)
+ *    hub.notify(ev2)
+ *    hub.endBatch()             // flush once
  *
- *    broadcaster.beginBatch()
- *    broadcaster.notify(ev1)         // queued
- *    broadcaster.notify(ev2)
- *    broadcaster.endBatch()          // deliver pending in order
- *
- *  BroadcastEvent is a mixin that defines the coalescence protocol for batched
- *  notify (see plan-graphics-view-listener.md Phase 5a).
- *
- *  Repo convention for dynamism:
- *  - Known types / closed set → multiple dispatch
- *  - Open but bounded interface → mixin protocol (Broadcaster / Listener / BroadcastEvent)
- *  - Genuinely open values → respondsto / runtime shape checks
+ *  Mix in BroadcastEvent so batched events can expose batchKey / coalesce.
  */
 
-/** Mixin: coalescence protocol for Broadcaster batching (`batchKey` / `coalesce`). */
+/** Defaults: no coalesce. Override batchKey (non-nil) and coalesce as needed. */
 class BroadcastEvent {
   batchKey() { return nil }
   coalesce(prev) { }
@@ -38,14 +30,14 @@ class Broadcaster {
     self._pending = []
   }
 
-  subscribe(listener) { // Register a listener
+  subscribe(listener) {
     for (l in self.listeners) {
       if (l == listener) return
     }
     self.listeners.append(listener)
   }
 
-  unsubscribe(listener) { // Deregister a listener
+  unsubscribe(listener) {
     var out = []
     for (l in self.listeners) {
       if (l != listener) out.append(l)
@@ -53,12 +45,10 @@ class Broadcaster {
     self.listeners = out
   }
 
-  /** Start a notification batch; nested beginBatch/endBatch supported. */
   beginBatch() {
     self._batchDepth += 1
   }
 
-  /** End a batch; outermost endBatch delivers pending events in order. */
   endBatch() {
     if (self._batchDepth <= 0) return
     self._batchDepth -= 1
@@ -70,7 +60,7 @@ class Broadcaster {
     }
   }
 
-  /** Queue while batching (coalesce when batchKey() is non-nil); else deliver now. */
+  /** Queue while batching; deliver immediately otherwise. */
   notify(event) {
     if (self._batchDepth > 0) {
       if (!event.respondsto("batchKey")) {
@@ -106,13 +96,12 @@ class Broadcaster {
   }
 }
 
-/** Receives events from a Broadcaster. Override `receive` (typed overloads OK). */
 class Listener {
-  listen(broadcaster) { // Start receiving from `broadcaster`
+  listen(broadcaster) {
     broadcaster.subscribe(self)
   }
 
-  ignore(broadcaster) { // Stop receiving from `broadcaster`
+  ignore(broadcaster) {
     broadcaster.unsubscribe(self)
   }
 

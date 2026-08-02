@@ -83,5 +83,5 @@ if (!v2.update(delDraw)) {
   v2.close()
   System.exit()
 }
-v2.wait(sessionTimeOut=1500)
+v2.wait(sessiontimeout=1500)
 print "ok"

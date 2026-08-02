@@ -186,7 +186,7 @@ g.display(wireroom(roomHalf, roomTiles, wallH))
 var ball = g.display(checkersphere(nLat, nLon), bp, scale=ballR, rotate=[angle, 0, 1, 0],
                      flat=true)
 
-var v = View(g, connectTimeOut=10000)
+var v = View(g, connecttimeout=10000)
 
 for (frame in 1...nFrames) {
   if (v.closed) break
@@ -209,7 +209,7 @@ for (frame in 1...nFrames) {
   g.move(shadow, worldPos(x, 0.04, z), scale=shadowScale(y))
   g.endBatch()
   System.sleep(dt)
-  v.poll(timeoutMs=0)
+  v.poll(timeoutms=0)
 }
 
 if (!v.closed) v.close()

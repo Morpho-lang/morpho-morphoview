@@ -14,6 +14,6 @@ var v = View()
 if (!v.open(commands)) {
   print "open failed"
 } else {
-  v.wait(sessionTimeOut=1500)
+  v.wait(sessiontimeout=1500)
   print "ok"
 }

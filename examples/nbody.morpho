@@ -66,7 +66,7 @@ for (i in 0...nBodies) {
   ids.append(id)
 }
 
-var v = View(g, connectTimeOut=20000)
+var v = View(g, connecttimeout=20000)
 var noiseAmp = diffusion*sqrt(dt)
 
 for (frame in 1...nFrames) {
@@ -122,7 +122,7 @@ for (frame in 1...nFrames) {
   g.endBatch()
 
   System.sleep(dt)
-  v.poll(timeoutMs=0)
+  v.poll(timeoutms=0)
 }
 
 if (!v.closed) v.close()

@@ -27,7 +27,7 @@ for (i in 1...8) {
   var a = Float(i) * 0.15
   g.move(id, [0.1*i, 0, 0], scale=1 + 0.05*i, rotate=[a, 0, 0, 1])
   System.sleep(0.05)
-  v.poll(timeoutMs=0)
+  v.poll(timeoutms=0)
 }
 
 if (!v.closed) v.close()
