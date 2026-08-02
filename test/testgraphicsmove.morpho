@@ -177,6 +177,11 @@ for (line in bufPose.lines) {
 }
 expect(hasD && !hasClear, "selective pose emits d without D")
 
+// Unmapped id: no emit (View must not D+redraw — would blank the window).
+var bufMiss = Buf()
+expect(!show7.emitEntryPose(g7, 999, bufMiss), "unmapped pose fails")
+expect(bufMiss.lines.count() == 0, "unmapped pose emits nothing")
+
 /* ---- two listeners see the same full id list ---- */
 var gMulti = Scene()
 var idMa = gMulti.display(tc, [0, 0, 0])

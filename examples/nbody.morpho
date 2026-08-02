@@ -62,8 +62,7 @@ for (i in 0...nBodies) {
   var col = hsv(360*Float(i)/Float(nBodies), 0.75, 0.95)
   var proto = protoLo
   if (r > 0.16) proto = protoHi
-  var id = g.display(proto, [pos[0,i], pos[1,i], pos[2,i]], scale=r)
-  g.findEntry(id).color = col
+  var id = g.display(proto, [pos[0,i], pos[1,i], pos[2,i]], scale=r, color=col)
   ids.append(id)
 }
 

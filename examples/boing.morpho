@@ -1,7 +1,6 @@
-// Amiga "Boing" ball — live Graphics session.
-// Pitched magenta wireframe room + faceted ball; physics via Scene.move.
+// Boing — bouncing checkered ball in a wireframe room (live Graphics session).
 //
-//   morpho6 examples/amigaball.morpho
+//   morpho6 examples/boing.morpho
 //
 // Close the viewer window (or wait for the run to finish) to exit.
 
@@ -10,11 +9,11 @@ import xgraphics
 import color
 import constants
 
-var amigaGrey = Color(10/15, 10/15, 10/15)
-var amigaWire = Color(1, 0, 1)                 // bright magenta grid
-var amigaRed = Color(1, 0, 0)
-var amigaWhite = Color(1, 1, 1)
-var amigaShadow = Color(0.22, 0.22, 0.22)
+var roomGrey = Color(10/15, 10/15, 10/15)
+var roomWire = Color(1, 0, 1)                 // bright magenta grid
+var ballRed = Color(1, 0, 0)
+var ballWhite = Color(1, 1, 1)
+var ballShadow = Color(0.22, 0.22, 0.22)
 
 var roomHalf = 3.0
 var roomTiles = 8
@@ -43,8 +42,8 @@ fn worldPos(x, y, z) {
   return pitchPt([x, y, z])
 }
 
-/* Magenta wireframe floor + back wall (classic Boing), pitched for default −Z camera. */
-fn amigaroom(half, n, height) {
+/* Magenta wireframe floor + back wall, pitched for default −Z camera. */
+fn wireroom(half, n, height) {
   var pts = []
   var segs = []
   var h = 2*half/Float(n)
@@ -84,7 +83,7 @@ fn amigaroom(half, n, height) {
     segs.append([i0, i0+1])
   }
 
-  return LineSet(pts, segs, color=amigaWire)
+  return LineSet(pts, segs, color=roomWire)
 }
 
 fn checkersphere(nlat, nlon) {
@@ -110,8 +109,8 @@ fn checkersphere(nlat, nlon) {
       ]
       var parity = i + j - 2*Int(Float(i + j)/2)
       var rgb = (parity == 0) ?
-        [amigaRed.r, amigaRed.g, amigaRed.b] :
-        [amigaWhite.r, amigaWhite.g, amigaWhite.b]
+        [ballRed.r, ballRed.g, ballRed.b] :
+        [ballWhite.r, ballWhite.g, ballWhite.b]
       var e1 = [raw[1][0]-raw[0][0], raw[1][1]-raw[0][1], raw[1][2]-raw[0][2]]
       var e2 = [raw[3][0]-raw[0][0], raw[3][1]-raw[0][1], raw[3][2]-raw[0][2]]
       var nx = e1[1]*e2[2]-e1[2]*e2[1]
@@ -145,13 +144,13 @@ fn unitshadow() {
   var p0 = pitchPt([0, 0.02, 0])
   pos[0,0]=p0[0]; pos[1,0]=p0[1]; pos[2,0]=p0[2]
   nrm[0,0]=nn[0]; nrm[1,0]=nn[1]; nrm[2,0]=nn[2]
-  col[0,0]=amigaShadow.r; col[1,0]=amigaShadow.g; col[2,0]=amigaShadow.b
+  col[0,0]=ballShadow.r; col[1,0]=ballShadow.g; col[2,0]=ballShadow.b
   for (i in 0...n) {
     var a = 2*Pi*Float(i)/Float(n)
     var pp = pitchPt([cos(a), 0.02, 0.65*sin(a)])
     pos[0,i+1]=pp[0]; pos[1,i+1]=pp[1]; pos[2,i+1]=pp[2]
     nrm[0,i+1]=nn[0]; nrm[1,i+1]=nn[1]; nrm[2,i+1]=nn[2]
-    col[0,i+1]=amigaShadow.r; col[1,i+1]=amigaShadow.g; col[2,i+1]=amigaShadow.b
+    col[0,i+1]=ballShadow.r; col[1,i+1]=ballShadow.g; col[2,i+1]=ballShadow.b
   }
   for (i in 0...n) {
     var j = i+1
@@ -176,17 +175,16 @@ var vx = 2.5
 var vy = 0.0
 var angle = 0.0
 
-var g = Scene(title="Boing", background=amigaGrey)
+var g = Scene(title="Boing", background=roomGrey)
 
 /* Translucent shadow before the room (display order matches the working
    translucent-then-vertex-color case); ball last. */
 var sp = worldPos(x, 0.04, z)
 var bp = worldPos(x, y, z)
-var shadow = g.display(unitshadow(), sp, scale=shadowScale(y))
-g.findEntry(shadow).flat = true
-g.display(amigaroom(roomHalf, roomTiles, wallH))
-var ball = g.display(checkersphere(nLat, nLon), bp, scale=ballR, rotate=[angle, 0, 1, 0])
-g.findEntry(ball).flat = true
+var shadow = g.display(unitshadow(), sp, scale=shadowScale(y), flat=true)
+g.display(wireroom(roomHalf, roomTiles, wallH))
+var ball = g.display(checkersphere(nLat, nLon), bp, scale=ballR, rotate=[angle, 0, 1, 0],
+                     flat=true)
 
 var v = View(g, connectTimeOut=10000)
 

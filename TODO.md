@@ -45,7 +45,7 @@ Done (Phases 2–5d):
 1. [x] Persistent apply context across `command_process` batches (sticky scene)
 2. [x] `D` + display/move — re-issue draws for already-defined objects without resending `v`/`f` (v1: full `D` + all poses)
 3. [x] Morpho `View` helpers: `open(g)` / `update(g)` / `redraw` / listener `receive` for Defined/Moved
-4. [x] Yardstick: [`examples/amigaball.morpho`](examples/amigaball.morpho) — define-once + `g.move` (not full `U S` each frame)
+4. [x] Yardstick: [`examples/boing.morpho`](examples/boing.morpho) — define-once + `g.move` (not full `U S` each frame)
 
 Remaining ([Phase 5](docs/plan-graphics-view-listener.md)):
 
@@ -233,7 +233,7 @@ Small viewer-only polish can land anytime; strategic sequence is Graphics (done)
 - [x] Graphics entries / `add` remap: [`test/testgraphicsentries.morpho`](test/testgraphicsentries.morpho)
 - [x] `move` / listeners / objectMap: [`test/testgraphicsmove.morpho`](test/testgraphicsmove.morpho)
 - [x] Live `open` → `move`: [`test/testviewmove.morpho`](test/testviewmove.morpho)
-- [x] Live Scene yardstick (define-once + `g.move`): [`examples/amigaball.morpho`](examples/amigaball.morpho)
+- [x] Live Scene yardstick (define-once + `g.move`): [`examples/boing.morpho`](examples/boing.morpho)
 - [x] Phase 5c n-body yardstick (many shared `Sphere`s + `g.move` / `recolor`): [`examples/nbody.morpho`](examples/nbody.morpho)
 - [x] Phase 5d command fixtures: update-object / update-vertices / delete-object / delete-draw (via [`test/testdefinedraw.morpho`](test/testdefinedraw.morpho))
 - [x] Phase 5d live remove/replace: [`test/testviewremove.morpho`](test/testviewremove.morpho)

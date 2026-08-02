@@ -776,38 +776,43 @@ class Graphics {
   }
 
   /** Allocate id and append a GraphicsEntry; returns the id. No events. */
-  _append(item, position=nil, scale=nil, rotate=nil, color=nil) {
+  _append(item, position=nil, scale=nil, rotate=nil, color=nil, flat=nil) {
     var id = self._nextid
     self._nextid += 1
-    self.displaylist.append(GraphicsEntry(id, item, position=position, scale=scale,
-                                          rotate=rotate, color=color))
+    var e = GraphicsEntry(id, item, position=position, scale=scale,
+                          rotate=rotate, color=color)
+    if (!isnil(flat)) e.flat = flat
+    self.displaylist.append(e)
     return id
   }
 
   /** Append a non-Sphere item (identity SRT). Returns Graphics-owned id.
    *  Morpho: defaults are keyword-only, so pose uses the 2-arg overload below. */
-  display(item) {
+  display(item, color=nil, flat=nil) {
     if (!isobject(item)) return nil
-    return self._append(item)
+    return self._append(item, color=color, flat=flat)
   }
 
-  /** Non-Sphere with pose: 2nd positional position (list/Matrix/nil) + scale=/rotate=. */
-  display(item, position, scale=nil, rotate=nil) {
+  /** Non-Sphere with pose: 2nd positional position + scale=/rotate=/color=/flat=. */
+  display(item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
     if (!isobject(item)) return nil
-    return self._append(item, position=position, scale=scale, rotate=rotate)
+    return self._append(item, position=position, scale=scale, rotate=rotate,
+                        color=color, flat=flat)
   }
 
   /** Unit Sphere + entry SRT from authored center/r. */
-  display(Sphere item) {
+  display(Sphere item, color=nil, flat=nil) {
+    var col = isnil(color) ? item.color : color
     return self._append(_unitsphere(item), position=item.center, scale=item.r,
-                        color=item.color)
+                        color=col, flat=flat)
   }
 
   /** Unit Sphere + pose args on the entry (sole pose authority). */
-  display(Sphere item, position, scale=nil, rotate=nil) {
+  display(Sphere item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
     var scl = isnil(scale) ? 1 : scale
+    var col = isnil(color) ? item.color : color
     return self._append(_unitsphere(item), position=position, scale=scl, rotate=rotate,
-                        color=item.color)
+                        color=col, flat=flat)
   }
 
   /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
@@ -825,7 +830,7 @@ class Graphics {
     }
     for (el in right.displaylist) {
       g._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate,
-                color=el.color)
+                color=el.color, flat=el.flat)
     }
     return g
   }
@@ -840,8 +845,9 @@ class Scene is Graphics with Broadcaster {
   }
 
   /** Allocate id, append entry, optionally notify Defined. */
-  _append(item, position=nil, scale=nil, rotate=nil, color=nil, notify=true) {
-    var id = super._append(item, position=position, scale=scale, rotate=rotate, color=color)
+  _append(item, position=nil, scale=nil, rotate=nil, color=nil, flat=nil, notify=true) {
+    var id = super._append(item, position=position, scale=scale, rotate=rotate,
+                           color=color, flat=flat)
     if (notify) self.notify(GraphicsEventDefined(id))
     return id
   }
@@ -923,7 +929,7 @@ class Scene is Graphics with Broadcaster {
     }
     for (el in right.displaylist) {
       g._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate,
-                color=el.color, notify=false)
+                color=el.color, flat=el.flat, notify=false)
     }
     return g
   }
@@ -1707,7 +1713,7 @@ class Show {
   }
 
   /** TriangleComplex: define once for this write, draw with entry SRT.
-   *  Set `entry.flat = true` (after display) for unlit solid facet colors. */
+   *  Pass `flat=true` on `display` (or set `entry.flat`) for unlit solid facet colors. */
   visitEntry(entry, TriangleComplex item, out) {
     self._currentEntry = entry
     var flat = entry.flat

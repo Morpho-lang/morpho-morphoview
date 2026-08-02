@@ -66,6 +66,22 @@ expect(!isnil(e.rotate), "posed rotate recorded")
 expect(e.item.r == 1, "posed Sphere stores unit r")
 expect(e.item.center[0] == 0, "posed Sphere stores unit center")
 
+/* ---- display color= / flat= (Phase 5dx) ---- */
+var gc = Graphics()
+var cid = gc.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], scale=0.5,
+                     color=Blue, flat=true)
+expect(gc.findEntry(cid).color == Blue, "color= overrides sphere item color")
+expect(gc.findEntry(cid).flat == true, "flat= on sphere display")
+var tc = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+var tid = gc.display(tc, flat=true)
+expect(gc.findEntry(tid).flat == true, "flat= on mesh display")
+expect(isnil(gc.findEntry(tid).color), "omitted color= leaves nil")
+
 /* ---- add remaps right-hand ids ---- */
 var a = Graphics()
 a.display(PointCloud(Matrix([[0], [0], [0]])))

@@ -23,7 +23,7 @@ Do **not** auto-diff inside `update(Graphics)`. Incremental updates go through S
 
 ```
 g = Scene()
-var id = g.display(Sphere(...))   // stable id; optional position=/scale=/rotate=
+var id = g.display(Sphere(...), color=, flat=)   // stable id; optional position=/scale=/rotate=
 var v = View(g)                   // one Show.write, then listen
 g.move(id, ...)                   // Scene → View: pose-only `d` (in-place matrix)
 ```
@@ -77,7 +77,7 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 1. **Foundation** — Graphics-owned ids on `display`; Show walks entries; keep `U S` snapshot path ✅
 2. **Viewer** — sticky context; `D`; prepare-safe redraw ✅
 3. **Graphics ↔ View** — `move`; listener registration; View translates events → commands ✅
-4. **Yardstick** — rewrite `examples/amigaball.morpho` via `g.move` (not full `U S`) ✅
+4. **Yardstick** — rewrite `examples/boing.morpho` via `g.move` (not full `U S`) ✅
 5. **Phase 5** — 5a–5d ✅; **5dx** cleaning pass (draw-slot id / `U V` / multi-listener / API polish); then **5e** shared Cylinder/Arrow; **5f** Text slots; dependents later (**5g**). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
 ## Hand sequences / tests
 
@@ -95,4 +95,4 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 | [`test/command/definedraw-delete-draw`](../test/command/definedraw-delete-draw) | `X D` one slot | Yes |
 | [`test/testviewremove.morpho`](../test/testviewremove.morpho) | Live `replace` / `remove` | Yes |
 
-Yardsticks: [`examples/amigaball.morpho`](../examples/amigaball.morpho) (TriangleComplex movers); [`examples/nbody.morpho`](../examples/nbody.morpho) (shared `Sphere`s + `move`/`recolor`); [`examples/soapbubble.morpho`](../examples/soapbubble.morpho) (Area+Volume CG → `U V` morph / refine `replace`).
+Yardsticks: [`examples/boing.morpho`](../examples/boing.morpho) (TriangleComplex movers); [`examples/nbody.morpho`](../examples/nbody.morpho) (shared `Sphere`s + `move`/`recolor`); [`examples/soapbubble.morpho`](../examples/soapbubble.morpho) (Area+Volume CG → `U V` morph / refine `replace`).

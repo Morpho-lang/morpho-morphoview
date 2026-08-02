@@ -179,4 +179,4 @@ Morpho `Graphics` is a displaylist container, not a scene graph. Serializer obje
 
 - **Occasional refresh** — `View.open(Graphics)` / `update(Graphics)` → full `U S` reserialize. This is the supported high-level path for “new snapshot” / update-on-demand. Do not expect it to be cheap when most of the scene is static.
 - **Efficient animation / composition** — see priority sequence in [`TODO.md`](../TODO.md): **Graphics prototype** (stable ids, define vs display, instancing) → **animation viewer ops** (sticky context, display/move, `U O` / `U V` / `X O` / `X D`) → **binary transport**. The command language already splits object definition (`o`/`v`/`f`) from display (`d` + transforms).
-- **Stress demo** — `examples/amigaball.morpho` exercises full replace under animation load on purpose.
+- **Stress demo** — `examples/boing.morpho` exercises full replace under animation load on purpose.

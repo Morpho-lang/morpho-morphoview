@@ -27,13 +27,14 @@ API and entry both use **`position`**. Keep SRT as fields on the entry (not a ne
 Both accept optional **2nd positional** `position` plus kwargs `scale=`, `rotate=`:
 
 ```
-display(item)                          // identity (Sphere: center→position, r→scale)
-display(item, position, scale=, rotate=)
-move(id, position, scale=, rotate=)    // Phase 3; same arity pattern
+display(item, color=, flat=)                    // identity (Sphere: center→position, r→scale)
+display(item, position, scale=, rotate=, color=, flat=)
+move(id, position, scale=, rotate=)             // Phase 3; same arity pattern
 ```
 
-Morpho treats `param=nil` defaults as keyword-only, so pose is a separate arity overload (not `position=nil` on the 1-arg form). `scale=` / `rotate=` remain kwargs on the posed form. `display(item, nil, scale=2)` works when position should stay default origin.
+Morpho treats `param=nil` defaults as keyword-only, so pose is a separate arity overload (not `position=nil` on the 1-arg form). `scale=` / `rotate=` / `color=` / `flat=` remain kwargs on the posed form. `display(item, nil, scale=2)` works when position should stay default origin.
 - Pose args set on `display` → entry SRT recorded; `Sphere` stored as **unit** abstract primitive (Phase 5c; Phase 1 temporarily stored matching center/r + baked).
+- `color=` / `flat=` set presentation fields on the entry at display time (Phase 5dx); omit → Sphere uses `item.color`, `flat` stays false.
 - No pose args + `Sphere` → store unit Sphere; copy `center`→entry position, `r`→scale.
 - No pose args + other primitives → identity SRT; geometry as authored.
 - Same item `display`’d twice → two ids / two entries.
@@ -115,7 +116,7 @@ g.move(shadow, [x,0.02,z], scale=shadowR)
 - **Id map:** View session owns `graphicsId → viewerObjectId` (on the live `Show` instance: `objectMap`, plus `entryColorId` / `flatIds`). `open(g)` builds it from one `Show.write` — no fake N `defined` events.
 - **Mid-session `display`:** notifies `GraphicsEventDefined`; View emits define+draw via `Show.writeEntry`.
 - **Events:** `GraphicsEventDefined`, `GraphicsEventMoved`, `GraphicsEventRecolored`, `GraphicsEventRemoved`, `GraphicsEventReplaced`.
-- **On `moved`:** pose-only `d` via `emitEntryPose` (Phase 5b); fall back to `D` + `emitPoseDraws` if unmapped.
+- **On `moved`:** pose-only `d` via `emitEntryPose` (Phase 5b); unmapped ids are skipped (no `D` fallback — Phase 5dx).
 
 **Steps:**
 
@@ -132,11 +133,11 @@ g.move(shadow, [x,0.02,z], scale=shadowR)
 
 ### Phase 4 — Yardstick ✅
 
-**Files:** `examples/amigaball.morpho`
+**Files:** `examples/boing.morpho`
 
 Rewrite: define once on `Graphics`, pose on `display` (or `move` before `open`), physics via `g.move` — no per-frame `update(Graphics)`. No first-paint flash.
 
-**Done when:** amigaball runs as a live Graphics session with define-once + move.
+**Done when:** boing runs as a live Graphics session with define-once + move.
 
 ### Phase 5 — Follow-ons
 
@@ -154,7 +155,7 @@ g.endBatch()            # one coalesced Moved
 
 #### Phase 5a — `beginBatch` / `endBatch` ✅
 
-**Files:** `share/modules/broadcast.morpho`, `share/modules/xgraphics.morpho`, `test/testgraphicsmove.morpho`; optionally wrap amigaball moves. View can stay on v1 (`D` + full `emitPoseDraws`) for this sub-phase.
+**Files:** `share/modules/broadcast.morpho`, `share/modules/xgraphics.morpho`, `test/testgraphicsmove.morpho`; optionally wrap boing moves. View can stay on v1 (`D` + full `emitPoseDraws`) for this sub-phase.
 
 **Locked:**
 
@@ -169,7 +170,7 @@ g.endBatch()            # one coalesced Moved
 - `GraphicsEventDefined` / `Removed` / `Replaced` keep default `batchKey` → each id is flushed separately.
 - `respondsto("batchKey")` in Broadcaster is only a guard for non-protocol objects on the open queue; prefer real `BroadcastEvent` citizens.
 
-**Done when:** test (and/or amigaball) can `beginBatch` → two `move`s → `endBatch` and a Capture listener sees **one** Moved; one viewer round-trip per frame when View is attached.
+**Done when:** test (and/or boing) can `beginBatch` → two `move`s → `endBatch` and a Capture listener sees **one** Moved; one viewer round-trip per frame when View is attached.
 
 **Out of scope for 5a:** changing `D` + full pose redraw on the View side (done in 5b).
 
@@ -182,12 +183,12 @@ g.endBatch()            # one coalesced Moved
 **Locked:**
 
 - Viewer: when applying `d <id>` with a matrix, if an `OBJECT` draw for that id already exists in the scene displaylist, **replace its matrix** instead of appending. Objects first; text `T` draws later if cheap.
-- View `receive(Moved)`: emit **only** pose lines via `Show.emitEntryPose` (no `C`/`M`); **do not** send `D`. Unmapped ids → fall back to full `D` + `emitPoseDraws`.
+- View `receive(Moved)`: emit **only** pose lines via `Show.emitEntryPose` (no `C`/`M`); **do not** send `D`. Unmapped ids are skipped (Phase 5dx: no `D` + empty redraw).
 - Coalesced batch Moved carries `ids` (merged via event `coalesce`); View pose-updates every mover.
 - Mid-session `Defined` unchanged (append define+draw).
 - Keep `View.redraw(ascii)` and explicit `D` for tests/fixtures (`definedraw-redraw` stays valid).
 
-**Done when:** `move` updates one object’s pose without clearing other draws; amigaball room is not re-sent each frame.
+**Done when:** `move` updates one object’s pose without clearing other draws; boing room is not re-sent each frame.
 
 #### Phase 5c — Show emit review (primitives) + draw-slot identity ✅
 
@@ -223,11 +224,11 @@ Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEvent
 1. **Draw-slot id for world-baked visits** — `visit(TriangleComplex)` (and PointCloud/LineSet identity draws that synthesize `GraphicsEntry(0,…)`) must emit `d <graphicsEntryId> <viewerObjectId>` when `_currentEntry` is set, not `d <viewerObjectId>`. Same for any baked path that reaches `emitEntryDraw` under an entry. Mixed Sphere + Cylinder scenes must not collide slots.
 2. **`U V` / `refreshMesh` float layout** — emit vertex layout must match how the object was defined (`xn` vs `xnc`). Prefer matching both paths; if opaque `xnc` morph is deferred, `refreshMesh` / `emitEntryVertices` must return `false` (or throw) rather than report success while the viewer drops the batch.
 3. **Pending ids vs multiple listeners** — ✅ `GraphicsEventMoved` / `Recolored` carry `ids`; Broadcaster coalesce calls optional `event.coalesce(previous)` so the surviving event merges payloads. No side-channel bag; every listener reads `ev.ids`.
-4. **Moved fallback** — if no mapped ids, do **not** `D` + empty redraw (blank window). No-op or skip; rely on (1) so unmapped baked ids are rare.
+4. **Moved fallback** — ✅ if no mapped ids, skip (do not `D` + empty redraw). Relies on (1) so unmapped baked ids are rare.
 
 **Locked — API polish (same pass if small; else follow immediately):**
 
-5. **`display` kwargs** — `color=` and/or `flat=` on `display` (and Sphere overloads) so yardsticks stop `findEntry(id).color = …` / `.flat = true` before open.
+5. **`display` kwargs** — ✅ `color=` / `flat=` on `display` (and Sphere overloads); boing / nbody updated.
 6. **Named morph path** — public `Scene`/`View` name for same-length vertex push (e.g. keep `refreshMesh` but document; or `updateVertices(id)`) distinct from `replace` (full redefine). soapbubble should not need `findEntry.item =` as the only efficient path — either document that pairing or add `Scene.morph(id, item)` that sets item + notifies a dedicated event / calls through View.
 7. **Failure convention** — `display` returns `false` (or keep `nil` but document) consistently with mutators; optional: document that Cylinder/Arrow/Text `move`/`remove` remain limited until 5e/5f.
 
@@ -238,7 +239,7 @@ Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEvent
 - Test: Sphere + Cylinder (or other baked) in one Scene → both visible; `move`/`remove` on each id target the right slot.
 - Test: opaque TriangleComplex `refreshMesh` either succeeds with matching layout or fails cleanly (no silent drop).
 - Test: two listeners on one Scene batch-`move` see the same full id list.
-- Yardsticks (amigaball / nbody / soapbubble) still pass; prefer updating them to use `color=`/`flat=` if (5) lands.
+- Yardsticks (boing / nbody / soapbubble) still pass; prefer updating them to use `color=`/`flat=` if (5) lands.
 
 **Working agreement:** finish 5dx and pause for review before starting 5e.
 

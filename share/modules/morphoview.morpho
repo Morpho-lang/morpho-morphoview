@@ -174,15 +174,10 @@ class View with Listener {
     var ids = ev.ids
     if (isnil(ids) || ids.count() == 0) ids = [ev.id]
     self.cmdBuf = ""
-    var any = false
     for (id in ids) {
-      if (self.show.emitEntryPose(g, id, self)) any = true
+      self.show.emitEntryPose(g, id, self)
     }
-    if (!any) {
-      // Nothing mapped yet — fall back to full D + pose redraw.
-      self.write("D")
-      self.show.emitPoseDraws(g, self)
-    }
+    // Unmapped ids: skip (do not D + empty redraw — blanks the window).
     if (self.cmdBuf.count() == 0) return
     self.gotOk = false
     self._send(self.cmdBuf)
