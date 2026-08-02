@@ -1,0 +1,152 @@
+// Soap-bubble: start as an ellipsoid, relax to a sphere under
+// constant-volume area minimization (CG + penalty, one step per frame).
+// Live mesh updates via View.refreshMesh (U V).
+//
+//   morpho6 examples/soapbubble.morpho
+//
+// Close the viewer window to stop early.
+
+import morphoview
+import xgraphics
+import color
+import constants
+import meshtools
+import optimize4
+
+var Nrefine = 3            // mesh refinements before projecting to ellipsoid
+var rx = 0.55              // ellipsoid semi-axes
+var ry = 0.9
+var rz = 0.45
+var Nsteps = 250           // one CG step per frame (slow, watchable)
+var frameSleep = 0.04      // seconds between frames
+var mu0 = 10               // initial penalty
+var muMul = 1.4            // gentle penalty growth
+var muEvery = 40           // bump penalty every this many steps
+var film = Color(0.72, 0.74, 0.76)
+var transmit = 0.82        // soap film: mostly see-through
+
+/** Face mesh → TriangleComplex (plotmesh-style: 3 verts per face, face normals). */
+fn meshFaces(mesh, color, transmit=nil) {
+  var vert = mesh.vertexmatrix()
+  var faces = mesh.connectivitymatrix(0, 2)
+  var nf = mesh.count(2)
+  var nvert = Matrix(3, 3*nf)
+  var norm = Matrix(3, 3*nf)
+  var ncol = Matrix(3, 3*nf)
+  var tri = Sparse(3*nf, nf)
+
+  var bb = []
+  var vt = vert.transpose()
+  for (i in 0...vt.dimensions()[1]) bb.append(bounds(vt.column(i)))
+  var centroid = Matrix(3)
+  for (i in 0...3) {
+    centroid[i] = bb[i][0] + (bb[i][1] - bb[i][0])/2
+  }
+
+  var rgb = Matrix(color.rgb(0))
+  var nnv = 0
+  for (i in 0...nf) {
+    var el = faces.rowindices(i)
+    var v0 = vert.column(el[0])
+    var v1 = vert.column(el[1])
+    var v2 = vert.column(el[2])
+    var normal = Matrix([
+      (v2[1]-v1[1])*(v1[2]-v0[2]) - (v2[2]-v1[2])*(v1[1]-v0[1]),
+      (v2[2]-v1[2])*(v1[0]-v0[0]) - (v2[0]-v1[0])*(v1[2]-v0[2]),
+      (v2[0]-v1[0])*(v1[1]-v0[1]) - (v2[1]-v1[1])*(v1[0]-v0[0])
+    ])
+    if (normal.inner(v0 - centroid) < 0) normal = -normal
+    var ln = normal.norm()
+    if (ln > 1e-12) normal = normal/ln
+
+    for (j in 0...3) {
+      tri[nnv, i] = 1
+      nvert.setcolumn(nnv, vert.column(el[j]))
+      norm.setcolumn(nnv, normal)
+      ncol.setcolumn(nnv, rgb)
+      nnv += 1
+    }
+  }
+
+  return TriangleComplex(nvert, norm, ncol, tri, transmit=transmit)
+}
+
+fn syncMesh(g, v, meshId, mesh) {
+  g.findEntry(meshId).item = meshFaces(mesh, film, transmit=transmit)
+  return v.refreshMesh(meshId)
+}
+
+/** Project every vertex onto the axis-aligned ellipsoid with semi-axes rx,ry,rz. */
+fn projectEllipsoid(mesh, rx, ry, rz) {
+  var vert = mesh.vertexmatrix().clone()
+  var nv = vert.dimensions()[1]
+  for (i in 0...nv) {
+    var x = vert[0, i]/rx
+    var y = vert[1, i]/ry
+    var z = vert[2, i]/rz
+    var n = sqrt(x*x + y*y + z*z)
+    if (n > 1e-12) {
+      vert[0, i] = rx*x/n
+      vert[1, i] = ry*y/n
+      vert[2, i] = rz*z/n
+    }
+  }
+  mesh.setvertexmatrix(vert)
+}
+
+// Start from a cube, refine for resolution, then project to an ellipsoid
+var mesh = PolyhedronMesh([ [-0.5, -0.5, -0.5],
+                            [ 0.5, -0.5, -0.5],
+                            [-0.5,  0.5, -0.5],
+                            [ 0.5,  0.5, -0.5],
+                            [-0.5, -0.5,  0.5],
+                            [ 0.5, -0.5,  0.5],
+                            [-0.5,  0.5,  0.5],
+                            [ 0.5,  0.5,  0.5]],
+                          [ [0,1,3,2], [4,5,7,6],
+                            [0,1,5,4], [3,2,6,7],
+                            [0,2,6,4], [1,3,7,5] ])
+
+for (level in 1..Nrefine) {
+  var mr = MeshRefiner([mesh])
+  mesh = mr.refine()[mesh]
+}
+projectEllipsoid(mesh, rx, ry, rz)
+
+var la = Area()
+var lv = VolumeEnclosed()
+
+var g = Scene(title="Soap bubble", background=Color(0.06, 0.07, 0.1))
+var meshId = g.display(meshFaces(mesh, film, transmit=transmit))
+var v = View(g, connectTimeOut=20000)
+
+print "Ellipsoid: ${mesh.count(0)} verts, ${mesh.count(2)} faces, A=${la.total(mesh)}  V=${lv.total(mesh)}"
+
+/* ---- Relax: area ↓, volume fixed → sphere (one CG step per frame) ---- */
+if (!v.closed) {
+  var problem = OptimizationProblem(mesh)
+  problem.addEnergy(la)
+  problem.addConstraint(lv)
+  var adapt = ProblemAdapter(problem, mesh)
+  var pad = PenaltyAdapter(adapt)
+  pad.setPenalty(mu0)
+  var gd = ConjugateGradientController(pad, verbosity="silent")
+  gd.start()
+
+  for (i in 1..Nsteps) {
+    if (v.closed) break
+    if (!gd.iterate()) break
+    if (!syncMesh(g, v, meshId, mesh)) break
+    v.poll(timeoutMs=0)
+    if (mod(i, muEvery) == 0) pad.setPenalty(pad.penalty()*muMul)
+    System.sleep(frameSleep)
+  }
+
+  var V1 = lv.total(mesh)
+  var A1 = la.total(mesh)
+  var R1 = (V1/(4/3*Pi))^(1/3)
+  print "Relaxed: A=${A1}  sphere=${4*Pi*R1*R1}  V=${V1}"
+  v.wait(sessionTimeOut=8000)
+}
+if (!v.closed) v.close()
+print "ok"

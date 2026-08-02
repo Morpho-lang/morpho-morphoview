@@ -93,4 +93,4 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 | [`test/command/definedraw-delete-draw`](../test/command/definedraw-delete-draw) | `X D` one slot | Yes |
 | [`test/testviewremove.morpho`](../test/testviewremove.morpho) | Live `replace` / `remove` | Yes |
 
-Yardsticks: [`examples/amigaball.morpho`](../examples/amigaball.morpho) (TriangleComplex movers); [`examples/nbody.morpho`](../examples/nbody.morpho) (shared `Sphere`s + `move`/`recolor`).
+Yardsticks: [`examples/amigaball.morpho`](../examples/amigaball.morpho) (TriangleComplex movers); [`examples/nbody.morpho`](../examples/nbody.morpho) (shared `Sphere`s + `move`/`recolor`); [`examples/soapbubble.morpho`](../examples/soapbubble.morpho) (Area+Volume CG → `U V` morph / refine `replace`).

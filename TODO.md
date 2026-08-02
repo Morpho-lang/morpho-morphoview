@@ -227,6 +227,7 @@ Small viewer-only polish can land anytime; strategic sequence is Graphics (done)
 - [x] Phase 5c n-body yardstick (many shared `Sphere`s + `g.move` / `recolor`): [`examples/nbody.morpho`](examples/nbody.morpho)
 - [x] Phase 5d command fixtures: update-object / update-vertices / delete-object / delete-draw (via [`test/testdefinedraw.morpho`](test/testdefinedraw.morpho))
 - [x] Phase 5d live remove/replace: [`test/testviewremove.morpho`](test/testviewremove.morpho)
+- [x] Deformable mesh yardstick (soap bubble / `U V` + refine `replace`): [`examples/soapbubble.morpho`](examples/soapbubble.morpho)
 
 ## Notes
 

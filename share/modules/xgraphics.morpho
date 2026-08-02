@@ -1250,6 +1250,36 @@ class Show {
     return true
   }
 
+  /** Same-length vertex replace for a mapped TriangleComplex (`U V`).
+   *  Emits position+normal floats (`xn`); requires the object was defined that way
+   *  (e.g. via transmit/filter → uniform `C`). Returns false if unmapped / wrong type. */
+  emitEntryVertices(graphic, graphicsId, out) {
+    if (!self.objectMap.contains(graphicsId)) return false
+    var entry = graphic.findEntry(graphicsId)
+    if (isnil(entry)) return false
+    return self._emitVertices(entry, entry.item, out)
+  }
+
+  _emitVertices(entry, TriangleComplex item, out) {
+    var vid = self.objectMap[entry.id]
+    var x = item.position
+    var n = item.normals
+    var dim = x.dimensions()[0]
+    var nv = x.dimensions()[1]
+    out.write("U V ${vid}")
+    for (i in 0...nv) {
+      var line = ""
+      for (j in 0...dim) line += "${self.fmt(x[j,i])} "
+      for (j in 0...dim) line += "${self.fmt(n[j,i])} "
+      out.write(line)
+    }
+    return true
+  }
+
+  _emitVertices(entry, item, out) {
+    return false
+  }
+
   /** POVRay transmit/filter → OpenGL alpha: a = 1 - clamp(transmit + filter, 0, 1). */
   opacity(item) {
     var t = isnil(item.transmit) ? 0 : item.transmit

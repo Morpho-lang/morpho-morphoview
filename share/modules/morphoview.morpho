@@ -15,6 +15,7 @@
  *    v.update(g)                // Graphics/Scene replace via `U S` + rebind
  *    v.redraw(posecommands)     // `D` + redraw draws (no geometry wipe)
  *    // After View(scene): scene.move / recolor drive pose-only `d` / `C`
+ *    // refreshMesh(id) — same-length U V for a TriangleComplex entry
  *    v.poll(timeoutMs=0)
  *    v.wait(sessionTimeOut=1500)
  *    v.close()
@@ -221,6 +222,18 @@ class View with Listener {
     self.gotOk = false
     self._send(self.cmdBuf)
     self._waitOk()
+  }
+
+  /** Push same-length vertex data for a TriangleComplex entry (`U V`).
+   *  Call after mutating `entry.item` in place (fixed connectivity). */
+  refreshMesh(graphicsId) {
+    if (self.closed || isnil(self.show) || isnil(self.graphics)) return false
+    self.cmdBuf = ""
+    if (!self.show.emitEntryVertices(self.graphics, graphicsId, self)) return false
+    if (self.cmdBuf.count() == 0) return false
+    self.gotOk = false
+    self._send(self.cmdBuf)
+    return self._waitOk()
   }
 
   // Wait briefly for one reply/event. Returns the message string, or nil.
