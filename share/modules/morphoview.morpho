@@ -135,14 +135,14 @@ class View with Listener {
     if (self.closed || isnil(self.show)) return
     var entry = g.findEntry(ev.id)
     if (isnil(entry)) return
-    self._emitAndWait(fn () { self.show.writeEntry(entry, self) })
+    self._tryEmit("defined id ${ev.id}", fn () { self.show.writeEntry(entry, self) })
   }
 
   receive(Graphics g, GraphicsEventMoved ev) {
     if (self.closed || isnil(self.show)) return
     var ids = ev.ids
     if (isnil(ids) || ids.count() == 0) ids = [ev.id]
-    self._emitAndWait(fn () {
+    self._tryEmit("moved", fn () {
       for (id in ids) self.show.emitEntryPose(g, id, self)
     })
   }
@@ -151,21 +151,31 @@ class View with Listener {
     if (self.closed || isnil(self.show)) return
     var ids = ev.ids
     if (isnil(ids) || ids.count() == 0) ids = [ev.id]
-    self._emitAndWait(fn () {
+    self._tryEmit("recolored", fn () {
       for (id in ids) self.show.emitEntryRecolor(g, id, self)
     })
   }
 
   receive(Graphics g, GraphicsEventRemoved ev) {
     if (self.closed || isnil(self.show)) return
-    self._emitAndWait(fn () { self.show.emitEntryRemove(ev.id, self) })
+    self._tryEmit("removed id ${ev.id}", fn () { self.show.emitEntryRemove(ev.id, self) })
   }
 
   receive(Graphics g, GraphicsEventReplaced ev) {
     if (self.closed || isnil(self.show)) return
-    self._emitAndWait(fn () {
+    self._tryEmit("replaced id ${ev.id}", fn () {
       if (!self.show.emitEntryReplace(g, ev.id, self)) return
     })
+  }
+
+  /** Fill cmdBuf via @p emit; send if non-empty. Warn on transport failure (not on empty). */
+  _tryEmit(label, emit) {
+    self.cmdBuf = ""
+    emit()
+    if (self.cmdBuf.count() == 0) return
+    self.gotOk = false
+    self._send(self.cmdBuf)
+    if (!self._waitOk()) print "morphoview: failed to emit ${label}"
   }
 
   /** Fill cmdBuf via @p emit, send if non-empty, wait for ok. */

@@ -123,6 +123,10 @@ void command_free(mv_command *cmd) {
 static varray_mv_commandptr command_queue;
 static pthread_mutex_t command_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+/** While non-NULL, command_enqueue appends here (parse staging) instead of the
+ *  shared queue — so a failed parse cannot wipe already-ok'd peer batches. */
+static varray_mv_commandptr *command_parse_staging = NULL;
+
 void command_queue_init(void) {
     varray_mv_commandptrinit(&command_queue);
 }
@@ -136,16 +140,46 @@ void command_queue_clear(void) {
     pthread_mutex_unlock(&command_queue_mutex);
 }
 
+static void command_free_list(varray_mv_commandptr *list) {
+    if (!list) return;
+    for (unsigned int i = 0; i < list->count; i++) {
+        command_free(list->data[i]);
+    }
+    list->count = 0;
+    varray_mv_commandptrclear(list);
+}
+
 void command_wake(void) {
     glfwPostEmptyEvent();
 }
 
 bool command_enqueue(mv_command *cmd) {
+    if (command_parse_staging) {
+        return varray_mv_commandptradd(command_parse_staging, &cmd, 1);
+    }
     pthread_mutex_lock(&command_queue_mutex);
     bool wasempty = (command_queue.count == 0);
     bool ok = varray_mv_commandptradd(&command_queue, &cmd, 1);
     pthread_mutex_unlock(&command_queue_mutex);
     if (!ok) return false;
+    if (wasempty) command_wake();
+    return true;
+}
+
+/** Append a staging list onto the shared queue; frees staging storage on success. */
+static bool command_commit_staging(varray_mv_commandptr *staging) {
+    if (!staging || staging->count == 0) {
+        if (staging) varray_mv_commandptrclear(staging);
+        return true;
+    }
+    pthread_mutex_lock(&command_queue_mutex);
+    bool wasempty = (command_queue.count == 0);
+    bool ok = varray_mv_commandptradd(&command_queue, staging->data,
+                                     (int) staging->count);
+    if (ok) staging->count = 0; /* ownership moved; do not free cmds */
+    pthread_mutex_unlock(&command_queue_mutex);
+    if (!ok) return false;
+    varray_mv_commandptrclear(staging);
     if (wasempty) command_wake();
     return true;
 }
@@ -458,10 +492,10 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_SELECT_COLOR:
             if (!ctx->scene) return false;
+            /* Context only: stamp onto subsequent `d` / `T` via current_colorid.
+             * Do not append COLOR displaylist entries (unbounded on live recolor)
+             * or mark the scene changed — draw-slot color lives on the OBJECT/TEXT. */
             ctx->current_colorid = MVCMD_AS_SELECT_COLOR(cmd)->id;
-            /* Keep COLOR displaylist entries for fixtures that rely on ordered state. */
-            scene_adddraw(ctx->scene, COLOR, ctx->current_colorid, -1);
-            command_touchscene(ctx);
             return true;
 
         case MVCMD_MATERIAL: {
@@ -562,7 +596,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 return true;
             }
 
-            /* Legacy: append TEXT draw with no draw-slot id. */
+            /* Legacy: append TEXT draw with no draw-slot id; stamp active `C`. */
             int tid = scene_addtext(ctx->scene, c->fontid, c->string);
             c->string = NULL; /* transferred to scene */
 
@@ -571,6 +605,11 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 matindx = scene_adddata(ctx->scene, c->matrix, 16);
             }
             scene_adddraw(ctx->scene, TEXT, tid, matindx);
+            if (stamp != SCENE_EMPTY && ctx->scene->displaylist.count > 0) {
+                gdraw *last = &ctx->scene->displaylist.data[
+                    ctx->scene->displaylist.count - 1];
+                last->colorid = stamp;
+            }
             command_touchscene(ctx);
             return true;
         }
@@ -1673,13 +1712,18 @@ void command_initializeparser(parser *p, lexer *l, error *err, void *out) {
     parse_setskipnewline(p, false, TOKEN_NONE);
 }
 
-/** @brief Parses a command sequence into the shared queue (does not apply). */
+/** @brief Parses a command sequence into the shared queue (does not apply).
+ *  Failed parses discard only this chunk's IR — prior enqueued batches stay. */
 bool command_parse(char *in) {
     command_parsectx ctx;
     command_parsectx_init(&ctx);
 
     error err;
     error_init(&err);
+
+    varray_mv_commandptr staging;
+    varray_mv_commandptrinit(&staging);
+    command_parse_staging = &staging;
 
     lexer l;
     command_initializelexer(&l, in);
@@ -1692,17 +1736,25 @@ bool command_parse(char *in) {
     parse_clear(&p);
     lex_clear(&l);
 
+    command_parse_staging = NULL;
+
     if (!success || ERROR_FAILED(err)) {
         fprintf(stderr, "morphoview: Error [%s] at line %i: %s\n",
                 err.id, err.line, err.msg);
-        command_queue_clear();
+        command_free_list(&staging);
         return false;
     }
 
     mv_command *prep = command_new(MVCMD_PREPARE, sizeof(mv_command));
-    if (!prep || !command_enqueue(prep)) {
+    if (!prep || !varray_mv_commandptradd(&staging, &prep, 1)) {
         command_free(prep);
-        command_queue_clear();
+        command_free_list(&staging);
+        return false;
+    }
+
+    if (!command_commit_staging(&staging)) {
+        /* Ownership transferred only on success; on failure free what we hold. */
+        command_free_list(&staging);
         return false;
     }
 

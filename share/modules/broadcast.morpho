@@ -27,7 +27,8 @@ class Broadcaster {
   _broadcasterInit() {
     self.listeners = []
     self._batchDepth = 0
-    self._pending = []
+    self._pending = []       // delivery order (non-keyed + first-seen keys)
+    self._pendingByKey = Dictionary()  // batchKey → event (keyed coalesce)
   }
 
   subscribe(listener) {
@@ -51,34 +52,32 @@ class Broadcaster {
     if (self._batchDepth > 0) return
     var pending = self._pending
     self._pending = []
+    self._pendingByKey = Dictionary()
     for (event in pending) {
       self._deliver(event)
     }
   }
 
-  /** Queue while batching; deliver immediately otherwise. */
+  /** Queue while batching; deliver immediately otherwise.
+   *  Events use BroadcastEvent: nil batchKey → append; non-nil → replace by key. */
   notify(event) {
     if (self._batchDepth > 0) {
-      if (!event.respondsto("batchKey")) {
+      var key = event.batchKey()
+      if (isnil(key)) {
         self._pending.append(event)
-      } else {
-        var key = event.batchKey()
-        if (isnil(key)) {
-          self._pending.append(event)
-        } else {
-          var out = []
-          var prev = nil
-          for (e in self._pending) {
-            if (e.respondsto("batchKey") && e.batchKey() == key) {
-              prev = e
-            } else {
-              out.append(e)
-            }
+      } else if (self._pendingByKey.contains(key)) {
+        var prev = self._pendingByKey[key]
+        event.coalesce(prev)
+        self._pendingByKey[key] = event
+        for (i in 0...self._pending.count()) {
+          if (self._pending[i] == prev) {
+            self._pending[i] = event
+            break
           }
-          if (!isnil(prev) && event.respondsto("coalesce")) event.coalesce(prev)
-          out.append(event)
-          self._pending = out
         }
+      } else {
+        self._pendingByKey[key] = event
+        self._pending.append(event)
       }
     } else {
       self._deliver(event)

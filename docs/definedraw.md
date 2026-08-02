@@ -40,7 +40,7 @@ Not a full scene graph. Richer than an append-only displaylist:
 - Entry **SRT** owns presentation pose (`position` as Matrix 3-vector / `scale` / `rotate` as fields on the entry); `Show` places from the entry only. API accepts list or Matrix for position and coerces to Matrix. Keep SRT fields (not one 4×4). `Sphere`s store as **unit** item + pose on entry (Phase 5c). `Cylinder` / `Arrow` store as **unit** shaft (+ tip) + start→end as entry SRT with non-uniform `scale` `[R,R,L]` (Phase 5e). `move` (on Scene): position always sets absolute `entry.position`; omitted scale/rotate leave components unchanged.
 - Small **mutation API** on Scene: `move`, `recolor`, `remove`, `replace`, `morph`; `beginBatch`/`endBatch` on Broadcaster
 - **`morph` vs `replace`:** `Scene.morph` / `View.morph` / `View.refreshMesh` — same-length vertex push (`U V`). `replace` — full redefine (new connectivity / type). Prefer `View.morph(id, item)` when a listener is attached.
-- **Return values:** `display` returns a Graphics id (`Int`) or `false`; mutators (`move` / `recolor` / `remove` / `replace` / `morph`) return `true`/`false`. Lookups (`findEntry`) still use `nil` when missing.
+- **Return values:** `display` returns a Graphics id (`Int`) or `nil` (no id); mutators (`move` / `recolor` / `remove` / `replace` / `morph`) return `true`/`false`. Lookups (`findEntry`) still use `nil` when missing.
 - **Phase 5f:** `Text` is draw-slot driven — `move` / `remove` / `recolor` update text like mesh slots; string/font via `replace`.
 - **Listeners** (`broadcast` module) + typed events (`GraphicsEventDefined` / `Moved` / `Recolored` / `Removed` / `Replaced`)
 - `open(g)` uses one `Show.write` then listens if `g` is a Scene; `update(g)` full replace + rebind

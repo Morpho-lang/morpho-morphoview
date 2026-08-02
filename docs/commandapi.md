@@ -61,7 +61,7 @@ Each command is a tagged `mv_command` (typed structs embed it as the first field
 | `MVCMD_VERTICES` | `v ["format"] <floats...>` | Optional format; float blob |
 | `MVCMD_ELEMENT` | `p` / `l` / `f` `<indices...>` | Points, lines, or facets |
 | `MVCMD_COLOR` | `c <id> <r g b [a]>...` | Color id; RGB triples or RGBA quads |
-| `MVCMD_SELECT_COLOR` | `C <id>` | Active color id (uniform albedo for subsequent geometry/text) |
+| `MVCMD_SELECT_COLOR` | `C <id>` | Active color id for subsequent `d` / `T` stamps (parse context only; no displaylist entry) |
 | `MVCMD_MATERIAL` | `M flat` / `M shaded [ka kd [ks [n]]]` | Shade mode + Phong coeffs |
 | `MVCMD_DRAW` | `d <drawId> [objectId]` | Draw-slot id; optional object id + baked 4×4. If an OBJECT or TEXT draw for `@p drawId` already exists, **replaces its matrix** (and stamps color) instead of appending. |
 | `MVCMD_CLEAR_DISPLAY` | `D` | Clear displaylist only (objects/colors/fonts/pools kept) |
@@ -91,7 +91,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `v` | `["format"] <floats...>` | Vertex data for current object |
 | `p` / `l` / `f` | `<indices...>` | Points / lines / facets |
 | `c` | `<id> <r g b [a]>...` | Define color table entry (RGB or RGBA) |
-| `C` | `<id>` | Select uniform color for subsequent geometry and text |
+| `C` | `<id>` | Select uniform color stamped onto subsequent draw-slots / text |
 | `M` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Material: unlit or OpenGL/VTK Phong (default ka=kd=0.5, ks=0) |
 | `d` | `<drawId>` \| `<drawId> <objectId>` | Draw slot `drawId` referencing object (defaults to `drawId` if one arg). Also updates an existing TEXT slot by `drawId` (pose/color). Matrix from prior transforms. Stamps current `C` onto the slot. No-matrix update preserves pose (recolor). |
 | `D` | — | Clear displaylist only; keep objects/colors/fonts/pools (sticky scene) |

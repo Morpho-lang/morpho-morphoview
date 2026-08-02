@@ -168,7 +168,7 @@ g.endBatch()            # one coalesced Moved
   - non-nil `batchKey()` → replace any pending event with the same key (latest wins);
   - `coalesce(previous)` may merge payload into the survivor (Moved / Recolored accumulate `ids`).
 - `GraphicsEventDefined` / `Removed` / `Replaced` keep default `batchKey` → each id is flushed separately.
-- `respondsto("batchKey")` in Broadcaster is only a guard for non-protocol objects on the open queue; prefer real `BroadcastEvent` citizens.
+- Broadcaster calls `batchKey()` / `coalesce` on the event (BroadcastEvent defaults); keyed pending uses a Dictionary for O(1) replace.
 
 **Done when:** test (and/or boing) can `beginBatch` → two `move`s → `endBatch` and a Capture listener sees **one** Moved; one viewer round-trip per frame when View is attached.
 
@@ -230,9 +230,9 @@ Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEvent
 
 5. **`display` kwargs** — ✅ `color=` / `flat=` on `display` (and Sphere overloads); boing / nbody updated.
 6. **Named morph path** — ✅ `Scene.morph(id, item)` sets item; `View.morph` sets + `U V`. Distinct from `replace`. soapbubble uses `View.morph`.
-7. **Failure convention** — ✅ `display` returns `false` (not `nil`) on bad input; mutators stay `true`/`false`. Documented: Text limits until 5f.
+7. **Failure convention** — ✅ `display` returns **`nil`** (no id) on bad input; Scene mutators (`move` / `recolor` / `remove` / …) return `true`/`false`. Documented: Text limits until 5f.
 
-**Out of scope for 5dx:** unit Cylinder/Arrow (5e); Text slots (5f); binary transport; COLOR-draw coalescing in the viewer (note only — unbounded `C` appends on live recolor); formal dependents (5g).
+**Out of scope for 5dx:** unit Cylinder/Arrow (5e); Text slots (5f); binary transport; formal dependents (5g). (COLOR-draw coalescing: done in post-5f polish — `C` is context-only.)
 
 **Done when:**
 
@@ -252,7 +252,7 @@ Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEvent
 - Canonical **unit cylinder** along +z, height 1, radius 1; Show mesh cache keyed by `n`.
 - `display(Cylinder)` / posed form: store unit abstract cylinder; encode **start→end** as entry `position` + non-uniform `scale` `[R,R,L]` (`R = 0.5*L*aspectratio`) + `rotate` (align +z). Color via `C`.
 - Viewer `s` accepts uniform or `s sx sy sz`.
-- **Arrow:** one composite unit mesh (shaft + tip); cache key `n` + `aspectratio` (tip fraction baked). Same start→end → SRT. Degenerate zero-length skipped (`display` → `false`).
+- **Arrow:** one composite unit mesh (shaft + tip); cache key `n` + `aspectratio` (tip fraction baked). Same start→end → SRT. Degenerate zero-length skipped (`display` → `nil`).
 - Mid-session `move` / `recolor` / `remove` use the existing draw-slot path (no per-frame rebake).
 
 **Out of scope for 5e:** Text; binary transport; general Tube.
