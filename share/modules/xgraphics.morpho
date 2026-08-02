@@ -77,6 +77,51 @@ fn _asPosition(p) {
   return Matrix(p)
 }
 
+/** Coerce scale: nil → 1; scalar; or 3-vector Matrix (non-uniform). */
+fn _asScale(s) {
+  if (isnil(s)) return 1
+  if (ismatrix(s)) {
+    if (s.count() == 1) return s[0]
+    return s.clone()
+  }
+  if (islist(s)) {
+    if (s.count() == 1) return s[0]
+    return Matrix(s)
+  }
+  return s
+}
+
+/** Angle-axis [phi, ax, ay, az] rotating unit @p from onto unit @p to.
+ *  Aligned → [0, 1, 0, 0] (so move can clear a prior tilt). */
+fn _axisAngleFromTo(from, to) {
+  var d = from.inner(to)
+  if (d > 1 - 1e-8) return [0, 1, 0, 0]
+  if (d < -1 + 1e-8) {
+    var ax = _normalVector(from)
+    var n = ax.norm()
+    if (n < _eps) ax = Matrix([1, 0, 0])
+    else ax = ax/n
+    return [Pi, ax[0], ax[1], ax[2]]
+  }
+  var axis = _cross3D(from, to)
+  axis = axis/axis.norm()
+  var phi = acos(d)
+  return [phi, axis[0], axis[1], axis[2]]
+}
+
+/** start→end + aspectratio → [position, scale Matrix(R,R,L), rotate]; nil if degenerate.
+ *  Unit shaft is +z, height 1, radius 1; world radius = 0.5 * length * aspectratio. */
+fn _segmentSRT(start, end, aspectratio) {
+  var x1 = _asPosition(start)
+  var x2 = _asPosition(end)
+  var dx = x2 - x1
+  var length = dx.norm()
+  if (!(length > 1e-8)) return nil
+  var R = 0.5*length*aspectratio
+  var rotate = _axisAngleFromTo(Matrix([0, 0, 1]), dx/length)
+  return [x1, Matrix([R, R, length]), rotate]
+}
+
 /* **************************************
  * Graphics primitives
  **************************************** */
@@ -117,7 +162,8 @@ class Cylinder {
     self.transmit = transmit
   }
 
-  toTriangleComplex() {
+  /** @param unit if true, shaft along +z height 1 radius 1 (pose on Graphics entry). */
+  toTriangleComplex(unit=false) {
     var aspectratio = self.aspectratio
     var n = self.n
 
@@ -126,20 +172,33 @@ class Cylinder {
 
     var np=2*n+2 // 2 points at the end plus 2*n point
     var nt=4*n
-    var dim=self.start.count()
-    var vertices=Matrix(dim, np);
-    var normals=Matrix(dim, np);
+    var dim=3
+    var vertices=Matrix(dim, np)
+    var normals=Matrix(dim, np)
 
-    var x1=self.start, x2=self.end
-    var dx=x2-x1 // Vector from x1 to x2
-    var length = dx.norm()
-    if (abs(length)<1e-8) return nil
-    var ndx=dx/length
-
-    var px=_normalVector(dx)
-    var pxnorm=px.norm()
-    if (abs(pxnorm)<1e-15) return
-    px=0.5*length*aspectratio*px/pxnorm
+    var x1, x2, dx, length, ndx, px
+    if (unit) {
+      x1 = Matrix([0, 0, 0])
+      x2 = Matrix([0, 0, 1])
+      dx = Matrix([0, 0, 1])
+      length = 1
+      ndx = dx
+      px = Matrix([1, 0, 0])
+    } else {
+      x1=self.start
+      x2=self.end
+      dim=x1.count()
+      vertices=Matrix(dim, np)
+      normals=Matrix(dim, np)
+      dx=x2-x1 // Vector from x1 to x2
+      length = dx.norm()
+      if (abs(length)<1e-8) return nil
+      ndx=dx/length
+      px=_normalVector(dx)
+      var pxnorm=px.norm()
+      if (abs(pxnorm)<1e-15) return
+      px=0.5*length*aspectratio*px/pxnorm
+    }
 
     // Head and base of the arrow
     vertices.setcolumn(0, x1)
@@ -301,7 +360,8 @@ class Arrow {
     self.transmit = transmit
   }
 
-  toTriangleComplex() {
+  /** @param unit if true, shaft along +z height 1 radius 1; tip fraction = aspectratio. */
+  toTriangleComplex(unit=false) {
     var aspectratio = self.aspectratio
     var n = self.n
 
@@ -310,19 +370,33 @@ class Arrow {
 
     var np=3*n+2 // 2 points at the end plus 3*n point
     var nt=6*n
-    var dim=self.start.count()
+    var dim=3
     var vertices=Matrix(dim, np)
     var normals=Matrix(dim, np)
 
-    var x1=self.start, x2=self.end
-    var dx=x2-x1 // Vector from x1 to x2
-    var length = dx.norm()
-    var ndx=dx/length
-
-    var px=_normalVector(dx)
-    var pxnorm=px.norm()
-    if (abs(pxnorm)<1e-15) return
-    px=0.5*length*aspectratio*px/pxnorm
+    var x1, x2, dx, length, ndx, px
+    if (unit) {
+      x1 = Matrix([0, 0, 0])
+      x2 = Matrix([0, 0, 1])
+      dx = Matrix([0, 0, 1])
+      length = 1
+      ndx = dx
+      px = Matrix([1, 0, 0])
+    } else {
+      x1=self.start
+      x2=self.end
+      dim=x1.count()
+      vertices=Matrix(dim, np)
+      normals=Matrix(dim, np)
+      dx=x2-x1 // Vector from x1 to x2
+      length = dx.norm()
+      if (abs(length)<1e-8) return nil
+      ndx=dx/length
+      px=_normalVector(dx)
+      var pxnorm=px.norm()
+      if (abs(pxnorm)<1e-15) return
+      px=0.5*length*aspectratio*px/pxnorm
+    }
 
     // Head and base of the arrow
     vertices.setcolumn(0, x1)
@@ -688,7 +762,7 @@ class GraphicsEntry {
     self.id = id
     self.item = item
     self.position = _asPosition(position)
-    self.scale = isnil(scale) ? 1 : scale
+    self.scale = _asScale(scale)
     self.rotate = rotate
     self.color = color             // presentation albedo (Sphere / recolor); nil → item
     self.flat = false              // unlit draw (set true for solid facet colors)
@@ -756,6 +830,18 @@ fn _unitSphere(Sphere item) {
                 filter=item.filter, transmit=item.transmit)
 }
 
+/** Unit Cylinder for entry storage (pose lives on the GraphicsEntry). */
+fn _unitCylinder(Cylinder item) {
+  return Cylinder([0, 0, 0], [0, 0, 1], aspectratio=item.aspectratio, n=item.n,
+                  color=item.color, filter=item.filter, transmit=item.transmit)
+}
+
+/** Unit Arrow for entry storage (pose lives on the GraphicsEntry). */
+fn _unitArrow(Arrow item) {
+  return Arrow([0, 0, 0], [0, 0, 1], aspectratio=item.aspectratio, n=item.n,
+               color=item.color, filter=item.filter, transmit=item.transmit)
+}
+
 /** Static displaylist container. Accepted by Show / View.open / View.update.
  *  For live mutation (move / recolor / batch) use Scene. */
 class Graphics {
@@ -816,6 +902,40 @@ class Graphics {
                         color=col, flat=flat)
   }
 
+  /** Unit Cylinder + entry SRT from authored start→end. */
+  display(Cylinder item, color=nil, flat=nil) {
+    var srt = _segmentSRT(item.start, item.end, item.aspectratio)
+    if (isnil(srt)) return false
+    var col = isnil(color) ? item.color : color
+    return self._append(_unitCylinder(item), position=srt[0], scale=srt[1], rotate=srt[2],
+                        color=col, flat=flat)
+  }
+
+  /** Unit Cylinder + pose args on the entry (sole pose authority). */
+  display(Cylinder item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
+    var scl = isnil(scale) ? 1 : scale
+    var col = isnil(color) ? item.color : color
+    return self._append(_unitCylinder(item), position=position, scale=scl, rotate=rotate,
+                        color=col, flat=flat)
+  }
+
+  /** Unit Arrow + entry SRT from authored start→end. */
+  display(Arrow item, color=nil, flat=nil) {
+    var srt = _segmentSRT(item.start, item.end, item.aspectratio)
+    if (isnil(srt)) return false
+    var col = isnil(color) ? item.color : color
+    return self._append(_unitArrow(item), position=srt[0], scale=srt[1], rotate=srt[2],
+                        color=col, flat=flat)
+  }
+
+  /** Unit Arrow + pose args on the entry (sole pose authority). */
+  display(Arrow item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
+    var scl = isnil(scale) ? 1 : scale
+    var col = isnil(color) ? item.color : color
+    return self._append(_unitArrow(item), position=position, scale=scl, rotate=rotate,
+                        color=col, flat=flat)
+  }
+
   /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
    *  Entry records are copied (item refs shared); no Defined notifications. */
   add(right) {
@@ -856,7 +976,7 @@ class Scene is Graphics with Broadcaster {
   move(id, scale=nil, rotate=nil) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    if (!isnil(scale)) e.scale = scale
+    if (!isnil(scale)) e.scale = _asScale(scale)
     if (!isnil(rotate)) e.rotate = rotate
     self.notify(GraphicsEventMoved(id))
     return true
@@ -867,7 +987,7 @@ class Scene is Graphics with Broadcaster {
     var e = self.findEntry(id)
     if (isnil(e)) return false
     e.position = _asPosition(position)
-    if (!isnil(scale)) e.scale = scale
+    if (!isnil(scale)) e.scale = _asScale(scale)
     if (!isnil(rotate)) e.rotate = rotate
     self.notify(GraphicsEventMoved(id))
     return true
@@ -910,6 +1030,26 @@ class Scene is Graphics with Broadcaster {
     var e = self.findEntry(id)
     if (isnil(e)) return false
     e.item = _unitSphere(item)
+    if (isnil(e.color)) e.color = item.color
+    self.notify(GraphicsEventReplaced(id))
+    return true
+  }
+
+  /** Replace with unit Cylinder (like display); keep entry SRT. */
+  replace(id, Cylinder item) {
+    var e = self.findEntry(id)
+    if (isnil(e)) return false
+    e.item = _unitCylinder(item)
+    if (isnil(e.color)) e.color = item.color
+    self.notify(GraphicsEventReplaced(id))
+    return true
+  }
+
+  /** Replace with unit Arrow (like display); keep entry SRT. */
+  replace(id, Arrow item) {
+    var e = self.findEntry(id)
+    if (isnil(e)) return false
+    e.item = _unitArrow(item)
     if (isnil(e.color)) e.color = item.color
     self.notify(GraphicsEventReplaced(id))
     return true
@@ -1101,10 +1241,17 @@ class Show {
    *  Without viewerid: d <graphicsId> (pose-only). */
   emitEntryDraw(entry, out, viewerid=nil) {
     out.write("i")
-    if (entry.scale != 1) out.write("s ${self.fmt(entry.scale)}")
+    var scl = entry.scale
+    if (ismatrix(scl) || islist(scl)) {
+      out.write("s ${self.fmt(scl[0])} ${self.fmt(scl[1])} ${self.fmt(scl[2])}")
+    } else if (scl != 1) {
+      out.write("s ${self.fmt(scl)}")
+    }
     if (!isnil(entry.rotate)) {
       var r = entry.rotate
-      out.write("r ${self.fmt(r[0])} ${self.fmt(r[1])} ${self.fmt(r[2])} ${self.fmt(r[3])}")
+      if (!(abs(r[0]) < 1e-8)) {
+        out.write("r ${self.fmt(r[0])} ${self.fmt(r[1])} ${self.fmt(r[2])} ${self.fmt(r[3])}")
+      }
     }
     var p = entry.position
     if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
@@ -1256,6 +1403,40 @@ class Show {
   _emitReplace(entry, Sphere item, out) {
     var graphicsId = entry.id
     var key = "sphere:${item._refinementLevel(entry.scale)}"
+    var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
+    if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
+      var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
+      self.entryColorId[graphicsId] = cid
+      out.write("C ${cid}")
+      self.emitEntryDraw(entry, out, viewerid=oldVid)
+      return true
+    }
+    self.emitEntryRemove(graphicsId, out)
+    self.writeEntry(entry, out)
+    return true
+  }
+
+  /** Shared Cylinder: keep cached `o` when n key matches; else drop + rewrite. */
+  _emitReplace(entry, Cylinder item, out) {
+    var graphicsId = entry.id
+    var key = "cylinder:${item.n}"
+    var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
+    if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
+      var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
+      self.entryColorId[graphicsId] = cid
+      out.write("C ${cid}")
+      self.emitEntryDraw(entry, out, viewerid=oldVid)
+      return true
+    }
+    self.emitEntryRemove(graphicsId, out)
+    self.writeEntry(entry, out)
+    return true
+  }
+
+  /** Shared Arrow: keep cached `o` when n+aspectratio key matches; else drop + rewrite. */
+  _emitReplace(entry, Arrow item, out) {
+    var graphicsId = entry.id
+    var key = "arrow:${item.n}:${item.aspectratio}"
     var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
     if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
       var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
@@ -1657,7 +1838,7 @@ class Show {
     self.visitEntry(entry, entry.item, out)
   }
 
-  /** Default: world-baked item, identity draw (Cylinder/Arrow/Text/…). */
+  /** Default: world-baked item, identity draw (Text/Tube/…). */
   visitEntry(entry, item, out) {
     self._currentEntry = entry
     self.visit(item, out)
@@ -1674,6 +1855,52 @@ class Show {
       vid = self.meshCache[key]
     } else {
       var tri = item.toTriangleComplex(scale=false, radiusforrefine=entry.scale)
+      if (!isnil(item.filter)) tri.filter = item.filter
+      if (!isnil(item.transmit)) tri.transmit = item.transmit
+      vid = self.defineXnTriangleComplex(tri, out)
+      self.meshCache[key] = vid
+    }
+    var alpha = self.opacity(item)
+    var cid = self.addRgb(self.entryRgb(entry), alpha, out)
+    out.write("C ${cid}")
+    self._recordObject(vid, colorid=cid)
+    self.emitEntryDraw(entry, out, viewerid=vid)
+    self._currentEntry = nil
+  }
+
+  /** Unit cylinder mesh (cached by face count) + entry SRT + `C` color. */
+  visitEntry(entry, Cylinder item, out) {
+    self._currentEntry = entry
+    var key = "cylinder:${item.n}"
+    var vid
+    if (self.meshCache.contains(key)) {
+      vid = self.meshCache[key]
+    } else {
+      var tri = item.toTriangleComplex(unit=true)
+      if (isnil(tri)) { self._currentEntry = nil; return }
+      if (!isnil(item.filter)) tri.filter = item.filter
+      if (!isnil(item.transmit)) tri.transmit = item.transmit
+      vid = self.defineXnTriangleComplex(tri, out)
+      self.meshCache[key] = vid
+    }
+    var alpha = self.opacity(item)
+    var cid = self.addRgb(self.entryRgb(entry), alpha, out)
+    out.write("C ${cid}")
+    self._recordObject(vid, colorid=cid)
+    self.emitEntryDraw(entry, out, viewerid=vid)
+    self._currentEntry = nil
+  }
+
+  /** Unit arrow mesh (cached by n + aspectratio) + entry SRT + `C` color. */
+  visitEntry(entry, Arrow item, out) {
+    self._currentEntry = entry
+    var key = "arrow:${item.n}:${item.aspectratio}"
+    var vid
+    if (self.meshCache.contains(key)) {
+      vid = self.meshCache[key]
+    } else {
+      var tri = item.toTriangleComplex(unit=true)
+      if (isnil(tri)) { self._currentEntry = nil; return }
       if (!isnil(item.filter)) tri.filter = item.filter
       if (!isnil(item.transmit)) tri.transmit = item.transmit
       vid = self.defineXnTriangleComplex(tri, out)

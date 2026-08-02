@@ -164,11 +164,20 @@ void mat3d_translate(mat4x4 in, vec3 vec, mat4x4 out) {
 /** @brief Scale by a factor
  * @param[in] in input matrix
  * @param[in] scale scale factor
- * @param[out] out on output, contains T*in where T is the translation matrix computed from vec */
+ * @param[out] out on output, contains S*in where S is uniform scale */
 void mat3d_scale(mat4x4 in, float scale, mat4x4 out) {
-    mat4x4 tr = { scale, 0.0f, 0.0f, 0.0f, // Col major order!
-                  0.0f, scale, 0.0f, 0.0f,
-                  0.0f, 0.0f, scale, 0.0f,
+    vec3 s = { scale, scale, scale };
+    mat3d_scale3(in, s, out);
+}
+
+/** @brief Non-uniform scale
+ * @param[in] in input matrix
+ * @param[in] scale per-axis scale factors
+ * @param[out] out on output, contains S*in where S is diag(sx,sy,sz,1) */
+void mat3d_scale3(mat4x4 in, vec3 scale, mat4x4 out) {
+    mat4x4 tr = { scale[0], 0.0f, 0.0f, 0.0f, // Col major order!
+                  0.0f, scale[1], 0.0f, 0.0f,
+                  0.0f, 0.0f, scale[2], 0.0f,
                   0.0f, 0.0f,  0.0f, 1.0f };
     mat4x4 in2;
     if (in==out) mat3d_copy4x4(in, in2); /* Use a copy if in and out are the same matrix */

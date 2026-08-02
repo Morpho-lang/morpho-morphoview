@@ -1,0 +1,80 @@
+// Vector field yardstick — shared unit Arrow meshes, many draw slots.
+// Color by continuous x-projection; batched Scene.move/recolor (Phase 5e).
+//
+//   morpho6 examples/vectors.morpho
+//
+// Close the viewer window (or wait for the run to finish) to exit.
+
+import morphoview
+import xgraphics
+import color
+import constants
+
+var nX = 10
+var nY = 10
+var nFrames = 600
+var dt = 1/50
+var spacing = 0.32
+var tipFrac = 0.22   // Arrow tip length fraction (= aspectratio)
+var shaftAR = 0.12   // thinner shaft: R = 0.5 * L * shaftAR via _segmentSRT
+var vxScale = 0.35   // tanh scale for x-projection → color
+var cmap = GradientMap()
+
+/** Map vx → [0,1] through GradientMap. */
+fn colorByVx(vx) {
+  var u = 0.5 + 0.5*tanh(vx/vxScale)
+  return cmap.rgb(u)
+}
+
+fn field(x, y, t) {
+  var vx = -y + 0.35*sin(t + x)
+  var vy = x + 0.35*cos(t + y)
+  var vz = 0.25*sin(0.7*t + x + y)
+  return Matrix([vx, vy, vz])
+}
+
+var g = Scene(title="Vectors", background=Color(0.07, 0.08, 0.1))
+var arrIds = []
+var origins = []
+var proto = Arrow([0, 0, 0], [0, 0, 1], aspectratio=tipFrac, n=10, color=White)
+
+for (ix in 0...nX) {
+  for (iy in 0...nY) {
+    var ox = (Float(ix) - 0.5*Float(nX-1))*spacing
+    var oy = (Float(iy) - 0.5*Float(nY-1))*spacing
+    var oz = 0
+    origins.append(Matrix([ox, oy, oz]))
+    var f0 = field(ox, oy, 0)
+    var start = [ox, oy, oz]
+    var end = [ox, oy, oz + 0.35]
+    var srt = _segmentSRT(start, end, shaftAR)
+    arrIds.append(g.display(proto, srt[0], scale=srt[1], rotate=srt[2],
+                            color=colorByVx(f0[0])))
+  }
+}
+
+var v = View(g, connecttimeout=20000)
+
+for (frame in 1...nFrames) {
+  if (v.closed) break
+  var t = Float(frame)*dt
+  g.beginBatch()
+  for (i in 0...origins.count()) {
+    var o = origins[i]
+    var f = field(o[0], o[1], t)
+    var nrm = f.norm()
+    if (!(nrm > 1e-8)) continue
+    var len = 0.22 + 0.18*tanh(nrm)
+    var tip = o + (len/nrm)*f
+    var srt = _segmentSRT(o, tip, shaftAR)
+    if (!isnil(srt)) {
+      g.move(arrIds[i], srt[0], scale=srt[1], rotate=srt[2])
+      g.recolor(arrIds[i], colorByVx(f[0]))
+    }
+  }
+  g.endBatch()
+  System.sleep(dt)
+  v.poll(timeoutms=0)
+}
+
+if (!v.closed) v.close()

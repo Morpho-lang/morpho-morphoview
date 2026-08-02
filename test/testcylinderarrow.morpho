@@ -1,0 +1,106 @@
+// Phase 5e: unit Cylinder/Arrow mesh cache, SRT, move/remove/recolor.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testcylinderarrow.morpho
+
+import xgraphics
+import color
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+/* ---- zero-length rejected ---- */
+var gz = Graphics()
+expect(gz.display(Cylinder([0, 0, 0], [0, 0, 0], n=6)) == false, "zero cylinder fails")
+expect(gz.display(Arrow([1, 1, 1], [1, 1, 1], n=6)) == false, "zero arrow fails")
+
+/* ---- unit storage + SRT from start→end ---- */
+var g = Graphics()
+var cid = g.display(Cylinder([0, 0, 0], [0, 0, 2], aspectratio=0.2, n=8, color=Red))
+var aid = g.display(Arrow([0, 0, 0], [1, 0, 0], aspectratio=0.25, n=8, color=Blue))
+expect(cid == 1 && aid == 2, "ids allocated")
+
+var ce = g.findEntry(cid)
+expect(ce.item.start[2] == 0 && ce.item.end[2] == 1, "cylinder stores unit shaft")
+expect(ce.item.n == 8, "cylinder keeps n")
+expect(ismatrix(ce.scale), "cylinder scale is 3-vector")
+expect(abs(ce.scale[2] - 2) < 1e-9, "scale.z is length")
+expect(abs(ce.scale[0] - 0.5*2*0.2) < 1e-9, "scale.xy is radius")
+expect(abs(ce.rotate[0]) < 1e-8, "+z cylinder has zero-angle rotate")
+
+var ae = g.findEntry(aid)
+expect(ae.item.end[2] == 1, "arrow stores unit shaft")
+expect(abs(ae.rotate[0]) > 1e-3, "arrow along +x needs nonzero rotate")
+expect(abs(ae.scale[2] - 1) < 1e-9, "arrow scale.z is length")
+
+/* ---- Show: many cylinders share one o; arrows share per (n,ar) ---- */
+var gs = Graphics()
+for (i in 0...5) {
+  gs.display(Cylinder([Float(i), 0, 0], [Float(i), 0, 1], aspectratio=0.1+0.02*Float(i), n=6,
+                      color=Red))
+}
+gs.display(Arrow([0, 1, 0], [0, 2, 0], aspectratio=0.2, n=6, color=Green))
+gs.display(Arrow([1, 1, 0], [1, 2, 0], aspectratio=0.2, n=6, color=Blue))
+gs.display(Arrow([2, 1, 0], [2, 2, 0], aspectratio=0.35, n=6, color=Yellow)) // different ar
+
+var buf = Buf()
+var show = Show()
+show.write(gs, buf)
+expect(countPrefix(buf.lines, "o ") == 3, "1 cylinder o + 2 arrow o (two aspectratios)")
+expect(countPrefix(buf.lines, "d ") == 8, "eight draw slots")
+expect(countPrefix(buf.lines, "s ") >= 8, "non-uniform or length scales emitted")
+
+/* ---- Scene move / recolor / remove (serialize path) ---- */
+var sc = Scene()
+var id1 = sc.display(Cylinder([0, 0, 0], [0, 1, 0], aspectratio=0.15, n=6, color=Red))
+var id2 = sc.display(Cylinder([1, 0, 0], [1, 1, 0], aspectratio=0.15, n=6, color=Blue))
+var id3 = sc.display(Arrow([0, 0, 0], [0, 0, 1], aspectratio=0.2, n=6, color=Green))
+
+var show2 = Show()
+var openBuf = Buf()
+show2.write(sc, openBuf)
+expect(show2.objectMap[id1] == show2.objectMap[id2], "scene cylinders share o")
+
+expect(sc.move(id1, [0.5, 0, 0], scale=[0.1, 0.1, 1.5]), "move cylinder")
+var poseBuf = Buf()
+expect(show2.emitEntryPose(sc, id1, poseBuf), "pose emit")
+expect(countPrefix(poseBuf.lines, "v ") == 0, "pose has no vertices")
+expect(countPrefix(poseBuf.lines, "f ") == 0, "pose has no facets")
+expect(poseBuf.lines[poseBuf.lines.count()-1] == "d ${id1}", "pose ends with d id")
+
+expect(sc.recolor(id3, Yellow), "recolor arrow")
+var colBuf = Buf()
+expect(show2.emitEntryRecolor(sc, id3, colBuf), "recolor emit")
+expect(countPrefix(colBuf.lines, "d ${id3}") == 1, "recolor redraws slot")
+
+expect(sc.remove(id2), "remove one shared cylinder")
+var remBuf = Buf()
+show2.emitEntryRemove(id2, remBuf)
+expect(countPrefix(remBuf.lines, "X D ${id2}") == 1, "X D for removed")
+expect(countPrefix(remBuf.lines, "X O ") == 0, "shared o retained")
+expect(show2.objectMap.contains(id1), "sibling cylinder still mapped")
+
+print "ok"

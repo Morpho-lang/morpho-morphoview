@@ -127,7 +127,7 @@ These update a parse-local model matrix and are **not** enqueued. On the next `d
 | `i` | — | Identity |
 | `m` | 16 floats | Left-multiply by 4×4 |
 | `r` | `<phi> <ax ay az>` | Rotate about axis |
-| `s` | `<scale>` | Uniform scale |
+| `s` | `<scale>` or `<sx sy sz>` | Uniform or non-uniform scale |
 | `t` | `<tx ty tz>` | Translate |
 
 ## Example

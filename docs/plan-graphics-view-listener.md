@@ -196,7 +196,7 @@ g.endBatch()            # one coalesced Moved
 
 **Substeps done:** 5c.1 draw-slots · 5c.2 unit Sphere + mesh cache · 5c.3 recolor · 5c.4 PointCloud/LineSet SRT · 5c.5 n-body (`examples/nbody.morpho`).
 
-**Contract:** Graphics entry id = viewer draw-slot id (`d <drawId> [objectId]`); color stamped on slot from `C`; unit Sphere + Show mesh cache by refine level; `Graphics.recolor` + `GraphicsEventRecolored`. `Cylinder` / `Arrow` / `Text` remain world-baked here (Phases 5e / 5f).
+**Contract:** Graphics entry id = viewer draw-slot id (`d <drawId> [objectId]`); color stamped on slot from `C`; unit Sphere + Show mesh cache by refine level; `Graphics.recolor` + `GraphicsEventRecolored`. `Text` remains until Phase 5f (`Cylinder` / `Arrow` → Phase 5e).
 
 #### Phase 5d — `U O` / `U V` / `X O` / `X D` ✅
 
@@ -230,7 +230,7 @@ Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEvent
 
 5. **`display` kwargs** — ✅ `color=` / `flat=` on `display` (and Sphere overloads); boing / nbody updated.
 6. **Named morph path** — ✅ `Scene.morph(id, item)` sets item; `View.morph` sets + `U V`. Distinct from `replace`. soapbubble uses `View.morph`.
-7. **Failure convention** — ✅ `display` returns `false` (not `nil`) on bad input; mutators stay `true`/`false`. Documented: Cylinder/Arrow/Text limits until 5e/5f.
+7. **Failure convention** — ✅ `display` returns `false` (not `nil`) on bad input; mutators stay `true`/`false`. Documented: Text limits until 5f.
 
 **Out of scope for 5dx:** unit Cylinder/Arrow (5e); Text slots (5f); binary transport; COLOR-draw coalescing in the viewer (note only — unbounded `C` appends on live recolor); formal dependents (5g).
 
@@ -243,21 +243,21 @@ Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEvent
 
 **Working agreement:** finish 5dx and pause for review before starting 5e.
 
-#### Phase 5e — Shared Cylinder / Arrow models (entry SRT)
+#### Phase 5e — Shared Cylinder / Arrow models (entry SRT) ✅
 
 **Why:** Many cylinders/arrows each bake a full world-space mesh today (`visitGeneric`). Same pattern as spheres: few unit meshes, many draws posed by entry SRT.
 
-**Locked (proposed):**
+**Locked:**
 
-- Canonical **unit cylinder** along a fixed axis (e.g. +z, height 1, radius 1); Show mesh cache keyed by refine (and any material mode that affects geometry).
-- `display(Cylinder)` / posed form: store a unit (or radius-normalized) abstract cylinder; encode **start→end** as entry `position` + `scale` (length and/or radius) + `rotate` (align axis). Color via `C` like spheres.
-- **Arrow:** shared shaft mesh + shared tip mesh (two draws or one composite object — pick one approach in implementation); same start→end → SRT mapping. Degenerate zero-length still skipped.
+- Canonical **unit cylinder** along +z, height 1, radius 1; Show mesh cache keyed by `n`.
+- `display(Cylinder)` / posed form: store unit abstract cylinder; encode **start→end** as entry `position` + non-uniform `scale` `[R,R,L]` (`R = 0.5*L*aspectratio`) + `rotate` (align +z). Color via `C`.
+- Viewer `s` accepts uniform or `s sx sy sz`.
+- **Arrow:** one composite unit mesh (shaft + tip); cache key `n` + `aspectratio` (tip fraction baked). Same start→end → SRT. Degenerate zero-length skipped (`display` → `false`).
 - Mid-session `move` / `recolor` / `remove` use the existing draw-slot path (no per-frame rebake).
-- Length or radius changes that cannot be expressed as uniform `scale` may need non-uniform scale later, or `replace` for now — prefer SRT-only in the first cut if possible (e.g. scale.z = length, scale.xy = radius).
 
 **Out of scope for 5e:** Text; binary transport; general Tube.
 
-**Done when:** many cylinders (and arrows) share one or two viewer `o`s; `g.move` updates pose without resending `v`/`f`; tests cover define-once + move + remove.
+**Done when:** many cylinders (and arrows) share one or two viewer `o`s; `g.move` updates pose without resending `v`/`f`; tests cover define-once + move + remove. ✅ [`test/testcylinderarrow.morpho`](../test/testcylinderarrow.morpho), [`test/testviewcylinder.morpho`](../test/testviewcylinder.morpho), [`examples/vectors.morpho`](../examples/vectors.morpho).
 
 #### Phase 5f — Text draw-slots (move / remove / update)
 

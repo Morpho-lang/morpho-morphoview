@@ -1214,10 +1214,16 @@ bool command_parserotate(parser *p, void *out) {
 
 bool command_parsescale(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
-    float s;
+    float s[3];
 
-    PARSE_CHECK(command_parsefloat(p, &s));
-    mat3d_scale(ctx->model, s, ctx->model);
+    PARSE_CHECK(command_parsefloat(p, &s[0]));
+    if (command_isnumerical(p)) {
+        PARSE_CHECK(command_parsefloat(p, &s[1]));
+        PARSE_CHECK(command_parsefloat(p, &s[2]));
+        mat3d_scale3(ctx->model, s, ctx->model);
+    } else {
+        mat3d_scale(ctx->model, s[0], ctx->model);
+    }
     ctx->modelchanged=true;
     return true;
 }

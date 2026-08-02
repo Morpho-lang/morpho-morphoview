@@ -1,0 +1,27 @@
+// Live Scene: Cylinder define-once + move (Phase 5e).
+// Expect: prints "ok" then exits.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+//
+//   cd test && morpho6 testviewcylinder.morpho
+
+import morphoview
+import xgraphics
+import color
+
+var g = Scene()
+g.title = "cylinder-move"
+var id = g.display(Cylinder([0, 0, 0], [0, 0, 1], aspectratio=0.2, n=8, color=Red))
+
+var v = View(g)
+
+for (i in 1...8) {
+  if (v.closed) break
+  var L = 0.8 + 0.1*Float(i)
+  var srt = _segmentSRT([0.05*Float(i), 0, 0], [0.05*Float(i), 0, L], 0.2)
+  g.move(id, srt[0], scale=srt[1], rotate=srt[2])
+  System.sleep(0.05)
+  v.poll(timeoutms=0)
+}
+
+if (!v.closed) v.close()
+print "ok"
