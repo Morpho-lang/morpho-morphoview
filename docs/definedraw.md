@@ -42,7 +42,7 @@ Not a full scene graph. Richer than an append-only displaylist:
 - **Listeners** (`broadcast` module) + typed events (`GraphicsEventDefined` / `Moved` / `Recolored` / `Removed` / `Replaced`)
 - `open(g)` uses one `Show.write` then listens if `g` is a Scene; `update(g)` full replace + rebind
 
-`Show` walks Graphics **entries** (Scene included). Phase 5c: `Sphere` → unit mesh via Show cache (key = refine bucket + material mode), draw with entry SRT; many entries may share one viewer `o`. Color/opacity via `C`, not baked vertices, so instances share geometry. `PointCloud` / `LineSet` use entry SRT. `Cylinder` / `Arrow` / `Text` stay world-baked until an orientation-in-transform cut.
+`Show` walks Graphics **entries** (Scene included). Phase 5c: `Sphere` → unit mesh via Show cache (key = refine bucket + material mode), draw with entry SRT; many entries may share one viewer `o`. Color/opacity via `C`, not baked vertices, so instances share geometry. `PointCloud` / `LineSet` use entry SRT. **Phase 5e:** same pattern for `Cylinder` / `Arrow` (unit shaft ± tip, start→end as SRT). **Phase 5f:** `Text` on draw-slots so `move` / `remove` work (string/font via `replace` first cut).
 
 ## Viewer protocol
 
@@ -67,6 +67,8 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 | Primitive | First define | Later draw (same Show / same id) |
 |-----------|--------------|----------------------------------|
 | Opaque / translucent `Sphere` | unit mesh `o`/`v`/`f` (cached by refine key); `C` for color/alpha | entry SRT `i`/`s`/`r`/`t`/`d` (Phase 5c; many `d` → one `o`) |
+| `Cylinder` / `Arrow` | unit shaft (± tip) mesh cache (Phase 5e); today: world-baked per instance | entry SRT from start→end (Phase 5e) |
+| `Text` | font + `T` (Phase 5f: entry-owned pose) | entry pose update / remove (Phase 5f); content via `replace` |
 | `TriangleComplex` | `o`/`v`/`f` (+ register `c` if transmit) | entry SRT (often identity if world-baked) |
 | `PointCloud` / `LineSet` | `o`/`v`/`p|l` | entry SRT (Phase 5c) |
 
@@ -76,7 +78,7 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 2. **Viewer** — sticky context; `D`; prepare-safe redraw ✅
 3. **Graphics ↔ View** — `move`; listener registration; View translates events → commands ✅
 4. **Yardstick** — rewrite `examples/amigaball.morpho` via `g.move` (not full `U S`) ✅
-5. **Phase 5** — batching (5a), selective redraw (5b), Show emit (5c), `U O` / `U V` / `X O` / `X D` (5d) ✅; dependents framework later (5e). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
+5. **Phase 5** — 5a–5d ✅; **5e** shared Cylinder/Arrow; **5f** Text slots; dependents later (**5g**). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
 ## Hand sequences / tests
 
 | File | Role | Runnable now? |

@@ -191,7 +191,7 @@ g.endBatch()            # one coalesced Moved
 
 **Substeps done:** 5c.1 draw-slots · 5c.2 unit Sphere + mesh cache · 5c.3 recolor · 5c.4 PointCloud/LineSet SRT · 5c.5 n-body (`examples/nbody.morpho`).
 
-**Contract:** Graphics entry id = viewer draw-slot id (`d <drawId> [objectId]`); color stamped on slot from `C`; unit Sphere + Show mesh cache by refine level; `Graphics.recolor` + `GraphicsEventRecolored`; Cylinder/Arrow/Text still world-baked.
+**Contract:** Graphics entry id = viewer draw-slot id (`d <drawId> [objectId]`); color stamped on slot from `C`; unit Sphere + Show mesh cache by refine level; `Graphics.recolor` + `GraphicsEventRecolored`. `Cylinder` / `Arrow` / `Text` remain world-baked here (Phases 5e / 5f).
 
 #### Phase 5d — `U O` / `U V` / `X O` / `X D` ✅
 
@@ -206,8 +206,41 @@ Viewer command language + Graphics/View wiring:
 
 Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEventReplaced`. View maps Removed → `X D` (+ `X O` if last user of the viewer object); Replaced → sphere-cache refresh when possible, else remove + re-`writeEntry`. Full `update(Graphics)` / `U S` unchanged. `U O` remains for low-level same-id refill.
 
-**Done when:** command fixtures exist; Morpho smoke for redefine/delete. Not required for pose animation.
+**Done when:** command fixtures exist; Morpho smoke for redefine/delete. Not required for pose animation. Yardstick: [`examples/soapbubble.morpho`](../examples/soapbubble.morpho) (`U V` + refine `replace`).
 
-#### Phase 5e — Formal Morpho dependents (backlog only)
+#### Phase 5e — Shared Cylinder / Arrow models (entry SRT)
+
+**Why:** Many cylinders/arrows each bake a full world-space mesh today (`visitGeneric`). Same pattern as spheres: few unit meshes, many draws posed by entry SRT.
+
+**Locked (proposed):**
+
+- Canonical **unit cylinder** along a fixed axis (e.g. +z, height 1, radius 1); Show mesh cache keyed by refine (and any material mode that affects geometry).
+- `display(Cylinder)` / posed form: store a unit (or radius-normalized) abstract cylinder; encode **start→end** as entry `position` + `scale` (length and/or radius) + `rotate` (align axis). Color via `C` like spheres.
+- **Arrow:** shared shaft mesh + shared tip mesh (two draws or one composite object — pick one approach in implementation); same start→end → SRT mapping. Degenerate zero-length still skipped.
+- Mid-session `move` / `recolor` / `remove` use the existing draw-slot path (no per-frame rebake).
+- Length or radius changes that cannot be expressed as uniform `scale` may need non-uniform scale later, or `replace` for now — prefer SRT-only in the first cut if possible (e.g. scale.z = length, scale.xy = radius).
+
+**Out of scope for 5e:** Text; binary transport; general Tube.
+
+**Done when:** many cylinders (and arrows) share one or two viewer `o`s; `g.move` updates pose without resending `v`/`f`; tests cover define-once + move + remove.
+
+#### Phase 5f — Text draw-slots (move / remove / update)
+
+**Why:** `visit(Text)` bakes `item.posn` / `dirn` / `vertical` into `t`/`m`/`T` and does not `_recordObject`, so `move` / `remove` do not drive Text like mesh draw-slots.
+
+**Locked (proposed):**
+
+- Graphics entry id ↔ viewer text draw-slot (or equivalent id tracked in `objectMap` / a parallel text map).
+- Store unit/default text pose on the entry: `position` from `posn` (and optionally orientation from `dirn`/`vertical` → entry `rotate` or a retained `m`); `Show` emits `T` with entry transform, not only baked `item.posn`.
+- `g.move(id, …)` → in-place pose update for that text slot (viewer: replace text draw matrix, analogous to mesh `d`).
+- `g.remove(id)` → delete that text draw (`X D` or text-specific delete if required).
+- String / font / size change → `replace` (remove + redefine) in the first cut; optional later in-place `T` content update if cheap.
+- Recolor: stamp color on the text draw if the viewer path allows; else redefine.
+
+**Out of scope for 5f:** Cylinder/Arrow (5e); rich text layout.
+
+**Done when:** live session can `display(Text)` → `move` → `remove` without full `U S`; smoke test + small example or fixture.
+
+#### Phase 5g — Formal Morpho dependents (backlog only)
 
 Non-goal for this series. Learn from Graphics→View; formalize a general Morpho dependent-object framework later.
