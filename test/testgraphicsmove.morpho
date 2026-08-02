@@ -15,9 +15,21 @@ fn expect(cond, msg) {
 }
 
 class Capture with Listener {
-  init() { self.events = [] }
+  init() {
+    self.events = []
+    self.movedIds = nil
+    self.recolorIds = nil
+  }
   receive(g, event) {
     self.events.append(self._kind(event))
+  }
+  receive(g, GraphicsEventMoved ev) {
+    self.events.append(GraphicsEventMoved)
+    self.movedIds = ev.ids
+  }
+  receive(g, GraphicsEventRecolored ev) {
+    self.events.append(GraphicsEventRecolored)
+    self.recolorIds = ev.ids
   }
   _kind(GraphicsEventDefined ev) { return GraphicsEventDefined }
   _kind(GraphicsEventMoved ev) { return GraphicsEventMoved }
@@ -137,10 +149,12 @@ for (line in buf2.lines) {
 }
 expect(hasT, "pose redraw includes translation")
 
-/* ---- processMovedIds + emitEntryPose (selective, no D) ---- */
+/* ---- event.ids + emitEntryPose (selective, no D) ---- */
 var g7 = Scene()
 var id7a = g7.display(tc, [0, 0, 0], scale=1)
 var id7b = g7.display(tc, [1, 0, 0], scale=1)
+var cap7 = Capture()
+cap7.listen(g7)
 var show7 = Show()
 var buf7 = Buf()
 show7.write(g7, buf7)
@@ -148,10 +162,9 @@ g7.beginBatch()
 g7.move(id7a, [2, 0, 0])
 g7.move(id7b, [3, 0, 0], scale=2)
 g7.endBatch()
-var moved = g7.processMovedIds()
-expect(moved.count() == 2, "batch pending has both movers")
-expect(moved[0] == id7a && moved[1] == id7b, "pending displaylist order")
-expect(g7.processMovedIds().count() == 0, "process clears pending")
+expect(cap7.events.count() == 1 && cap7.events[0] == GraphicsEventMoved, "one coalesced Moved")
+expect(!isnil(cap7.movedIds) && cap7.movedIds.count() == 2, "event.ids has both movers")
+expect(cap7.movedIds[0] == id7a && cap7.movedIds[1] == id7b, "event.ids first-seen order")
 
 var bufPose = Buf()
 expect(show7.emitEntryPose(g7, id7a, bufPose), "emitEntryPose a")
@@ -163,6 +176,22 @@ for (line in bufPose.lines) {
   if (line.count() >= 2 && line[0] == "d") hasD = true
 }
 expect(hasD && !hasClear, "selective pose emits d without D")
+
+/* ---- two listeners see the same full id list ---- */
+var gMulti = Scene()
+var idMa = gMulti.display(tc, [0, 0, 0])
+var idMb = gMulti.display(tc, [1, 0, 0])
+var capM1 = Capture()
+var capM2 = Capture()
+capM1.listen(gMulti)
+capM2.listen(gMulti)
+gMulti.beginBatch()
+gMulti.move(idMa, [2, 0, 0])
+gMulti.move(idMb, [3, 0, 0])
+gMulti.endBatch()
+expect(capM1.movedIds.count() == 2 && capM2.movedIds.count() == 2, "both listeners get two ids")
+expect(capM1.movedIds[0] == idMa && capM1.movedIds[1] == idMb, "listener 1 full set")
+expect(capM2.movedIds[0] == idMa && capM2.movedIds[1] == idMb, "listener 2 full set")
 
 /* ---- recolor ---- */
 var g8 = Scene()
@@ -179,8 +208,8 @@ g8.recolor(id8, Yellow)
 expect(cap8.events.count() == 0, "recolor inside batch silent")
 g8.endBatch()
 expect(cap8.events.count() == 1 && cap8.events[0] == GraphicsEventRecolored, "one coalesced Recolored")
-var recolored = g8.processRecolorIds()
-expect(recolored.count() == 1 && recolored[0] == id8, "processRecolorIds")
+expect(!isnil(cap8.recolorIds) && cap8.recolorIds.count() == 1, "recolor event.ids")
+expect(cap8.recolorIds[0] == id8, "recolor id on event")
 
 var show8 = Show()
 var buf8 = Buf()

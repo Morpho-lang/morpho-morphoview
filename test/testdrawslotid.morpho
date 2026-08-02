@@ -1,0 +1,83 @@
+// Phase 5dx.1: world-baked visits use graphics entry id as draw-slot.
+// Sphere (unit cache) + Cylinder (baked) in one Scene must not collide slots;
+// remove targets the right draw-slot.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testdrawslotid.morpho
+
+import xgraphics
+import color
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn findDraw(lines, graphicsId) {
+  var needle = "d ${graphicsId} "
+  for (line in lines) {
+    if (line.count() >= needle.count()) {
+      var ok = true
+      for (i in 0...needle.count()) {
+        if (line[i] != needle[i]) { ok = false; break }
+      }
+      if (ok) return line
+    }
+  }
+  return nil
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+var g = Scene()
+var sid = g.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], scale=0.3)
+var cid = g.display(Cylinder([0, 0, 0], [0, 0, 1], aspectratio=0.2, n=6, color=Blue))
+
+expect(sid != cid, "distinct graphics ids")
+
+var buf = Buf()
+var show = Show()
+show.write(g, buf)
+
+expect(show.objectMap.contains(sid), "sphere mapped")
+expect(show.objectMap.contains(cid), "cylinder mapped")
+expect(show.objectMap[sid] != show.objectMap[cid], "sphere and cylinder use different viewer objects")
+
+var sd = findDraw(buf.lines, sid)
+var cd = findDraw(buf.lines, cid)
+expect(!isnil(sd), "sphere draw is d <graphicsId> <viewerId>")
+expect(!isnil(cd), "cylinder draw is d <graphicsId> <viewerId>")
+expect(countPrefix(buf.lines, "d ") == 2, "two draw slots")
+
+// Remove cylinder: X D <graphicsId> (+ X O for its private mesh).
+var rem = Buf()
+show.emitEntryRemove(cid, rem)
+expect(countPrefix(rem.lines, "X D ${cid}") == 1, "remove uses cylinder graphics id")
+expect(!show.objectMap.contains(cid), "cylinder unmapped after remove")
+expect(show.objectMap.contains(sid), "sphere still mapped")
+
+// Pose emit for sphere still works by graphics id.
+var pose = Buf()
+expect(show.emitEntryPose(g, sid, pose), "sphere pose after cylinder remove")
+expect(pose.lines[pose.lines.count()-1] == "d ${sid}", "pose is d <graphicsId>")
+
+print "ok"

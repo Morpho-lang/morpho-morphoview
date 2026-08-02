@@ -1,0 +1,109 @@
+// Phase 5dx.2: U V / refreshMesh float layout matches define (xn vs xnc).
+// Opaque TriangleComplex must morph with xnc stride; translucent with xn.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testrefreshlayout.morpho
+
+import xgraphics
+import color
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn hasPrefix(line, prefix) {
+  if (line.count() < prefix.count()) return false
+  for (i in 0...prefix.count()) {
+    if (line[i] != prefix[i]) return false
+  }
+  return true
+}
+
+/** Count whitespace-separated floats after the U V header line. */
+fn countUvFloats(lines) {
+  var n = 0
+  var pastHeader = false
+  for (line in lines) {
+    if (!pastHeader) {
+      if (hasPrefix(line, "U V ")) pastHeader = true
+      continue
+    }
+    // Rough token count: non-empty runs separated by spaces.
+    var inTok = false
+    for (i in 0...line.count()) {
+      var ch = line[i]
+      if (ch == " " || ch == "\t") {
+        if (inTok) { n += 1; inTok = false }
+      } else {
+        inTok = true
+      }
+    }
+    if (inTok) n += 1
+  }
+  return n
+}
+
+fn makeTri(transmit=nil) {
+  return TriangleComplex(
+    Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
+    Matrix([[1], [1], [1]]),
+    transmit=transmit
+  )
+}
+
+/* ---- opaque: define xnc, morph xnc (3 verts × 9 floats) ---- */
+var gOpaque = Scene()
+var idOpaque = gOpaque.display(makeTri())
+var showO = Show()
+var defineO = Buf()
+showO.write(gOpaque, defineO)
+
+expect(showO.vertexLayout[idOpaque] == "xnc", "opaque layout is xnc")
+var sawXnc = false
+for (line in defineO.lines) {
+  if (line == "v \"xnc\"") sawXnc = true
+}
+expect(sawXnc, "opaque define emits v \"xnc\"")
+
+var morphO = Buf()
+expect(showO.emitEntryVertices(gOpaque, idOpaque, morphO), "opaque morph emits")
+expect(hasPrefix(morphO.lines[0], "U V "), "opaque morph starts with U V")
+expect(countUvFloats(morphO.lines) == 27, "opaque morph is 3×9 floats")
+
+/* ---- translucent: define xn, morph xn (3 verts × 6 floats) ---- */
+var gTx = Scene()
+var idTx = gTx.display(makeTri(transmit=0.5))
+var showT = Show()
+var defineT = Buf()
+showT.write(gTx, defineT)
+
+expect(showT.vertexLayout[idTx] == "xn", "translucent layout is xn")
+var sawXn = false
+for (line in defineT.lines) {
+  if (line == "v \"xn\"") sawXn = true
+}
+expect(sawXn, "translucent define emits v \"xn\"")
+
+var morphT = Buf()
+expect(showT.emitEntryVertices(gTx, idTx, morphT), "translucent morph emits")
+expect(countUvFloats(morphT.lines) == 18, "translucent morph is 3×6 floats")
+
+/* ---- unmapped / wrong type fail cleanly ---- */
+expect(!showO.emitEntryVertices(gOpaque, 999, Buf()), "missing id fails")
+var gSph = Scene()
+var sid = gSph.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], scale=0.2)
+var showS = Show()
+showS.write(gSph, Buf())
+expect(!showS.emitEntryVertices(gSph, sid, Buf()), "sphere entry is not mesh morph")
+
+print "ok"

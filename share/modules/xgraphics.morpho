@@ -696,7 +696,7 @@ class GraphicsEntry {
 
 /** Events from Scene (Broadcaster). Typed subclasses enable multiple dispatch.
  *  Named GraphicsEvent* for continuity with the Graphics entry model. */
-class GraphicsEvent {
+class GraphicsEvent with BroadcastEvent {
   init(id) {
     self.id = id
   }
@@ -704,14 +704,43 @@ class GraphicsEvent {
 
 class GraphicsEventDefined is GraphicsEvent {}
 
-/** Coalesces within a Broadcaster batch (latest Moved wins). */
-class GraphicsEventMoved is GraphicsEvent {
-  batchKey() { return GraphicsEventMoved }
+/** Merge `prev.ids` then `into.ids` (first-seen order, deduped). */
+fn _coalesceIds(into, prev) {
+  var seen = Dictionary()
+  var out = []
+  for (id in prev.ids) {
+    if (!seen.contains(id)) {
+      seen[id] = true
+      out.append(id)
+    }
+  }
+  for (id in into.ids) {
+    if (!seen.contains(id)) {
+      seen[id] = true
+      out.append(id)
+    }
+  }
+  into.ids = out
 }
 
-/** Coalesces within a Broadcaster batch (latest Recolored wins). */
+/** Coalesces within a Broadcaster batch; `ids` accumulates every mover. */
+class GraphicsEventMoved is GraphicsEvent {
+  init(id) {
+    super.init(id)
+    self.ids = [id]
+  }
+  batchKey() { return GraphicsEventMoved }
+  coalesce(prev) { _coalesceIds(self, prev) }
+}
+
+/** Coalesces within a Broadcaster batch; `ids` accumulates every recolor target. */
 class GraphicsEventRecolored is GraphicsEvent {
+  init(id) {
+    super.init(id)
+    self.ids = [id]
+  }
   batchKey() { return GraphicsEventRecolored }
+  coalesce(prev) { _coalesceIds(self, prev) }
 }
 
 /** Entry removed from Scene (no coalesce — each id flushed). */
@@ -808,9 +837,6 @@ class Scene is Graphics with Broadcaster {
   init(title = nil, background = nil) {
     super.init(title=title, background=background)
     self._broadcasterInit()
-    // kind → { graphicsId → true }; processed (cleared) by processPendingIds
-    // (named _pendingIds to avoid clashing with Broadcaster._pending)
-    self._pendingIds = Dictionary()
   }
 
   /** Allocate id, append entry, optionally notify Defined. */
@@ -820,44 +846,13 @@ class Scene is Graphics with Broadcaster {
     return id
   }
 
-  /** Return pending ids for `kind` ("moved" / "recolored") in displaylist order and clear them. */
-  processPendingIds(kind) {
-    var ids = []
-    if (!self._pendingIds.contains(kind)) return ids
-    var pending = self._pendingIds[kind]
-    for (e in self.displaylist) {
-      if (pending.contains(e.id)) ids.append(e.id)
-    }
-    self._pendingIds[kind] = Dictionary()
-    return ids
-  }
-
-  _markPending(kind, id, event) {
-    var pending = Dictionary()
-    if (self._pendingIds.contains(kind)) pending = self._pendingIds[kind]
-    pending[id] = true
-    self._pendingIds[kind] = pending
-    self.notify(event)
-  }
-
-  processMovedIds() { return self.processPendingIds("moved") }
-  processRecolorIds() { return self.processPendingIds("recolored") }
-
-  _markMoved(id) {
-    self._markPending("moved", id, GraphicsEventMoved(id))
-  }
-
-  _markRecolor(id) {
-    self._markPending("recolored", id, GraphicsEventRecolored(id))
-  }
-
   /** Update scale=/rotate= only; omitted kwargs leave that component unchanged. */
   move(id, scale=nil, rotate=nil) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
     if (!isnil(scale)) e.scale = scale
     if (!isnil(rotate)) e.rotate = rotate
-    self._markMoved(id)
+    self.notify(GraphicsEventMoved(id))
     return true
   }
 
@@ -868,7 +863,7 @@ class Scene is Graphics with Broadcaster {
     e.position = _asposition(position)
     if (!isnil(scale)) e.scale = scale
     if (!isnil(rotate)) e.rotate = rotate
-    self._markMoved(id)
+    self.notify(GraphicsEventMoved(id))
     return true
   }
 
@@ -877,7 +872,7 @@ class Scene is Graphics with Broadcaster {
     var e = self.findEntry(id)
     if (isnil(e)) return false
     e.color = color
-    self._markRecolor(id)
+    self.notify(GraphicsEventRecolored(id))
     return true
   }
 
@@ -987,9 +982,11 @@ class Show {
     self.objectMap = Dictionary()    // graphicsId → viewer object id
     self.entryColorId = Dictionary() // graphicsId → color id when draw needs `C`
     self.flatIds = Dictionary()      // graphicsId → true if draw needs `M flat`
+    self.vertexLayout = Dictionary() // graphicsId → "xn" | "xnc" (TriangleComplex)
     self.meshCache = Dictionary()    // mesh key → viewer object id (shared geometry)
     self._currentEntry = nil
     self._lastColorId = nil
+    self._lastVertexLayout = nil
   }
 
   // Fire-and-forget: temp file + morphoview -t.
@@ -1092,8 +1089,9 @@ class Show {
 
   /** Emit i / s / r / t / d.
    *  - viewerId set, entry.id ≠ 0 → `d <graphicsId> <viewerId>` (define/redraw)
-   *  - viewerId set, entry.id == 0 → `d <viewerId>` (identity / world-baked)
-   *  - viewerId nil → `d <graphicsId>` (pose-only update) */
+   *  - viewerId set, entry.id == 0 → `d <viewerId>` (no Graphics entry; raw bake only)
+   *  - viewerId nil → `d <graphicsId>` (pose-only update)
+   *  Callers under an entry must pass that entry (not GraphicsEntry(0,…)). */
   emitEntryDraw(entry, out, viewerId=nil) {
     out.write("i")
     if (entry.scale != 1) out.write("s ${self.fmt(entry.scale)}")
@@ -1114,13 +1112,22 @@ class Show {
     }
   }
 
-  /** Record graphicsId → viewer id (and optional draw color / flat shade) for the current entry. */
+  /** Entry for a draw under visit: prefer `_currentEntry`, else synthetic id 0. */
+  _drawEntry(item) {
+    if (!isnil(self._currentEntry)) return self._currentEntry
+    return GraphicsEntry(0, item)
+  }
+
+  /** Record graphicsId → viewer id (and optional draw color / flat shade / layout). */
   _recordObject(viewerId, colorId=nil, flat=false) {
     var entry = self._currentEntry
     if (isnil(entry) || entry.id == 0) return
     self.objectMap[entry.id] = viewerId
     if (!isnil(colorId)) self.entryColorId[entry.id] = colorId
     if (flat) self.flatIds[entry.id] = true
+    if (!isnil(self._lastVertexLayout)) {
+      self.vertexLayout[entry.id] = self._lastVertexLayout
+    }
   }
 
   /** Re-issue draws for all mapped entries after `D` (entry SRT). */
@@ -1147,14 +1154,25 @@ class Show {
     return true
   }
 
-  /** Presentation RGB for an entry (entry.color, else item color fields). */
+  /** Presentation RGB for an entry (entry.color, else typed item albedo). */
   entryRgb(entry) {
-    var col = entry.color
-    var item = entry.item
-    if (isnil(col)) {
-      if (isobject(item) && item.respondsto("color")) col = item.color
-      else if (isobject(item) && item.respondsto("colors")) return self.uniformRgb(item)
-    }
+    if (!isnil(entry.color)) return self._rgbValue(entry.color)
+    return self._itemRgb(entry.item)
+  }
+
+  /** Item albedo by concrete type (closed display-item set → multiple dispatch). */
+  _itemRgb(TriangleComplex item) { return self._rgbValue(item.colors) }
+  _itemRgb(Sphere item) { return self._rgbValue(item.color) }
+  _itemRgb(Cylinder item) { return self._rgbValue(item.color) }
+  _itemRgb(Arrow item) { return self._rgbValue(item.color) }
+  _itemRgb(Tube item) { return self._rgbValue(item.color) }
+  _itemRgb(Text item) { return self._rgbValue(item.color) }
+  _itemRgb(PointCloud item) { return self._rgbValue(item.color) }
+  _itemRgb(LineSet item) { return self._rgbValue(item.color) }
+  _itemRgb(item) { return [0.5, 0.5, 0.5] }
+
+  /** Normalize Matrix / list / Color / ColorMap-like values to RGB (open value shapes). */
+  _rgbValue(col) {
     if (isnil(col)) return [0.5, 0.5, 0.5]
     if (ismatrix(col)) return [col[0,0], col[1,0], col[2,0]]
     if (islist(col)) return col
@@ -1192,6 +1210,7 @@ class Show {
     if (self.objectMap.contains(graphicsId)) self.objectMap.remove(graphicsId)
     if (self.entryColorId.contains(graphicsId)) self.entryColorId.remove(graphicsId)
     if (self.flatIds.contains(graphicsId)) self.flatIds.remove(graphicsId)
+    if (self.vertexLayout.contains(graphicsId)) self.vertexLayout.remove(graphicsId)
   }
 
   /** Drop meshCache keys that point at @p viewerId. */
@@ -1251,8 +1270,8 @@ class Show {
   }
 
   /** Same-length vertex replace for a mapped TriangleComplex (`U V`).
-   *  Emits position+normal floats (`xn`); requires the object was defined that way
-   *  (e.g. via transmit/filter → uniform `C`). Returns false if unmapped / wrong type. */
+   *  Float layout must match define (`xn` vs `xnc`); returns false if unmapped,
+   *  wrong type, or layout unknown (never emit a length the viewer will drop). */
   emitEntryVertices(graphic, graphicsId, out) {
     if (!self.objectMap.contains(graphicsId)) return false
     var entry = graphic.findEntry(graphicsId)
@@ -1261,17 +1280,16 @@ class Show {
   }
 
   _emitVertices(entry, TriangleComplex item, out) {
+    if (!self.vertexLayout.contains(entry.id)) return false
+    var layout = self.vertexLayout[entry.id]
     var vid = self.objectMap[entry.id]
-    var x = item.position
-    var n = item.normals
-    var dim = x.dimensions()[0]
-    var nv = x.dimensions()[1]
     out.write("U V ${vid}")
-    for (i in 0...nv) {
-      var line = ""
-      for (j in 0...dim) line += "${self.fmt(x[j,i])} "
-      for (j in 0...dim) line += "${self.fmt(n[j,i])} "
-      out.write(line)
+    if (layout == "xnc") {
+      self._triangleComplexVertexFloats(item, out, includeColor=true)
+    } else if (layout == "xn") {
+      self._triangleComplexVertexFloats(item, out, includeColor=false)
+    } else {
+      return false
     }
     return true
   }
@@ -1288,15 +1306,9 @@ class Show {
     return (a < 0) ? 0 : ((a > 1) ? 1 : a)
   }
 
-  /** Uniform RGB for a TriangleComplex (first vertex if per-vertex colors).
-   *  Type cascade is fine here — colors may be Matrix, list, or Color. */
+  /** Uniform RGB for a TriangleComplex (first vertex if per-vertex colors). */
   uniformRgb(item) {
-    var col = item.colors
-    if (isnil(col)) return [0.5, 0.5, 0.5]
-    if (ismatrix(col)) return [col[0,0], col[1,0], col[2,0]]
-    if (islist(col)) return col
-    if (isobject(col)) return col.rgb(0)
-    return [0.5, 0.5, 0.5]
+    return self._rgbValue(item.colors)
   }
 
   /** Emit `c` for rgb[+alpha]; returns color id. Alpha < ~1 → RGBA. */
@@ -1316,40 +1328,12 @@ class Show {
   }
 
   triangleComplexObjectData(item, out, includeColor=true) {
-    var x = item.position
-    var n = item.normals
-    var col = item.colors
-    var localColor = false
-    var dimensions=x.dimensions()
-    var dim = dimensions[0]
-    var nv = dimensions[1]
-
     if (includeColor) {
-      if (ismatrix(col)) {
-        if (col.dimensions()[1]>1) localColor = true
-      } else if (isobject(col) && !islist(col)) col = col.rgb(0)
       out.write("v \"xnc\"")
     } else {
       out.write("v \"xn\"")
     }
-
-    for (i in 0...nv) {
-      var line = ""
-      for (j in 0...dim) {
-        line+="${self.fmt(x[j,i])} "
-      }
-      for (j in 0...dim) {
-        line+="${self.fmt(n[j,i])} "
-      }
-      if (includeColor) {
-        if (localColor) {
-          for (j in 0...3) line+="${self.fmt(col[j,i])} "
-        } else {
-          for (j in 0...item.colors.count()) line+="${self.fmt(col[j])} "
-        }
-      }
-      out.write(line)
-    }
+    self._triangleComplexVertexFloats(item, out, includeColor=includeColor)
 
     out.write("f")
     var f=item.connectivity
@@ -1372,17 +1356,50 @@ class Show {
     }
   }
 
+  /** Position + normal [+ color] float rows only (shared by define `v` and `U V`). */
+  _triangleComplexVertexFloats(item, out, includeColor=true) {
+    var x = item.position
+    var n = item.normals
+    var col = item.colors
+    var localColor = false
+    var dimensions = x.dimensions()
+    var dim = dimensions[0]
+    var nv = dimensions[1]
+
+    if (includeColor) {
+      if (ismatrix(col)) {
+        if (col.dimensions()[1] > 1) localColor = true
+      } else if (isobject(col) && !islist(col)) col = col.rgb(0)
+    }
+
+    for (i in 0...nv) {
+      var line = ""
+      for (j in 0...dim) line += "${self.fmt(x[j,i])} "
+      for (j in 0...dim) line += "${self.fmt(n[j,i])} "
+      if (includeColor) {
+        if (localColor) {
+          for (j in 0...3) line += "${self.fmt(col[j,i])} "
+        } else {
+          for (j in 0...item.colors.count()) line += "${self.fmt(col[j])} "
+        }
+      }
+      out.write(line)
+    }
+  }
+
   /** Define a TriangleComplex with `v "xn"` only (no vertex colors); returns viewer id.
    *  Does not emit `C` — caller stamps color for the draw slot. */
   defineXnTriangleComplex(item, out) {
     var id = self.uid()
+    self._lastVertexLayout = "xn"
     out.write("o ${id}")
     self.triangleComplexObjectData(item, out, includeColor=false)
     return id
   }
 
   /** Define a TriangleComplex (`o`/`v`/`f`, optional `C`); returns viewer object id.
-   *  Sets `self._lastColorId` when a uniform `C` is selected (else nil). */
+   *  Sets `self._lastColorId` when a uniform `C` is selected (else nil).
+   *  Sets `self._lastVertexLayout` to `"xn"` (translucent) or `"xnc"` (opaque). */
   defineTriangleComplex(item, out) {
     var id = self.uid()
     var alpha = self.opacity(item)
@@ -1391,35 +1408,28 @@ class Show {
       // Uniform albedo + alpha (viewer transparent pass); vertex colors deferred.
       var cid = self.addRgb(self.uniformRgb(item), alpha, out)
       self._lastColorId = cid
+      self._lastVertexLayout = "xn"
       out.write("C ${cid}")
       out.write("o ${id}")
       self.triangleComplexObjectData(item, out, includeColor=false)
     } else {
+      self._lastVertexLayout = "xnc"
       out.write("o ${id}")
       self.triangleComplexObjectData(item, out)
     }
     return id
   }
 
-  /** From visitGeneric (baked Sphere/Cylinder/…): identity draw; record map if under an entry. */
+  /** From visitGeneric (baked Sphere/Cylinder/…): draw with `_currentEntry` when set. */
   visit(TriangleComplex item, out) {
     var vid = self.defineTriangleComplex(item, out)
     self._recordObject(vid, colorId=self._lastColorId)
-    self.emitEntryDraw(GraphicsEntry(0, item), out, viewerId=vid)
+    self.emitEntryDraw(self._drawEntry(item), out, viewerId=vid)
   }
 
   /** Uniform RGB for PointCloud / LineSet color field. */
   pointLineRgb(item) {
-    var col = item.color
-    if (isnil(col)) return [0.5, 0.5, 0.5]
-    if (ismatrix(col)) return [col[0,0], col[1,0], col[2,0]]
-    if (islist(col)) return col
-    // Color (and similar): prefer .r/.g/.b; fall back to rgb(0) for ColorMaps.
-    if (isobject(col)) {
-      if (!isnil(col.r) && !isnil(col.g) && !isnil(col.b)) return [col.r, col.g, col.b]
-      return col.rgb(0)
-    }
-    return [0.5, 0.5, 0.5]
+    return self._rgbValue(item.color)
   }
 
   /** Emit vertex positions (+ optional per-vertex color) for points/lines. */
@@ -1515,7 +1525,7 @@ class Show {
     var id = self.definePointCloud(item, out)
     if (isnil(id)) { out.write("M shaded"); return }
     self._recordObject(id, colorId=self._lastColorId, flat=true)
-    self.emitEntryDraw(GraphicsEntry(0, item), out, viewerId=id)
+    self.emitEntryDraw(self._drawEntry(item), out, viewerId=id)
     out.write("M shaded")
   }
 
@@ -1524,7 +1534,7 @@ class Show {
     var id = self.defineLineSet(item, out)
     if (isnil(id)) { out.write("M shaded"); return }
     self._recordObject(id, colorId=self._lastColorId, flat=true)
-    self.emitEntryDraw(GraphicsEntry(0, item), out, viewerId=id)
+    self.emitEntryDraw(self._drawEntry(item), out, viewerId=id)
     out.write("M shaded")
   }
 
@@ -1627,6 +1637,7 @@ class Show {
     self.objectMap = Dictionary()
     self.entryColorId = Dictionary()
     self.flatIds = Dictionary()
+    self.vertexLayout = Dictionary()
     self.meshCache = Dictionary()
 
     for (entry in graphic.displaylist) {

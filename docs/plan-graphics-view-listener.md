@@ -158,12 +158,16 @@ g.endBatch()            # one coalesced Moved
 
 **Locked:**
 
-- `Broadcaster.beginBatch()` / `endBatch()` with a nesting counter (Graphics inherits via mixin).
+- `Broadcaster.beginBatch()` / `endBatch()` with a nesting counter (Scene inherits via mixin).
 - Inside a batch: `notify` queues events; outermost `endBatch` delivers pending in order.
-- Events that implement `batchKey()` coalesce within a batch (latest with that key wins). `GraphicsEventMoved` coalesces; `GraphicsEventDefined` does not (each id flushed).
 - Outside a batch: `notify` delivers immediately.
 - Nested `beginBatch`/`endBatch` pairs supported; only the outermost `endBatch` flushes.
-- Graphics `display` / `move` always call `notify` — no Graphics-specific batch state.
+- Scene `display` / `move` / `recolor` always call `notify` — no Scene-specific batch state.
+- **`BroadcastEvent` mixin** — coalescence protocol for batched notify. Defaults: `batchKey()` → `nil` (no coalesce), `coalesce(prev)` no-op. `GraphicsEvent` uses `with BroadcastEvent`; Moved / Recolored override:
+  - non-nil `batchKey()` → replace any pending event with the same key (latest wins);
+  - `coalesce(previous)` may merge payload into the survivor (Moved / Recolored accumulate `ids`).
+- `GraphicsEventDefined` / `Removed` / `Replaced` keep default `batchKey` → each id is flushed separately.
+- `respondsto("batchKey")` in Broadcaster is only a guard for non-protocol objects on the open queue; prefer real `BroadcastEvent` citizens.
 
 **Done when:** test (and/or amigaball) can `beginBatch` → two `move`s → `endBatch` and a Capture listener sees **one** Moved; one viewer round-trip per frame when View is attached.
 
@@ -173,13 +177,13 @@ g.endBatch()            # one coalesced Moved
 
 **Why:** After `D`, static draws vanish unless re-issued. True “movers only” needs in-place draw update.
 
-**Files:** `src/command.c`, `src/scene.c` / `scene.h`, `share/modules/morphoview.morpho`, `share/modules/xgraphics.morpho` (`emitEntryPose`, `processMovedIds`), `test/command/definedraw-pose-update`, `test/testdefinedraw.morpho`.
+**Files:** `src/command.c`, `src/scene.c` / `scene.h`, `share/modules/morphoview.morpho`, `share/modules/xgraphics.morpho` (`emitEntryPose`, `GraphicsEventMoved.ids`), `test/command/definedraw-pose-update`, `test/testdefinedraw.morpho`.
 
 **Locked:**
 
 - Viewer: when applying `d <id>` with a matrix, if an `OBJECT` draw for that id already exists in the scene displaylist, **replace its matrix** instead of appending. Objects first; text `T` draws later if cheap.
 - View `receive(Moved)`: emit **only** pose lines via `Show.emitEntryPose` (no `C`/`M`); **do not** send `D`. Unmapped ids → fall back to full `D` + `emitPoseDraws`.
-- Scene tracks pending ids via `_pendingIds` / `processPendingIds` (`processMovedIds` / `processRecolorIds` wrappers); coalesced batch Moved updates every mover.
+- Coalesced batch Moved carries `ids` (merged via event `coalesce`); View pose-updates every mover.
 - Mid-session `Defined` unchanged (append define+draw).
 - Keep `View.redraw(ascii)` and explicit `D` for tests/fixtures (`definedraw-redraw` stays valid).
 
@@ -207,6 +211,36 @@ Viewer command language + Graphics/View wiring:
 Graphics: `Scene.remove` / `replace` → `GraphicsEventRemoved` / `GraphicsEventReplaced`. View maps Removed → `X D` (+ `X O` if last user of the viewer object); Replaced → sphere-cache refresh when possible, else remove + re-`writeEntry`. Full `update(Graphics)` / `U S` unchanged. `U O` remains for low-level same-id refill.
 
 **Done when:** command fixtures exist; Morpho smoke for redefine/delete. Not required for pose animation. Yardstick: [`examples/soapbubble.morpho`](../examples/soapbubble.morpho) (`U V` + refine `replace`).
+
+#### Phase 5dx — Cleaning pass (before 5e)
+
+**Why:** Holistic review after 5d found silent draw-slot / listener / `U V` traps that would poison Cylinder/Arrow work (5e) and make mixed scenes unreliable. Fix hygiene first; then 5e builds on a correct draw-slot contract.
+
+**Source:** post-5d architecture review (simplicity / composability / clarity).
+
+**Locked — must fix (bugs):**
+
+1. **Draw-slot id for world-baked visits** — `visit(TriangleComplex)` (and PointCloud/LineSet identity draws that synthesize `GraphicsEntry(0,…)`) must emit `d <graphicsEntryId> <viewerObjectId>` when `_currentEntry` is set, not `d <viewerObjectId>`. Same for any baked path that reaches `emitEntryDraw` under an entry. Mixed Sphere + Cylinder scenes must not collide slots.
+2. **`U V` / `refreshMesh` float layout** — emit vertex layout must match how the object was defined (`xn` vs `xnc`). Prefer matching both paths; if opaque `xnc` morph is deferred, `refreshMesh` / `emitEntryVertices` must return `false` (or throw) rather than report success while the viewer drops the batch.
+3. **Pending ids vs multiple listeners** — ✅ `GraphicsEventMoved` / `Recolored` carry `ids`; Broadcaster coalesce calls optional `event.coalesce(previous)` so the surviving event merges payloads. No side-channel bag; every listener reads `ev.ids`.
+4. **Moved fallback** — if no mapped ids, do **not** `D` + empty redraw (blank window). No-op or skip; rely on (1) so unmapped baked ids are rare.
+
+**Locked — API polish (same pass if small; else follow immediately):**
+
+5. **`display` kwargs** — `color=` and/or `flat=` on `display` (and Sphere overloads) so yardsticks stop `findEntry(id).color = …` / `.flat = true` before open.
+6. **Named morph path** — public `Scene`/`View` name for same-length vertex push (e.g. keep `refreshMesh` but document; or `updateVertices(id)`) distinct from `replace` (full redefine). soapbubble should not need `findEntry.item =` as the only efficient path — either document that pairing or add `Scene.morph(id, item)` that sets item + notifies a dedicated event / calls through View.
+7. **Failure convention** — `display` returns `false` (or keep `nil` but document) consistently with mutators; optional: document that Cylinder/Arrow/Text `move`/`remove` remain limited until 5e/5f.
+
+**Out of scope for 5dx:** unit Cylinder/Arrow (5e); Text slots (5f); binary transport; COLOR-draw coalescing in the viewer (note only — unbounded `C` appends on live recolor); formal dependents (5g).
+
+**Done when:**
+
+- Test: Sphere + Cylinder (or other baked) in one Scene → both visible; `move`/`remove` on each id target the right slot.
+- Test: opaque TriangleComplex `refreshMesh` either succeeds with matching layout or fails cleanly (no silent drop).
+- Test: two listeners on one Scene batch-`move` see the same full id list.
+- Yardsticks (amigaball / nbody / soapbubble) still pass; prefer updating them to use `color=`/`flat=` if (5) lands.
+
+**Working agreement:** finish 5dx and pause for review before starting 5e.
 
 #### Phase 5e — Shared Cylinder / Arrow models (entry SRT)
 

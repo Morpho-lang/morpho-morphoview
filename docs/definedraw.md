@@ -78,7 +78,7 @@ Low-level escape hatch: `View.redraw(ascii)` still useful for tests/fixtures; pr
 2. **Viewer** — sticky context; `D`; prepare-safe redraw ✅
 3. **Graphics ↔ View** — `move`; listener registration; View translates events → commands ✅
 4. **Yardstick** — rewrite `examples/amigaball.morpho` via `g.move` (not full `U S`) ✅
-5. **Phase 5** — 5a–5d ✅; **5e** shared Cylinder/Arrow; **5f** Text slots; dependents later (**5g**). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
+5. **Phase 5** — 5a–5d ✅; **5dx** cleaning pass (draw-slot id / `U V` / multi-listener / API polish); then **5e** shared Cylinder/Arrow; **5f** Text slots; dependents later (**5g**). Details: [`plan-graphics-view-listener.md`](plan-graphics-view-listener.md).
 ## Hand sequences / tests
 
 | File | Role | Runnable now? |

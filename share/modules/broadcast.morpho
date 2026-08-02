@@ -16,9 +16,20 @@
  *    broadcaster.notify(ev2)
  *    broadcaster.endBatch()          // deliver pending in order
  *
- *  Events that implement `batchKey()` coalesce within a batch: only the latest
- *  event with the same key is kept (e.g. many Moved → one Moved).
+ *  BroadcastEvent is a mixin that defines the coalescence protocol for batched
+ *  notify (see plan-graphics-view-listener.md Phase 5a).
+ *
+ *  Repo convention for dynamism:
+ *  - Known types / closed set → multiple dispatch
+ *  - Open but bounded interface → mixin protocol (Broadcaster / Listener / BroadcastEvent)
+ *  - Genuinely open values → respondsto / runtime shape checks
  */
+
+/** Mixin: coalescence protocol for Broadcaster batching (`batchKey` / `coalesce`). */
+class BroadcastEvent {
+  batchKey() { return nil }
+  coalesce(prev) { }
+}
 
 class Broadcaster {
   _broadcasterInit() {
@@ -59,19 +70,29 @@ class Broadcaster {
     }
   }
 
-  /** Queue while batching (optional coalesce via event.batchKey()); else deliver now. */
+  /** Queue while batching (coalesce when batchKey() is non-nil); else deliver now. */
   notify(event) {
     if (self._batchDepth > 0) {
-      if (event.respondsto("batchKey")) {
-        var key = event.batchKey()
-        var out = []
-        for (e in self._pending) {
-          if (!(e.respondsto("batchKey") && e.batchKey() == key)) out.append(e)
-        }
-        out.append(event)
-        self._pending = out
-      } else {
+      if (!event.respondsto("batchKey")) {
         self._pending.append(event)
+      } else {
+        var key = event.batchKey()
+        if (isnil(key)) {
+          self._pending.append(event)
+        } else {
+          var out = []
+          var prev = nil
+          for (e in self._pending) {
+            if (e.respondsto("batchKey") && e.batchKey() == key) {
+              prev = e
+            } else {
+              out.append(e)
+            }
+          }
+          if (!isnil(prev)) event.coalesce(prev)
+          out.append(event)
+          self._pending = out
+        }
       }
     } else {
       self._deliver(event)
@@ -80,7 +101,7 @@ class Broadcaster {
 
   _deliver(event) {
     for (l in self.listeners) {
-      if (l.respondsto("receive")) l.receive(self, event)
+      l.receive(self, event)
     }
   }
 }

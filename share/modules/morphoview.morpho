@@ -171,8 +171,8 @@ class View with Listener {
 
   receive(Graphics g, GraphicsEventMoved ev) {
     if (self.closed || isnil(self.show)) return
-    var ids = g.processMovedIds()
-    if (ids.count() == 0) ids = [ev.id]
+    var ids = ev.ids
+    if (isnil(ids) || ids.count() == 0) ids = [ev.id]
     self.cmdBuf = ""
     var any = false
     for (id in ids) {
@@ -191,8 +191,8 @@ class View with Listener {
 
   receive(Graphics g, GraphicsEventRecolored ev) {
     if (self.closed || isnil(self.show)) return
-    var ids = g.processRecolorIds()
-    if (ids.count() == 0) ids = [ev.id]
+    var ids = ev.ids
+    if (isnil(ids) || ids.count() == 0) ids = [ev.id]
     self.cmdBuf = ""
     var any = false
     for (id in ids) {
@@ -225,6 +225,7 @@ class View with Listener {
   }
 
   /** Push same-length vertex data for a TriangleComplex entry (`U V`).
+   *  Layout must match how the object was defined (`xn` / `xnc`).
    *  Call after mutating `entry.item` in place (fixed connectivity). */
   refreshMesh(graphicsId) {
     if (self.closed || isnil(self.show) || isnil(self.graphics)) return false
