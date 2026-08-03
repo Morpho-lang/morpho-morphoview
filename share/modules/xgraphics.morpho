@@ -9,10 +9,10 @@
  * - Show can now clear display list
  * - Scene is Graphics with Broadcaster (move / recolor)
  * Live View sessions live in morphoview.morpho (Listener over ZMQ).
+ * Sphere tessellation is a cached UV sphere (no meshtools).
  */
 
 import constants
-import meshtools
 import color
 import broadcast
 
@@ -273,87 +273,73 @@ class Cylinder {
 
 }
 
-var _sphere = [ PolyhedronMesh(
-  [[-0.982247, 0.0, 0.187592], [0.982247,
-    0.0, -0.187592], [-0.303531, -0.934172, 0.187592], [-0.303531,
-    0.934172, 0.187592], [0.794654, -0.57735, 0.187592], [0.794654,
-    0.57735, 0.187592], [-0.187592, -0.57735, 0.794654], [-0.187592,
-    0.57735, 0.794654], [-0.491123, -0.356822, -0.794654], [-0.491123,
-    0.356822, -0.794654], [0.491123, -0.356822, 0.794654], [0.491123,
-    0.356822, 0.794654], [0.607062,
-    0.0, -0.794654], [-0.794654, -0.57735, -0.187592], [-0.794654,
-    0.57735, -0.187592], [-0.607062, 0.0,
-    0.794654], [0.187592, -0.57735, -0.794654], [0.187592,
-    0.57735, -0.794654], [0.303531, -0.934172, -0.187592], [0.303531,
-    0.934172, -0.187592]]
-  ,
-  [[14, 9, 8, 13, 0], [1, 5, 11, 10, 4], [4, 10, 6, 2, 18], [10, 11, 7,
-    15, 6], [11, 5, 19, 3, 7], [5, 1, 12, 17, 19], [1, 4, 18, 16,
-    12], [3, 19, 17, 9, 14], [17, 12, 16, 8, 9], [16, 18, 2, 13, 8], [2,
-     6, 15, 0, 13], [15, 7, 3, 14, 0]]
-) ]
+/* Unit UV-sphere by level (cached). No meshtools. */
 
-/** Draws a sphere
-  @param[in] center - the center of the sphere
-  @param[in] r - radius
-  @param[in] color - Color of the sphere */
-class Sphere {
-  init(center, r, color=nil, maxrefine = 3, filter=nil, transmit=nil) {
-    self.center = center
-    self.r = r
-    self.color = color
-    self.maxrefine = maxrefine
+var _sphereCache = Dictionary() // level → [verts, faces]
 
-    /* Optional arguments to be used by povray */
-    self.filter = filter 
-    self.transmit = transmit
-  }
+/** Vertex index: poles are 0 / nv-1; else ring i∈1…st−1, slot j. */
+fn _sphereIx(i, j, st, sl, nv) {
+  if (i == 0) return 0
+  if (i == st) return nv - 1
+  return 1 + (i - 1) * sl + j
+}
 
-  _refinementLevel() {
-    return self._refinementLevel(self.r)
-  }
-
-  /** Tessellation level from an effective display radius (entry.scale for unit spheres). */
-  _refinementLevel(effectiveradius) {
-    var n = 0
-    var r = _effectiveRadius(effectiveradius)
-    while (r/(2^n)>0.1 && n<self.maxrefine) {
-      if (n>=_sphere.count()-1) {
-        _sphere.append(refinemesh(_sphere[-1]))
+/** UV sphere: st / sl grow with level. Single north/south pole verts. */
+fn _uvSphere(level) {
+  if (_sphereCache.contains(level)) return _sphereCache[level]
+  var st = 6 + 4 * level, sl = 10 + 6 * level, nv = 2 + (st - 1) * sl
+  var v = Matrix(3, nv), tris = []
+  var dphi = Pi / st, dth = 2 * Pi / sl
+  for (phi, i in 0..Pi:dphi) {
+    var sp = sin(phi), cp = cos(phi)
+    for (th, j in 0..(2 * Pi - dth):dth) {
+      if (i == 0 || i == st) {
+        if (j == 0) v.setcolumn(_sphereIx(i, j, st, sl, nv), Matrix([0, 0, cp]))
+      } else {
+        v.setcolumn(_sphereIx(i, j, st, sl, nv), Matrix([sp * cos(th), sp * sin(th), cp]))
       }
-      n += 1
+      if (i < st) {
+        var jn = mod(j + 1, sl)
+        var a = _sphereIx(i, j, st, sl, nv), b = _sphereIx(i, jn, st, sl, nv)
+        var c = _sphereIx(i + 1, j, st, sl, nv), d = _sphereIx(i + 1, jn, st, sl, nv)
+        if (a == b || c == d) tris.append(a == b ? [a, c, d] : [a, c, b])
+        else { tris.append([a, c, b]); tris.append([b, c, d]) }
+      }
     }
+  }
+  var f = Sparse(nv, tris.count())
+  for (tri, i in tris) { for (p in tri) f[p, i] = 1 }
+  for (tri, i in tris) f.setrowindices(i, tri)
+  _sphereCache[level] = [v, f]
+  return _sphereCache[level]
+}
+
+/** Draws a sphere */
+class Sphere {
+  init(center, r, color=nil, maxrefine=3, filter=nil, transmit=nil) {
+    self.center = center; self.r = r; self.color = color
+    self.maxrefine = maxrefine; self.filter = filter; self.transmit = transmit
+  }
+
+  _refinementLevel() { return self._refinementLevel(self.r) }
+
+  /** Level from effective display radius (entry.scale for unit spheres). */
+  _refinementLevel(effectiveradius) {
+    var n = 0, r = _effectiveRadius(effectiveradius)
+    while (r / (2^n) > 0.1 && n < self.maxrefine) n += 1
     return n
   }
 
-  /** @param scale if false, unit ball at origin (pose on Graphics entry).
-   *  @param radiusforrefine radius used only to pick tessellation (defaults to self.r). */
+  /** @param scale false → unit ball at origin. @param radiusforrefine picks tessellation. */
   toTriangleComplex(scale=true, radiusforrefine=nil) {
-    var center = self.center, r = self.r
-    var col = self.color
-    if (isnil(col)) col = _defaultRgb
-    var refineR = isnil(radiusforrefine) ? self.r : radiusforrefine
-    var n = self._refinementLevel(refineR)
-
-    var v = _sphere[n].vertexmatrix().clone()
-    var normals = _sphere[n].vertexmatrix().clone()
-    var conn = _sphere[n].connectivitymatrix(0,2).clone()
-    var nv = v.dimensions()[1]
-
-    var x0=center
-    if (islist(center)) x0=Matrix(center)
-
-    // Unit ball at the origin; keep authored color (pose lives on the Graphics entry).
-    if (!scale) { x0*=0; r=1 }
-
-    for (i in 0...nv) { // Normalize, scale and translate
-      var x = v.column(i)
-      var nn = x/x.norm()
-      normals.setcolumn(i, nn)
-      v.setcolumn(i, x0 + r*nn)
-    }
-
-    return TriangleComplex(v, normals, col, conn,
+    var col = isnil(self.color) ? _defaultRgb : self.color
+    var mesh = _uvSphere(self._refinementLevel(isnil(radiusforrefine) ? self.r : radiusforrefine))
+    var unit = mesh[0], v = unit.clone(), nv = v.dimensions()[1]
+    var x0 = islist(self.center) ? Matrix(self.center) : self.center
+    var r = scale ? self.r : 1
+    if (!scale) x0 = Matrix([0, 0, 0])
+    for (i in 0...nv) v.setcolumn(i, x0 + r * unit.column(i))
+    return TriangleComplex(v, unit.clone(), col, mesh[1].clone(),
                            filter=self.filter, transmit=self.transmit)
   }
 }

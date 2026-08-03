@@ -17,7 +17,9 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 
 ### Upstream
 
-- [ ] Push settled pieces from [`xgraphics.morpho`](share/modules/xgraphics.morpho) (`Graphics` / `Scene` / `Show` / events) to morpho `graphics.morpho`
+- [ ] Push settled pieces from [`xgraphics.morpho`](share/modules/xgraphics.morpho) (`Graphics` / `Scene` / `Show` / events / `broadcast`) to morpho `graphics.morpho`
+- [ ] Keep core `graphics.morpho` free of `meshtools` (prototype: local sphere tessellation in xgraphics; examples like soapbubble may still `import meshtools`)
+- [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
 
 ### Transport
 
