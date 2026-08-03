@@ -29,4 +29,8 @@ bool listener_reply(const char *msg);
 /** Ask the I/O thread to stop and join it. */
 void listener_stop(void);
 
+/** Init / tear down reply-queue mutex (call around display lifetime). */
+void listener_initialize(void);
+void listener_finalize(void);
+
 #endif /* listener_h */

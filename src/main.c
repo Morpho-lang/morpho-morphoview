@@ -23,6 +23,7 @@ static const char *main_optarg(const char *option, unsigned int *i, int argc, co
 int main(int argc, const char * argv[]) {
     morpho_initialize();
     command_initialize();
+    listener_initialize();
     scene_initialize();
     display_initialize();
     text_initialize();
@@ -80,7 +81,7 @@ int main(int argc, const char * argv[]) {
         display_loop();
     }
 
-    listener_stop();
+    listener_finalize();
 
     text_finalize();
     display_finalize();

@@ -7,9 +7,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <pthread.h>
 
 #include <czmq.h>
+
+#include "platform.h"
 
 #include "listener.h"
 #include "command.h"
@@ -25,7 +26,7 @@ typedef struct reply_node {
 
 static reply_node *reply_head = NULL;
 static reply_node *reply_tail = NULL;
-static pthread_mutex_t reply_mutex = PTHREAD_MUTEX_INITIALIZER;
+static MorphoMutex reply_mutex;
 
 static bool reply_enqueue(const char *msg) {
     if (!msg) return false;
@@ -38,25 +39,25 @@ static bool reply_enqueue(const char *msg) {
     }
     node->next = NULL;
 
-    pthread_mutex_lock(&reply_mutex);
+    MorphoMutex_lock(&reply_mutex);
     if (reply_tail) {
         reply_tail->next = node;
         reply_tail = node;
     } else {
         reply_head = reply_tail = node;
     }
-    pthread_mutex_unlock(&reply_mutex);
+    MorphoMutex_unlock(&reply_mutex);
     return true;
 }
 
 static char *reply_dequeue(void) {
-    pthread_mutex_lock(&reply_mutex);
+    MorphoMutex_lock(&reply_mutex);
     reply_node *node = reply_head;
     if (node) {
         reply_head = node->next;
         if (!reply_head) reply_tail = NULL;
     }
-    pthread_mutex_unlock(&reply_mutex);
+    MorphoMutex_unlock(&reply_mutex);
 
     if (!node) return NULL;
     char *msg = node->msg;
@@ -73,7 +74,7 @@ static void reply_clear(void) {
  * Listener state
  * ------------------------------------------------------- */
 
-static pthread_t listener_thread;
+static MorphoThread listener_thread;
 static volatile bool listener_running = false;
 static volatile bool listener_stop_requested = false;
 static char *listener_endpoint = NULL;
@@ -99,14 +100,14 @@ static void listener_process_replies(zsock_t *sock) {
     }
 }
 
-static void *listener_thread_main(void *arg) {
+static MorphoThreadFnReturnType listener_thread_main(void *arg) {
     (void) arg;
 
     zsock_t *sock = zsock_new(ZMQ_PAIR);
     if (!sock) {
         fprintf(stderr, "morphoview: Could not create ZMQ PAIR socket.\n");
         listener_running = false;
-        return NULL;
+        return (MorphoThreadFnReturnType) NULL;
     }
 
     int rc;
@@ -122,7 +123,7 @@ static void *listener_thread_main(void *arg) {
         zsock_destroy(&sock);
         listener_running = false;
         command_wake();
-        return NULL;
+        return (MorphoThreadFnReturnType) NULL;
     }
 
     zsock_set_rcvtimeo(sock, 100); /* ms — allows stop checks + reply processing */
@@ -152,7 +153,7 @@ static void *listener_thread_main(void *arg) {
     zsock_destroy(&sock);
     listener_running = false;
     command_wake();
-    return NULL;
+    return (MorphoThreadFnReturnType) NULL;
 }
 
 static bool listener_start(const char *endpoint, bool do_bind) {
@@ -173,7 +174,7 @@ static bool listener_start(const char *endpoint, bool do_bind) {
     listener_stop_requested = false;
     listener_running = true;
 
-    if (pthread_create(&listener_thread, NULL, listener_thread_main, NULL) != 0) {
+    if (!MorphoThread_create(&listener_thread, listener_thread_main, NULL)) {
         fprintf(stderr, "morphoview: Could not start listener thread.\n");
         listener_running = false;
         free(listener_endpoint);
@@ -202,10 +203,20 @@ void listener_stop(void) {
 
     listener_stop_requested = true;
     if (listener_running) {
-        pthread_join(listener_thread, NULL);
+        MorphoThread_join(listener_thread);
+        MorphoThread_clear(listener_thread);
     }
     listener_running = false;
     reply_clear();
     free(listener_endpoint);
     listener_endpoint = NULL;
+}
+
+void listener_initialize(void) {
+    MorphoMutex_init(&reply_mutex);
+}
+
+void listener_finalize(void) {
+    listener_stop();
+    MorphoMutex_clear(&reply_mutex);
 }

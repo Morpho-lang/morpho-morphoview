@@ -6,9 +6,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdlib.h>
-#include <pthread.h>
 
 #include "morpho.h"
+#include "platform.h"
 #include "parse.h"
 #include "memory.h"
 #include "varray.h"
@@ -127,7 +127,7 @@ void command_free(mv_command *cmd) {
  * ------------------------------------------------------- */
 
 static varray_mv_commandptr command_queue;
-static pthread_mutex_t command_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+static MorphoMutex command_queue_mutex;
 
 /** While non-NULL, command_enqueue appends here (parse staging) instead of the
  *  shared queue — so a failed parse cannot wipe already-ok'd peer batches. */
@@ -138,12 +138,12 @@ void command_queue_init(void) {
 }
 
 void command_queue_clear(void) {
-    pthread_mutex_lock(&command_queue_mutex);
+    MorphoMutex_lock(&command_queue_mutex);
     for (unsigned int i=0; i<command_queue.count; i++) {
         command_free(command_queue.data[i]);
     }
     varray_mv_commandptrclear(&command_queue);
-    pthread_mutex_unlock(&command_queue_mutex);
+    MorphoMutex_unlock(&command_queue_mutex);
 }
 
 static void command_free_list(varray_mv_commandptr *list) {
@@ -163,10 +163,10 @@ bool command_enqueue(mv_command *cmd) {
     if (command_parse_staging) {
         return varray_mv_commandptradd(command_parse_staging, &cmd, 1);
     }
-    pthread_mutex_lock(&command_queue_mutex);
+    MorphoMutex_lock(&command_queue_mutex);
     bool wasempty = (command_queue.count == 0);
     bool ok = varray_mv_commandptradd(&command_queue, &cmd, 1);
-    pthread_mutex_unlock(&command_queue_mutex);
+    MorphoMutex_unlock(&command_queue_mutex);
     if (!ok) return false;
     if (wasempty) command_wake();
     return true;
@@ -178,12 +178,12 @@ static bool command_commit_staging(varray_mv_commandptr *staging) {
         if (staging) varray_mv_commandptrclear(staging);
         return true;
     }
-    pthread_mutex_lock(&command_queue_mutex);
+    MorphoMutex_lock(&command_queue_mutex);
     bool wasempty = (command_queue.count == 0);
     bool ok = varray_mv_commandptradd(&command_queue, staging->data,
                                      (int) staging->count);
     if (ok) staging->count = 0; /* ownership moved; do not free cmds */
-    pthread_mutex_unlock(&command_queue_mutex);
+    MorphoMutex_unlock(&command_queue_mutex);
     if (!ok) return false;
     varray_mv_commandptrclear(staging);
     if (wasempty) command_wake();
@@ -636,10 +636,10 @@ int command_process(void) {
 
     /* Steal the queue under the lock so apply (GL) does not block the I/O thread. */
     varray_mv_commandptr batch;
-    pthread_mutex_lock(&command_queue_mutex);
+    MorphoMutex_lock(&command_queue_mutex);
     batch = command_queue;
     varray_mv_commandptrinit(&command_queue);
-    pthread_mutex_unlock(&command_queue_mutex);
+    MorphoMutex_unlock(&command_queue_mutex);
 
     int applied=0;
     for (unsigned int i=0; i<batch.count; i++) {
@@ -1836,6 +1836,7 @@ loadinput_cleanup:
  * ********************************************************************** */
 
 void command_initialize(void) {
+    MorphoMutex_init(&command_queue_mutex);
     command_queue_init();
 
     morpho_defineerror(COMMAND_UNRCGNZDCMND, ERROR_PARSE, COMMAND_UNRCGNZDCMND_MSG);
@@ -1855,5 +1856,6 @@ void command_initialize(void) {
 
 void command_finalize(void) {
     command_queue_clear();
+    MorphoMutex_clear(&command_queue_mutex);
     command_sticky_applyctx_reset();
 }
