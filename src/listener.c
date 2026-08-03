@@ -11,6 +11,8 @@
 #include <czmq.h>
 
 #include "platform.h"
+#include "common.h"
+#include "memory.h"
 
 #include "listener.h"
 #include "command.h"
@@ -32,7 +34,7 @@ static bool reply_enqueue(const char *msg) {
     if (!msg) return false;
     reply_node *node = malloc(sizeof(reply_node));
     if (!node) return false;
-    node->msg = strdup(msg);
+    node->msg = morpho_strdup((char *) msg);
     if (!node->msg) {
         free(node);
         return false;
@@ -67,7 +69,7 @@ static char *reply_dequeue(void) {
 
 static void reply_clear(void) {
     char *msg;
-    while ((msg = reply_dequeue()) != NULL) free(msg);
+    while ((msg = reply_dequeue()) != NULL) MORPHO_FREE(msg);
 }
 
 /* -------------------------------------------------------
@@ -96,7 +98,7 @@ static void listener_process_replies(zsock_t *sock) {
     char *msg;
     while ((msg = reply_dequeue()) != NULL) {
         zstr_send(sock, msg);
-        free(msg);
+        MORPHO_FREE(msg);
     }
 }
 
@@ -166,8 +168,8 @@ static bool listener_start(const char *endpoint, bool do_bind) {
         return false;
     }
 
-    free(listener_endpoint);
-    listener_endpoint = strdup(endpoint);
+    if (listener_endpoint) MORPHO_FREE(listener_endpoint);
+    listener_endpoint = morpho_strdup((char *) endpoint);
     if (!listener_endpoint) return false;
 
     listener_do_bind = do_bind;
@@ -177,7 +179,7 @@ static bool listener_start(const char *endpoint, bool do_bind) {
     if (!MorphoThread_create(&listener_thread, listener_thread_main, NULL)) {
         fprintf(stderr, "morphoview: Could not start listener thread.\n");
         listener_running = false;
-        free(listener_endpoint);
+        MORPHO_FREE(listener_endpoint);
         listener_endpoint = NULL;
         return false;
     }
@@ -196,7 +198,7 @@ bool listener_connect(const char *endpoint) {
 void listener_stop(void) {
     if (!listener_running && !listener_stop_requested) {
         reply_clear();
-        free(listener_endpoint);
+        if (listener_endpoint) MORPHO_FREE(listener_endpoint);
         listener_endpoint = NULL;
         return;
     }
@@ -208,7 +210,7 @@ void listener_stop(void) {
     }
     listener_running = false;
     reply_clear();
-    free(listener_endpoint);
+    if (listener_endpoint) MORPHO_FREE(listener_endpoint);
     listener_endpoint = NULL;
 }
 
