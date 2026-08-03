@@ -1,8 +1,8 @@
 # morpho-morphoview
 
-Interactive viewer application for `morpho`. 
+Interactive viewer application for `morpho`.
 
-## Installation 
+## Installation
 
 To install this, clone this repository onto your computer in any convenient place:
 
@@ -10,7 +10,7 @@ To install this, clone this repository onto your computer in any convenient plac
 
 then add the location of this repository to your .morphopackages file.
 
-    echo PACKAGEPATH >> ~/.morphopackages 
+    echo PACKAGEPATH >> ~/.morphopackages
     where PACKAGEPATH is the location of the git repository.
 
 You need to compile the extension, which you can do by navigating to the repository and typing:
@@ -22,10 +22,28 @@ You need to compile the extension, which you can do by navigating to the reposit
 
 You may need to use `sudo`. Dependencies include GLFW, FreeType, and [czmq](https://github.com/zeromq/czmq) (`brew install czmq` / `apt install libczmq-dev`).
 
-The package can be loaded into morpho using the `import` keyword.
+## Usage
 
     import morphoview
+    import xgraphics
+    import color
 
-Fire-and-forget display: `Show(g)` (temp file + `-t`). Live ZMQ session: `View` with `open`/`update` taking either ASCII or a `Graphics` object (serialized by the package’s prototype `Show` — candidate to push upstream). See `share/modules/morphoview.morpho`.
+Fire-and-forget display:
 
-Viewer CLI extras: `-b <endpoint>` binds a ZMQ PAIR socket; `-c <endpoint>` connects (used by `View`).
+    var g = Graphics()
+    g.display(Sphere([0,0,0], 1, color=Red))
+    Show(g)
+
+Live session (ZeroMQ duplex; drive with `poll` / `wait`):
+
+    var g = Scene()
+    var id = g.display(Sphere([0,0,0], 1), [0,0,0], color=Red)
+    var v = View(g)
+    g.move(id, [0.1, 0, 0])
+    v.wait()
+
+Online help: `help morphoview` (package file in `share/help/`).
+
+Viewer command language (ASCII / C API / ZMQ): [`docs/commandapi.md`](docs/commandapi.md). Architecture: [`docs/definedraw.md`](docs/definedraw.md). Backlog: [`TODO.md`](TODO.md).
+
+Viewer CLI: `-b <endpoint>` binds a ZMQ PAIR socket; `-c <endpoint>` connects (used by `View`). `-t` unlinks a temp draw file on exit (used by `Show`).
