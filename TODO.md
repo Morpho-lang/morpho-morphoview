@@ -1,6 +1,6 @@
 # MorphoView TODO
 
-Future work for this package. Command language: [`docs/commandapi.md`](docs/commandapi.md). Architecture: [`docs/definedraw.md`](docs/definedraw.md).
+Future work for this package. Command language: [`docs/commandapi.md`](docs/commandapi.md).
 
 ## Occasional update vs efficient animation
 

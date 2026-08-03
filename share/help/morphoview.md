@@ -8,12 +8,10 @@
 The `morphoview` package provides interactive 3D visualization through the external `morphoview` application. Import the package modules:
 
     import morphoview
-    import xgraphics
-    import color
 
 There are two ways to display graphics:
 
-* **Fire-and-forget** — build a `Graphics` object and call `Show(g)`. The viewer opens, then exits when you close the window.
+* **Display only** — build a `Graphics` object and call `Show(g)`. The viewer opens, then exits when you close the window.
 * **Live session** — build a `Scene`, open a `View`, and update with `move` / `recolor` / etc. The viewer stays connected over ZeroMQ.
 
     var g = Graphics()
@@ -26,7 +24,7 @@ There are two ways to display graphics:
     g.move(id, [0.1, 0, 0])
     v.wait()
 
-Requires `morpho-zeromq`. Low-level viewer ASCII commands are documented in the package `docs/commandapi.md`.
+Requires `morpho-zeromq` package. Low-level viewer ASCII commands are documented in the package `docs/commandapi.md`.
 
 [showsubtopics]: # (subtopics)
 
@@ -49,15 +47,13 @@ Set `show.replace = true` so the preamble emits `U S` (in-place scene replace) i
 ## View
 [tagView]: # (View)
 
-`View` keeps a duplex ZeroMQ session with a running morphoview process. Drive it with `poll` / `System.sleep` — Morpho has no async runtime.
-
 Open immediately from a `Graphics` or `Scene`:
 
     var v = View(g)              // throws on failure
     var v = View()
     v.open(g)                    // or an ASCII command string
 
-For a `Scene`, `open` also registers as a listener so later `move` / `recolor` / `remove` / `replace` events are forwarded to the viewer.
+View makes use of the `Listener` protocol to track changes in a `Scene`.  
 
 ### Methods
 

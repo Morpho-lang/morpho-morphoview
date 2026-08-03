@@ -44,6 +44,6 @@ Live session (ZeroMQ duplex; drive with `poll` / `wait`):
 
 Online help: `help morphoview` (package file in `share/help/`).
 
-Viewer command language (ASCII / C API / ZMQ): [`docs/commandapi.md`](docs/commandapi.md). Architecture: [`docs/definedraw.md`](docs/definedraw.md). Backlog: [`TODO.md`](TODO.md).
+Viewer command language (ASCII / C API / ZMQ): [`docs/commandapi.md`](docs/commandapi.md). Backlog: [`TODO.md`](TODO.md).
 
 Viewer CLI: `-b <endpoint>` binds a ZMQ PAIR socket; `-c <endpoint>` connects (used by `View`). `-t` unlinks a temp draw file on exit (used by `Show`).

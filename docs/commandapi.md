@@ -2,7 +2,7 @@
 
 Commands are the viewer’s public API: an ASCII language that parses into a tagged IR (`mv_command`). Only the main/GLFW thread applies commands and touches GL.
 
-Morpho users: `help morphoview` (or see [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho)). Architecture: [`definedraw.md`](definedraw.md).
+Morpho users: `help morphoview` (or see [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho)).
 
 ## Pipeline
 
