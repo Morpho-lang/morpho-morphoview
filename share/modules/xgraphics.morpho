@@ -804,23 +804,21 @@ class GraphicsEvent with BroadcastEvent {
 
 class GraphicsEventDefined is GraphicsEvent {}
 
-/** Merge `prev.ids` then `into.ids` (first-seen order, deduped). */
+/** Merge `into.ids` into `prev`'s accumulating list (first-seen order, deduped).
+ *  O(|into.ids|) per call via prev._seen — not a full rebuild. */
 fn _coalesceIds(into, prev) {
-  var seen = Dictionary()
-  var out = []
-  for (id in prev.ids) {
-    if (!seen.contains(id)) {
-      seen[id] = true
-      out.append(id)
-    }
+  if (isnil(prev._seen)) {
+    prev._seen = Dictionary()
+    for (id in prev.ids) prev._seen[id] = true
   }
   for (id in into.ids) {
-    if (!seen.contains(id)) {
-      seen[id] = true
-      out.append(id)
+    if (!prev._seen.contains(id)) {
+      prev._seen[id] = true
+      prev.ids.append(id)
     }
   }
-  into.ids = out
+  into.ids = prev.ids
+  into._seen = prev._seen
 }
 
 /** Coalesces within a Broadcaster batch; `ids` accumulates every mover. */
@@ -828,6 +826,7 @@ class GraphicsEventMoved is GraphicsEvent {
   init(id) {
     super.init(id)
     self.ids = [id]
+    self._seen = nil // filled on first coalesce
   }
   batchKey() { return GraphicsEventMoved }
   coalesce(prev) { _coalesceIds(self, prev) }
@@ -838,6 +837,7 @@ class GraphicsEventRecolored is GraphicsEvent {
   init(id) {
     super.init(id)
     self.ids = [id]
+    self._seen = nil
   }
   batchKey() { return GraphicsEventRecolored }
   coalesce(prev) { _coalesceIds(self, prev) }
