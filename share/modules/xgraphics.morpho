@@ -1215,7 +1215,7 @@ class Show {
     out.close()
 
     if (isWindows) {
-      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}' -WindowStyle Hidden\"")
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}'\"")
     } else {
       // 1/7/25 Redirect error output to /dev/null
       system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
@@ -1815,13 +1815,21 @@ class Show {
     return nil
   }
 
+  /** First resolvable face for this platform (falls back to a conventional name). */
   defaultFontName() {
     var platform = System.platform()
+    var candidates
     if (platform=="macos") {
-      return "Helvetica"
+      candidates = ["Helvetica", "Arial", "DejaVuSans", "FreeSans"]
     } else if (platform=="windows") {
-      return "arial" // Note case sensitive
-    } else return "FreeSans"
+      candidates = ["arial", "segoeui", "calibri", "tahoma"]
+    } else {
+      candidates = ["DejaVuSans", "FreeSans", "LiberationSans", "NimbusSans-Regular", "Ubuntu-R"]
+    }
+    for (name in candidates) {
+      if (self.findFont(name)) return name
+    }
+    return candidates[0]
   }
 
   addFont(font, size, out) {

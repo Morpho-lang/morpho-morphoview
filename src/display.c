@@ -252,10 +252,9 @@ display *display_open(scene *s) {
     
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-#ifdef __APPLE__
+    /* Core profile: required for #version 330 core shaders on all platforms. */
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, true);
-#endif
     glfwWindowHint(GLFW_SAMPLES, 4);
     
     /* Create a windowed mode window and its OpenGL context.
