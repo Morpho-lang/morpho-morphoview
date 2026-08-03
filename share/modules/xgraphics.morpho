@@ -1147,16 +1147,17 @@ fn _morphoViewBin() {
   if (r["exitstatus"]==0) {
     roots.append(r["stdout"].split("\n")[0])
   } else if (Folder.contents(System.homefolder()).contains(".morphopackages")) {
-    for (p in File("${System.homefolder()}/.morphopackages").lines()) {
+    var packages = Folder.normalizePath("${System.homefolder()}/.morphopackages")
+    for (p in File(packages).lines()) {
       if (p.split("/\\").contains("morpho-morphoview")) roots.append(p)
     }
   }
 
   for (root in roots) {
-    if (root.count()>0 &&
-        Folder.isFolder("${root}/bin") &&
-        Folder.contents("${root}/bin").contains(exe)) {
-      _mvbin = Folder.normalizePath("${root}/bin/${exe}")
+    if (root.count()==0) continue
+    var bindir = Folder.normalizePath("${root}/bin")
+    if (Folder.isFolder(bindir) && Folder.contents(bindir).contains(exe)) {
+      _mvbin = Folder.normalizePath("${bindir}/${exe}")
       return _mvbin
     }
   }
@@ -1201,9 +1202,11 @@ class Show {
   /** Fire-and-forget: temp file + morphoview -t (viewer unlinks the file on exit). */
   _launch(g) {
     var isWindows = System.platform()=="windows"
-    var tempFolder = (isWindows ? "${System.homefolder()}\\AppData\\local\\Temp" : "/tmp")
+    // Build with /; Folder.normalizePath rewrites separators for the platform.
+    var tempFolder = isWindows ?
+      "${System.homefolder()}/AppData/Local/Temp" : "/tmp"
     var fname = self._randomAlphanumString(10)
-    var path = "${tempFolder}/morpho${fname}.draw"
+    var path = Folder.normalizePath("${tempFolder}/morpho${fname}.draw")
     var out = File(path, "w")
     var bin = _morphoViewBin()
 
@@ -1215,7 +1218,7 @@ class Show {
       system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}' -WindowStyle Hidden\"")
     } else {
       // 1/7/25 Redirect error output to /dev/null
-      system("\"${bin}\" -t ${path} > /dev/null 2>&1 &")
+      system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
     }
   }
 
@@ -1779,7 +1782,7 @@ class Show {
     if (platform=="macos") {
       return ["/System/Library/Fonts"]
     } else if (platform=="windows") {
-      return ["C:/Windows/Fonts"]
+      return [Folder.normalizePath("C:/Windows/Fonts")]
     } else return ["/usr/share/fonts","/usr/local/share/fonts"]
   }
 
@@ -1792,7 +1795,7 @@ class Show {
 
   searchFontFolder(folder, font) {
     for (f in Folder.contents(folder)) {
-      var path = folder + "/" + f
+      var path = Folder.normalizePath("${folder}/${f}")
       if (self.matchFontFile(f, font)) return path
 
       if (Folder.isFolder(path)) { // Recurse
