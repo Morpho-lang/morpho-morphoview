@@ -7,21 +7,13 @@
 
 #include "matrix3d.h"
 #include <math.h>
-#include <string.h> 
-
-/** Use Apple's Accelerate library for LAPACK and BLAS */
-#ifdef __APPLE__
-#define ACCELERATE_NEW_LAPACK
-#include <Accelerate/Accelerate.h>
-#else
-#include <cblas.h>
-#include <lapacke.h>
-#define USE_LAPACKE
-#endif
-
-
+#include <string.h>
 
 #define EPS 1e-16
+
+/** Determinant of a 3x3 matrix given in column-major order */
+#define DET3(a,b,c, d,e,f, g,h,i) \
+    ((a)*((e)*(i)-(f)*(h)) - (b)*((d)*(i)-(f)*(g)) + (c)*((d)*(h)-(e)*(g)))
 
 /** @brief Normalizes a vector
  * @param[in] in - input vector
@@ -95,32 +87,37 @@ void mat3d_copy4x4(mat4x4 a, mat4x4 out) {
     memcpy(out, a, sizeof(float)*16);
 }
 
-/** @brief Matrix inversion
+/** @brief Matrix inversion via cofactors
  * @param[in] a input matrix
- * @param[out] out filled with inverse(a)  */
+ * @param[out] out filled with inverse(a); copy of a if singular */
 void mat3d_invert4x4(mat4x4 a, mat4x4 out) {
-    int m = 4, n = 4;
-    int piv[4];
-    int info;
-    /* Copy a into out */
-    memcpy(out, a, sizeof(float)*16);
-    /* Compute LU decomposition, storing result in place */
-#ifdef USE_LAPACKE
-    info = LAPACKE_sgetrf(LAPACK_COL_MAJOR, m, n, out, m, piv);
-#else
-    sgetrf_(&m, &n, out, &m, piv, &info);
-#endif
-    
-    if (!info) {
-        /* Now compute inverse */
-#ifdef USE_LAPACKE
-        info=LAPACKE_sgetri(LAPACK_COL_MAJOR, n, out, n, piv);
-#else
-        float work[16];
-        int lwork=16;
-        sgetri_(&n, out, &n, piv, work, &lwork, &info);
-#endif
-    }
+    /* Adjugate of a in column-major order (transpose of cofactor matrix) */
+    float c[16];
+    c[0]  =  DET3(a[5],a[6],a[7], a[9],a[10],a[11], a[13],a[14],a[15]);
+    c[1]  = -DET3(a[1],a[2],a[3], a[9],a[10],a[11], a[13],a[14],a[15]);
+    c[2]  =  DET3(a[1],a[2],a[3], a[5],a[6],a[7],   a[13],a[14],a[15]);
+    c[3]  = -DET3(a[1],a[2],a[3], a[5],a[6],a[7],   a[9],a[10],a[11]);
+
+    c[4]  = -DET3(a[4],a[6],a[7], a[8],a[10],a[11], a[12],a[14],a[15]);
+    c[5]  =  DET3(a[0],a[2],a[3], a[8],a[10],a[11], a[12],a[14],a[15]);
+    c[6]  = -DET3(a[0],a[2],a[3], a[4],a[6],a[7],   a[12],a[14],a[15]);
+    c[7]  =  DET3(a[0],a[2],a[3], a[4],a[6],a[7],   a[8],a[10],a[11]);
+
+    c[8]  =  DET3(a[4],a[5],a[7], a[8],a[9],a[11],  a[12],a[13],a[15]);
+    c[9]  = -DET3(a[0],a[1],a[3], a[8],a[9],a[11],  a[12],a[13],a[15]);
+    c[10] =  DET3(a[0],a[1],a[3], a[4],a[5],a[7],   a[12],a[13],a[15]);
+    c[11] = -DET3(a[0],a[1],a[3], a[4],a[5],a[7],   a[8],a[9],a[11]);
+
+    c[12] = -DET3(a[4],a[5],a[6], a[8],a[9],a[10],  a[12],a[13],a[14]);
+    c[13] =  DET3(a[0],a[1],a[2], a[8],a[9],a[10],  a[12],a[13],a[14]);
+    c[14] = -DET3(a[0],a[1],a[2], a[4],a[5],a[6],   a[12],a[13],a[14]);
+    c[15] =  DET3(a[0],a[1],a[2], a[4],a[5],a[6],   a[8],a[9],a[10]);
+
+    float det = a[0]*c[0] + a[4]*c[1] + a[8]*c[2] + a[12]*c[3];
+    if (fabsf(det) < EPS) { memcpy(out, a, sizeof(float)*16); return; }
+
+    float id = 1.0f/det;
+    for (unsigned int i=0; i<16; i++) out[i] = c[i]*id;
 }
 
 /** @brief Convert a 3x3 matrix to a 4x4 matrix

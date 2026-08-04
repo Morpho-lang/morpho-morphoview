@@ -1,7 +1,7 @@
 /** @file matrix3d.h
  *  @author T J Atherton
  *
- *  @brief Minimal matrix math for 3d graphics; uses BLAS and LAPACK
+ *  @brief Matrix math for 3d graphics (4x4 and 3x3 matrices); no dependencies.
  */
 
 #ifndef matrix3d_h
