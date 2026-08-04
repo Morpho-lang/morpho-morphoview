@@ -1,7 +1,8 @@
 /** @file matrix3d.c
  *  @author T J Atherton
  *
- *  @brief Matrix math for 3d graphics
+ *  @brief Matrix math for 3d graphics (4x4 and 3x3 matrices)
+ *  @details Implements simple matrix operations with no dependencies.
  */
 
 #include "matrix3d.h"
@@ -26,29 +27,29 @@
  * @param[in] in - input vector
  * @param[out] out - output vector. */
 void mat3d_vectornormalize(vec3 in, vec3 out) {
-    float norm=cblas_snrm2(3, in, 1);
-    if (norm>EPS) norm = 1.0/norm;
-    if (out!=in) cblas_scopy(3, in, 1, out, 1);
-    cblas_sscal(3, norm, out, 1);
+    float norm = sqrtf(in[0]*in[0] + in[1]*in[1] + in[2]*in[2]);
+    if (norm>EPS) norm = 1.0f/norm;
+    if (out!=in) memcpy(out, in, sizeof(float)*3);
+    out[0] *= norm; out[1] *= norm; out[2] *= norm;
 }
 
 /** @brief Stores the identity matrix in out.
  * @param[out] out - output matrix. */
 void mat3d_identity4x4(mat4x4 out) {
-    static float ident[] = { 1.0f, 0.0f, 0.0f, 0.0f,
-                            0.0f, 1.0f, 0.0f, 0.0f,
-                            0.0f, 0.0f, 1.0f, 0.0f,
-                            0.0f, 0.0f, 0.0f, 1.0f };
-    cblas_scopy(16, ident, 1, out, 1);
+    static const float ident[] = { 1.0f, 0.0f, 0.0f, 0.0f,
+                                   0.0f, 1.0f, 0.0f, 0.0f,
+                                   0.0f, 0.0f, 1.0f, 0.0f,
+                                   0.0f, 0.0f, 0.0f, 1.0f };
+    memcpy(out, ident, sizeof(ident));
 }
 
 /** @brief Stores the identity matrix in out.
  * @param[out] out - output matrix. */
 void mat3d_identity3x3(mat3x3 out) {
-    static float ident[] = { 1.0f, 0.0f, 0.0f,
-                             0.0f, 1.0f, 0.0f,
-                             0.0f, 0.0f, 1.0f };
-    cblas_scopy(9, ident, 1, out, 1);
+    static const float ident[] = { 1.0f, 0.0f, 0.0f,
+                                   0.0f, 1.0f, 0.0f,
+                                   0.0f, 0.0f, 1.0f };
+    memcpy(out, ident, sizeof(ident));
 }
 
 /** @brief Multiply out = a*b
@@ -57,7 +58,12 @@ void mat3d_identity3x3(mat3x3 out) {
  * @param[out] out filled with a*b
  * @warning: out must be distinct from a and b */
 void mat3d_mul4x4(mat4x4 a, mat4x4 b, mat4x4 out) {
-    cblas_sgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, 4, 4, 4, 1.0, a, 4, b, 4, 0.0, out, 4);
+    for (unsigned int col=0; col<4; col++) {
+        for (unsigned int row=0; row<4; row++) {
+            out[col*4+row] = a[row]*b[col*4] + a[4+row]*b[col*4+1] +
+                             a[8+row]*b[col*4+2] + a[12+row]*b[col*4+3];
+        }
+    }
 }
 
 /** @brief Multiply: out = a*b
@@ -66,7 +72,11 @@ void mat3d_mul4x4(mat4x4 a, mat4x4 b, mat4x4 out) {
  * @param[out] out filled with a*b
  * @warning: out must be distinct from a and b */
 void mat3d_mul3x3(mat3x3 a, mat3x3 b, mat3x3 out) {
-    cblas_sgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, 3, 3, 3, 1.0, a, 3, b, 3, 0.0, out, 3);
+    for (unsigned int col=0; col<3; col++) {
+        for (unsigned int row=0; row<3; row++) {
+            out[col*3+row] = a[row]*b[col*3] + a[3+row]*b[col*3+1] + a[6+row]*b[col*3+2];
+        }
+    }
 }
 
 /** @brief Add with scale: out = a + alpha*b
@@ -74,15 +84,15 @@ void mat3d_mul3x3(mat3x3 a, mat3x3 b, mat3x3 out) {
  * @param[in] b input matrix
  * @param[out] out filled with a + alpha*b  */
 void mat3d_addscale3x3(mat3x3 a, float alpha, mat3x3 b, mat3x3 out) {
-    if (a!=out) cblas_scopy(9, a, 1, out, 1);
-    cblas_saxpy(9, alpha, b, 1, out, 1);
+    if (a!=out) memcpy(out, a, sizeof(float)*9);
+    for (unsigned int i=0; i<9; i++) out[i] += alpha*b[i];
 }
 
 /** @brief Copy: out = a
  * @param[in] a input matrix
  * @param[out] out filled with a*b */
 void mat3d_copy4x4(mat4x4 a, mat4x4 out) {
-    cblas_scopy(16, a, 1, out, 1);
+    memcpy(out, a, sizeof(float)*16);
 }
 
 /** @brief Matrix inversion
@@ -121,7 +131,7 @@ void mat3d_lift(mat3x3 in, mat4x4 out) {
                    in[3], in[4], in[5], 0.0f,
                    in[6], in[7], in[8], 0.0f,
                     0.0f,  0.0f,  0.0f, 1.0f };
-    cblas_scopy(16, new, 1, out, 1);
+    memcpy(out, new, sizeof(new));
 }
 
 /** @brief Print a 3x3 matrix */
