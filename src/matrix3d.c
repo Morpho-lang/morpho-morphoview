@@ -44,7 +44,7 @@ void mat3d_identity4x4(mat4x4 out) {
 
 /** @brief Stores the identity matrix in out.
  * @param[out] out - output matrix. */
-void mat3d_identity3x3(mat4x4 out) {
+void mat3d_identity3x3(mat3x3 out) {
     static float ident[] = { 1.0f, 0.0f, 0.0f,
                              0.0f, 1.0f, 0.0f,
                              0.0f, 0.0f, 1.0f };

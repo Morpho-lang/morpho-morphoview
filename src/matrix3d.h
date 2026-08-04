@@ -17,7 +17,7 @@ typedef float vec3[3];
 void mat3d_vectornormalize(vec3 in, vec3 out);
 
 void mat3d_identity4x4(mat4x4 out);
-void mat3d_identity3x3(mat4x4 out);
+void mat3d_identity3x3(mat3x3 out);
 
 void mat3d_mul4x4(mat4x4 a, mat4x4 b, mat4x4 out);
 void mat3d_mul3x3(mat3x3 a, mat3x3 b, mat3x3 out);
