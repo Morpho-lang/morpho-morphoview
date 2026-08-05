@@ -73,7 +73,17 @@ class View with Listener {
     return s
   }
 
+  /** Non-blocking read of any pending replies (ok / err / window.closed). */
+  _process() {
+    if (isnil(self.poller) || self.closed) return
+    while (!self.closed && self.poller.wait(0)) {
+      self._handle(self.sock.receive())
+    }
+  }
+
   _sendWait(commands) {
+    self._process()
+    if (self.closed) return false
     self.gotOk = false
     self._send(commands)
     return self._waitOk()
@@ -143,7 +153,10 @@ class View with Listener {
     return self._sendWait(body)
   }
 
-  _live() { return !self.closed && !isnil(self.show) }
+  _live() {
+    self._process()
+    return !self.closed && !isnil(self.show)
+  }
 
   _ids(ev) {
     if (isnil(ev.ids) || ev.ids.count() == 0) return [ev.id]
@@ -183,12 +196,16 @@ class View with Listener {
     })
   }
 
-  /** Run @p emit into the buffer; send if non-empty. Warn on transport failure. */
+  /** Run @p emit into the buffer; send if non-empty. Warn on transport failure.
+   *  Skip the warning when the session closed mid-flight (window.closed) — that is
+   *  expected shutdown, not a failed emit. */
   _tryEmit(label, emit) {
     self.cmdLines = []
     emit()
     if (self.cmdLines.count() == 0) return
-    if (!self._sendWait(self._takeCommands())) _vwemitfl.warning("failed to emit ${label}")
+    if (!self._sendWait(self._takeCommands()) && !self.closed) {
+      _vwemitfl.warning("failed to emit ${label}")
+    }
   }
 
   /** Run @p emit into the buffer; send if non-empty and wait for ok. */
@@ -292,11 +309,12 @@ class View with Listener {
     var waited = 0
     while (!self.closed && !self.gotOk) {
       self.poll(timeoutms=self.pollms)
-      if (self.gotOk) return true
-      if (self.closed) {
-        self._resetTransport()
-        return false
+      if (self.gotOk) {
+        /* ok is parse-ack; window.closed may already be queued behind it. */
+        self._process()
+        return true
       }
+      if (self.closed) return false
       waited += self.pollms
       if (waited >= self.connecttimeout) {
         print "morphoview: timed out waiting for ok"
@@ -310,17 +328,17 @@ class View with Listener {
 
   _handle(msg) {
     if (!isstring(msg)) {
-      self.closed = true
+      self._resetTransport()
       return nil
     }
     if (msg == "ok") {
       self.gotOk = true
     } else if (msg == "window.closed") {
-      self.closed = true
+      self._resetTransport()
     } else if (msg.count() >= 3 && msg.substring(0, 3) == "err") {
       print "morphoview: ${msg}"
       self._kill()
-      self.closed = true
+      self._resetTransport()
     }
     return msg
   }
