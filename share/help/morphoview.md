@@ -121,9 +121,11 @@ Graphical elements for `display` (from `xgraphics`):
 * `Cylinder(start, end, aspectratio=, n=, color=, …)` — unit shaft + start→end as pose
 * `Arrow(start, end, aspectratio=, n=, color=, …)` — unit shaft+tip + start→end as pose
 * `Text(string, posn=, font=, color=, …)` — draw-slot text; move/remove like meshes; string/font via `replace`
-* `TriangleComplex(position, normals, colors, connectivity, …)` — triangle mesh
+* `TriangleComplex(position, normals, color, connectivity, …)` — triangle mesh
 * `PointCloud` / `LineSet` — points and lines with entry pose
 * `Tube` — tube along a path
+
+All of these are `GraphicsPrimitive`s sharing `color`, `filter`, and `transmit`.
 
 `transmit` / `filter` map to viewer alpha (`alpha = 1 − clamp(transmit + filter, 0, 1)`). True POVRay filter-vs-transmit pigment behavior remains POVRay-only.
 

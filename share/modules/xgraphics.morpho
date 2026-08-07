@@ -134,20 +134,25 @@ fn _segmentSRT(start, end, aspectratio) {
  * Graphics primitives
  **************************************** */
 
-/** TriangleComplexes are a basic graphical unit that draw a set of triangles
-   from a given set of vertices. */
-class TriangleComplex {
-  init(position, normals, colors, connectivity, filter=nil, transmit=nil) {
-    self.position=position /* Vertex position matrix */
-    self.normals=normals /* Matrix of normal vectors */
-    self.colors=colors /* Color */
-    self.connectivity=connectivity /* Connectivity matrix; columns are triangles */
-    
-    /* Optional arguments to be used by povray*/
-    self.filter = filter 
+/** Shared albedo + POVRay-style opacity flags for every displayable item.
+ *  Typed MD on GraphicsPrimitive collapses Show color/opacity lookups. */
+class GraphicsPrimitive {
+  init(color=nil, filter=nil, transmit=nil) {
+    self.color = color
+    self.filter = filter
     self.transmit = transmit
   }
+}
 
+/** TriangleComplexes are a basic graphical unit that draw a set of triangles
+   from a given set of vertices. */
+class TriangleComplex is GraphicsPrimitive {
+  init(position, normals, color, connectivity, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit)
+    self.position = position /* Vertex position matrix */
+    self.normals = normals /* Matrix of normal vectors */
+    self.connectivity = connectivity /* Connectivity matrix; columns are triangles */
+  }
 }
 
 
@@ -157,17 +162,13 @@ class TriangleComplex {
   @param[in] aspectratio - aspect ratio
   @param[in] n - number of faces to use
   @param[in] color - Color of the cylinder */
-class Cylinder {
+class Cylinder is GraphicsPrimitive {
   init(start, end, aspectratio=0.1, n=10, color=nil, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit)
     self.start = Matrix(start)
     self.end = Matrix(end)
     self.aspectratio = aspectratio
     self.n = n
-    self.color = color
-
-    /* Optional arguments to be used by povray*/
-    self.filter = filter 
-    self.transmit = transmit
   }
 
   /** @param unit if true, shaft along +z height 1 radius 1 (pose on Graphics entry). */
@@ -315,10 +316,12 @@ fn _uvSphere(level) {
 }
 
 /** Draws a sphere */
-class Sphere {
+class Sphere is GraphicsPrimitive {
   init(center, r, color=nil, maxrefine=3, filter=nil, transmit=nil) {
-    self.center = center; self.r = r; self.color = color
-    self.maxrefine = maxrefine; self.filter = filter; self.transmit = transmit
+    super.init(color=color, filter=filter, transmit=transmit)
+    self.center = center
+    self.r = r
+    self.maxrefine = maxrefine
   }
 
   _refinementLevel() { return self._refinementLevel(self.r) }
@@ -350,17 +353,13 @@ class Sphere {
   @param[in] aspectratio - aspect ratio of the arrow
   @param[in] n - number of faces to use
   @param[in] color - Color of the arrow */
-class Arrow {
+class Arrow is GraphicsPrimitive {
   init(start, end, aspectratio=0.1, n=10, color=nil, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit)
     self.start = Matrix(start)
     self.end = Matrix(end)
     self.aspectratio = aspectratio
     self.n = n
-    self.color = color
-
-    /* Optional arguments to be used by povray*/
-    self.filter = filter 
-    self.transmit = transmit
   }
 
   /** @param unit if true, shaft along +z height 1 radius 1; tip fraction = aspectratio. */
@@ -485,7 +484,7 @@ class Arrow {
   @param[in] n - number of faces to use per point
   @param[in] closed - whether to treat the point list as closed or not
   @param[in] color - Color of the tube */
-class Tube {
+class Tube is GraphicsPrimitive {
   _shaftNormal(vec) { // no abs — unlike module _normalVector
     var order = [vec[0], vec[1], vec[2]].order()
     var out=vec.clone()
@@ -496,15 +495,11 @@ class Tube {
   }
 
   init(pts, rad, n=10, color=nil, closed=false, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit)
     self.pts = pts
     self.radius = rad
     self.n = n
     self.closed = closed
-    self.color = color
-
-    /* Optional arguments to be used by povray*/
-    self.filter = filter
-    self.transmit = transmit
   }
 
   toTriangleComplex() {
@@ -632,8 +627,9 @@ class Tube {
  * Text
  **************************************** */
 
-class Text {
+class Text is GraphicsPrimitive {
   init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit)
     self.posn = posn
     if (islist(self.posn)) self.posn = Matrix(self.posn)
 
@@ -645,12 +641,7 @@ class Text {
     
     self.string = string 
     self.font = font
-    self.color = color 
     self.size = size 
-    
-    /* Optional arguments to be used by povray*/
-    self.filter = filter 
-    self.transmit = transmit
   }
 
   transformationMatrix() {
@@ -700,12 +691,10 @@ fn _asVertexMatrix(pts) { // list of points
 
 /** Point cloud — positions as Matrix columns (or list of points).
   Optional uniform or per-vertex `color`. Emits viewer points (`p`), not spheres. */
-class PointCloud {
+class PointCloud is GraphicsPrimitive {
   init(position, color=nil, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit)
     self.position = _asVertexMatrix(position)
-    self.color = color
-    self.filter = filter
-    self.transmit = transmit
   }
 }
 
@@ -714,25 +703,21 @@ class PointCloud {
   @param connectivity - Sparse/Matrix with two vertices per column, or list of [i,j] pairs.
     Omit for a polyline through successive vertices (use `closed=true` to loop).
   Color and flags are keyword args (Morpho optionals are not positional). */
-class LineSet {
+class LineSet is GraphicsPrimitive {
   // Polyline through successive vertices
   init(position, color=nil, closed=false, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit)
     self.position = _asVertexMatrix(position)
     self.connectivity = nil
-    self.color = color
     self.closed = closed
-    self.filter = filter
-    self.transmit = transmit
   }
 
   // Explicit segments
   init(position, connectivity, color=nil, closed=false, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit)
     self.position = _asVertexMatrix(position)
     self.connectivity = connectivity
-    self.color = color
     self.closed = closed
-    self.filter = filter
-    self.transmit = transmit
   }
 
   /** Flat index list for GL_LINES: i0 j0 i1 j1 ... */
@@ -1389,14 +1374,7 @@ class Show {
   }
 
   /** Item albedo by concrete type (closed display-item set → multiple dispatch). */
-  _itemRgb(TriangleComplex item) { return self._rgbValue(item.colors) }
-  _itemRgb(Sphere item) { return self._rgbValue(item.color) }
-  _itemRgb(Cylinder item) { return self._rgbValue(item.color) }
-  _itemRgb(Arrow item) { return self._rgbValue(item.color) }
-  _itemRgb(Tube item) { return self._rgbValue(item.color) }
-  _itemRgb(Text item) { return self._rgbValue(item.color) }
-  _itemRgb(PointCloud item) { return self._rgbValue(item.color) }
-  _itemRgb(LineSet item) { return self._rgbValue(item.color) }
+  _itemRgb(GraphicsPrimitive item) { return self._rgbValue(item.color) }
   _itemRgb(item) { return _defaultRgb }
 
   /** Normalize Matrix / list / Color / ColorMap-like values to RGB (open value shapes). */
@@ -1555,15 +1533,8 @@ class Show {
     return 1
   }
 
-  /** Item color field by concrete type (for Color.a lookup). */
-  _itemColor(TriangleComplex item) { return item.colors }
-  _itemColor(Sphere item) { return item.color }
-  _itemColor(Cylinder item) { return item.color }
-  _itemColor(Arrow item) { return item.color }
-  _itemColor(Tube item) { return item.color }
-  _itemColor(Text item) { return item.color }
-  _itemColor(PointCloud item) { return item.color }
-  _itemColor(LineSet item) { return item.color }
+  /** Item color field (GraphicsPrimitive.color). */
+  _itemColor(GraphicsPrimitive item) { return item.color }
   _itemColor(item) { return nil }
 
   /** True if POVRay-style transmit/filter was supplied on the item. */
@@ -1602,7 +1573,7 @@ class Show {
 
   /** Uniform RGB for a TriangleComplex (first vertex if per-vertex colors). */
   uniformRgb(item) {
-    return self._rgbValue(item.colors)
+    return self._rgbValue(item.color)
   }
 
   /** Emit `c` for rgb[+alpha]; returns color id. Alpha < ~1 → RGBA. */
@@ -1654,7 +1625,7 @@ class Show {
   _triangleComplexVertexFloats(item, out, includecolor=true) {
     var x = item.position
     var n = item.normals
-    var col = item.colors
+    var col = item.color
     var localColor = false
     var dimensions = x.dimensions()
     var dim = dimensions[0]
