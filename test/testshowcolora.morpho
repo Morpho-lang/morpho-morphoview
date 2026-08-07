@@ -1,0 +1,89 @@
+// Color always has .a (default 1). Show prefers transmit/filter when set, else Color.a.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testshowcolora.morpho
+
+import morphoview
+import xgraphics
+import xcolor
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn anyHasAlpha(lines, a) {
+  for (line in lines) {
+    var parts = line.split(" ")
+    if (parts.count() == 6 && parts[0] == "c" && parts[5] == a) return true
+  }
+  return false
+}
+
+fn anyExact(lines, want) {
+  for (line in lines) {
+    if (line == want) return true
+  }
+  return false
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+var pos = Matrix([[0, 1, 0.5], [0, 0, 0.8], [0, 0, 0]])
+var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
+var conn = Matrix([[1], [1], [1]])
+
+/* ---- item Color(r,g,b,a) ---- */
+var g1 = Graphics()
+g1.display(TriangleComplex(pos, nrm, Color(1, 0, 0, 0.4), conn))
+var buf1 = Buf()
+Show().write(g1, buf1)
+expect(anyHasAlpha(buf1.lines, "0.4"), "item Color.a → alpha 0.4")
+expect(anyExact(buf1.lines, "v \"xn\""), "Color.a translucent → xn")
+
+/* ---- transmit wins over Color.a when set ---- */
+var g2 = Graphics()
+g2.display(TriangleComplex(pos, nrm, Color(0, 1, 0, 0.5), conn, transmit=0.9))
+var buf2 = Buf()
+Show().write(g2, buf2)
+expect(anyHasAlpha(buf2.lines, "0.1"), "transmit preferred over Color.a")
+expect(!anyHasAlpha(buf2.lines, "0.5"), "Color.a not used when transmit set")
+
+/* ---- opaque Color(r,g,b) + transmit ---- */
+var g3 = Graphics()
+g3.display(TriangleComplex(pos, nrm, Red, conn, transmit=0.4))
+var buf3 = Buf()
+Show().write(g3, buf3)
+expect(anyHasAlpha(buf3.lines, "0.6"), "opaque Color + transmit 0.4 → alpha 0.6")
+
+/* ---- presentation color=Color(...,a) on display ---- */
+var g4 = Graphics()
+g4.display(TriangleComplex(pos, nrm, Blue, conn), color=Color(0, 0, 1, 0.25))
+var buf4 = Buf()
+Show().write(g4, buf4)
+expect(anyHasAlpha(buf4.lines, "0.25"), "entry color Color.a → alpha 0.25")
+
+/* ---- Scene.recolor with Color.a ---- */
+var sc = Scene()
+var id = sc.display(Sphere([0, 0, 0], 1, color=White), [0, 0, 0])
+var show = Show()
+var buf5 = Buf()
+show.write(sc, buf5)
+expect(sc.recolor(id, Color(1, 0.5, 0, 0.3)), "recolor with Color.a")
+var buf6 = Buf()
+expect(show.emitEntryRecolor(sc, id, buf6), "emit recolor")
+expect(anyHasAlpha(buf6.lines, "0.3"), "recolor Color.a → alpha 0.3")
+
+/* ---- Color API smoke ---- */
+var c = Color(0.2, 0.4, 0.6, 0.8)
+expect(c.alpha(0) == 0.8, "alpha()")
+expect(c.rgba(0).count() == 4 && c.rgba(0)[3] == 0.8, "rgba()")
+expect(Red.a == 1, "opaque named color has a=1")
+expect(Red.alpha(0) == 1, "alpha() is 1 for opaque")
+
+print "ok"

@@ -3,15 +3,24 @@
 import constants
 
 class Color {
-  init(r,g,b) {
+  init(r, g, b) {
     self.r = r
     self.g = g
     self.b = b
+    self.a = 1
+  }
+  init(r, g, b, a) {
+    self.r = r
+    self.g = g
+    self.b = b
+    self.a = a
   }
   red(x) { return self.r }
   green(x) { return self.g }
   blue(x) { return self.b }
+  alpha(x) { return self.a }
   rgb(x) { return [self.r, self.g, self.b] }
+  rgba(x) { return [self.r, self.g, self.b, self.a] }
 }
 
 // Some predefined colors

@@ -1416,8 +1416,7 @@ class Show {
     if (!self.objectMap.contains(graphicsId)) return false
     var entry = graphic.findEntry(graphicsId)
     if (isnil(entry)) return false
-    var alpha = self.opacity(entry.item)
-    var cid = self.addRgb(self.entryRgb(entry), alpha, out)
+    var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
     self.entryColorId[graphicsId] = cid
     out.write("C ${cid}")
     out.write("d ${graphicsId}")
@@ -1480,7 +1479,7 @@ class Show {
     var graphicsId = entry.id
     var oldVid = self.objectMap.contains(graphicsId) ? self.objectMap[graphicsId] : nil
     if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
-      var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
+      var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
       self.entryColorId[graphicsId] = cid
       out.write("C ${cid}")
       self.emitEntryDraw(entry, out, viewerid=oldVid)
@@ -1537,12 +1536,68 @@ class Show {
     return false
   }
 
+  /** Alpha from Color.a / 4-vector; default 1 if absent (e.g. upstream color). */
+  _colorAlpha(col) {
+    if (isnil(col)) return 1
+    if (isobject(col) && !islist(col) && !ismatrix(col)) {
+      if (!col.has("a")) return 1
+      var a = col.a
+      return (a < 0) ? 0 : ((a > 1) ? 1 : a)
+    }
+    if (islist(col) && col.count() >= 4) {
+      var a = col[3]
+      return (a < 0) ? 0 : ((a > 1) ? 1 : a)
+    }
+    if (ismatrix(col) && col.dimensions()[0] >= 4) {
+      var a = col[3, 0]
+      return (a < 0) ? 0 : ((a > 1) ? 1 : a)
+    }
+    return 1
+  }
+
+  /** Item color field by concrete type (for Color.a lookup). */
+  _itemColor(TriangleComplex item) { return item.colors }
+  _itemColor(Sphere item) { return item.color }
+  _itemColor(Cylinder item) { return item.color }
+  _itemColor(Arrow item) { return item.color }
+  _itemColor(Tube item) { return item.color }
+  _itemColor(Text item) { return item.color }
+  _itemColor(PointCloud item) { return item.color }
+  _itemColor(LineSet item) { return item.color }
+  _itemColor(item) { return nil }
+
+  /** True if POVRay-style transmit/filter was supplied on the item. */
+  _hasTransmitFilter(item) {
+    return !isnil(item.transmit) || !isnil(item.filter)
+  }
+
   /** POVRay transmit/filter → OpenGL alpha: a = 1 - clamp(transmit + filter, 0, 1). */
-  opacity(item) {
+  _transmitFilterAlpha(item) {
     var t = isnil(item.transmit) ? 0 : item.transmit
     var f = isnil(item.filter) ? 0 : item.filter
     var a = 1 - (t + f)
     return (a < 0) ? 0 : ((a > 1) ? 1 : a)
+  }
+
+  /** Presentation / item Color.a (entry.color wins over item color). */
+  _entryColorAlpha(entry) {
+    if (!isnil(entry.color)) return self._colorAlpha(entry.color)
+    return self._colorAlpha(self._itemColor(entry.item))
+  }
+
+  /** Prefer transmit/filter when set (graphics/POVRay); else Color.a.
+   *  Color stays a simple RGBA value; opacity policy lives here. */
+  opacity(GraphicsEntry entry) {
+    if (self._hasTransmitFilter(entry.item)) return self._transmitFilterAlpha(entry.item)
+    return self._entryColorAlpha(entry)
+  }
+
+  opacity(item) {
+    if (self._hasTransmitFilter(item)) return self._transmitFilterAlpha(item)
+    if (!isnil(self._currentEntry) && !isnil(self._currentEntry.color)) {
+      return self._colorAlpha(self._currentEntry.color)
+    }
+    return self._colorAlpha(self._itemColor(item))
   }
 
   /** Uniform RGB for a TriangleComplex (first vertex if per-vertex colors). */
@@ -1916,7 +1971,7 @@ class Show {
     var font = item.font
     if (!font) font = self.defaultFontName()
     var fid = self.findFontId(font, item.size, out)
-    var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
+    var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
     out.write("C ${cid}")
     self._emitTextTransforms(entry, item, out)
     out.write("T ${entry.id} ${fid} \"${item.string}\"")
@@ -1939,7 +1994,7 @@ class Show {
       vid = self.defineXnTriangleComplex(tri, out)
       self.meshCache[key] = vid
     }
-    var cid = self.addRgb(self.entryRgb(entry), self.opacity(item), out)
+    var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
     out.write("C ${cid}")
     self._recordObject(vid, colorid=cid)
     self.emitEntryDraw(entry, out, viewerid=vid)

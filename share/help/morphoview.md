@@ -126,3 +126,5 @@ Graphical elements for `display` (from `xgraphics`):
 * `Tube` — tube along a path
 
 `transmit` / `filter` map to viewer alpha (`alpha = 1 − clamp(transmit + filter, 0, 1)`). True POVRay filter-vs-transmit pigment behavior remains POVRay-only.
+
+Every `Color` has an alpha channel (`Color(r,g,b)` sets `a=1`; use `Color(r,g,b,a)` for translucency). In morphoview, `transmit`/`filter` on an item take priority when set; otherwise `Show` uses the presentation or item `Color.a`.
