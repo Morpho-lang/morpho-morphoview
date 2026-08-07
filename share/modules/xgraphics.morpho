@@ -1121,27 +1121,37 @@ class Scene is Graphics with Broadcaster {
  **************************************** */
 
 var _mvbin = nil
+var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command); please upgrade morphopm.")
+var _mvpmfl = Error("MvPmFl", "morphopm path morphoview failed; check the package install.")
 
 fn _morphoViewBin() {
   if (!isnil(_mvbin)) return _mvbin
 
   var exe = (System.platform()=="windows" ? "morphoview.exe" : "morphoview")
   var roots = []
+  var haspm = System.subprocess(System.platform()=="windows" ? "where morphopm" : "command -v morphopm")
 
-  var r = System.subprocess("morphopm path morphoview")
-  if (r["exitstatus"]==0) {
-    roots.append(r["stdout"].split("\n")[0])
-  } else if (Folder.contents(System.homefolder()).contains(".morphopackages")) {
-    var packages = Folder.normalizePath("${System.homefolder()}/.morphopackages")
-    for (p in File(packages).lines()) {
+  if (haspm["exitstatus"]==0) {
+    var line = System.subprocess("morphopm path morphoview")["stdout"].split("\n")[0]
+    var parts = line.split("'")
+    var code = (parts.count()>1) ? parts[1] : ""
+    if (code == "ErrMorphoPMUnrcgnzd") _mvpmold.throw()
+    if (code != "ErrMorphoPMNotInst") {
+      if (line.count()==0 || !Folder.isFolder(line)) _mvpmfl.throw()
+      roots.append(line)
+    }
+  }
+
+  /* No morphopm, or package not installed — scan ~/.morphopackages (dev checkout). */
+  if (roots.count()==0 && Folder.contents(System.homefolder()).contains(".morphopackages")) {
+    for (p in File(Folder.normalizePath("${System.homefolder()}/.morphopackages")).lines()) {
       if (p.split("/\\").contains("morpho-morphoview")) roots.append(p)
     }
   }
 
   for (root in roots) {
-    if (root.count()==0) continue
     var bindir = Folder.normalizePath("${root}/bin")
-    if (Folder.isFolder(bindir) && Folder.contents(bindir).contains(exe)) {
+    if (root.count()>0 && Folder.isFolder(bindir) && Folder.contents(bindir).contains(exe)) {
       _mvbin = Folder.normalizePath("${bindir}/${exe}")
       return _mvbin
     }
