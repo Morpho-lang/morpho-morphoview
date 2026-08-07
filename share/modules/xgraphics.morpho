@@ -1122,7 +1122,6 @@ class Scene is Graphics with Broadcaster {
 
 var _mvbin = nil
 var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command); please upgrade morphopm.")
-var _mvpmfl = Error("MvPmFl", "morphopm path morphoview failed; check the package install.")
 
 fn _morphoViewBin() {
   if (!isnil(_mvbin)) return _mvbin
@@ -1136,13 +1135,12 @@ fn _morphoViewBin() {
     var parts = line.split("'")
     var code = (parts.count()>1) ? parts[1] : ""
     if (code == "ErrMorphoPMUnrcgnzd") _mvpmold.throw()
-    if (code != "ErrMorphoPMNotInst") {
-      if (line.count()==0 || !Folder.isFolder(line)) _mvpmfl.throw()
-      roots.append(line)
-    }
+    /* Only trust morphopm when it prints a real directory; otherwise fall through
+     * (NotInst, empty/stderr-only output, stale path, other errors). */
+    if (line.count()>0 && Folder.isFolder(line)) roots.append(line)
   }
 
-  /* No morphopm, or package not installed — scan ~/.morphopackages (dev checkout). */
+  /* No usable morphopm path — scan ~/.morphopackages (dev checkout). */
   if (roots.count()==0 && Folder.contents(System.homefolder()).contains(".morphopackages")) {
     for (p in File(Folder.normalizePath("${System.homefolder()}/.morphopackages")).lines()) {
       if (p.split("/\\").contains("morpho-morphoview")) roots.append(p)
