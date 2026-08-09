@@ -20,7 +20,7 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 - [ ] Push settled pieces from [`xgraphics.morpho`](share/modules/xgraphics.morpho) (`Graphics` / `Scene` / `Show` / events / `broadcast`) to morpho `graphics.morpho`
 - [ ] Keep core `graphics.morpho` free of `meshtools` (prototype: local sphere tessellation in xgraphics; examples like soapbubble may still `import meshtools`)
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
-- [ ] Extend morpho `color` module with alpha (`Color(r,g,b)` / `Color(r,g,b,a)` via MD, always store `a`; `rgba` / `alpha`); wire `Show` to use transmit/filter when set, else `Color.a` — **prototyped in package `xcolor` + `xgraphics`**
+- [ ] Extend morpho `color` module with alpha (`Color(r,g,b)` / `Color(r,g,b,a)` via MD, always store `a`; `rgba` / `alpha`); `Coloring` shared kind; ColorMap not a Color; wire `Show` via Coloring MD — **prototyped in package `xcolor` + `xgraphics`**
 
 ### Transport
 

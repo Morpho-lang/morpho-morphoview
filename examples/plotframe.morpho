@@ -8,7 +8,7 @@
 
 import morphoview
 import xgraphics
-import color
+import xcolor
 
 /* ---- frame ---- */
 var lo = [-1.0, -1.0, -1.0]

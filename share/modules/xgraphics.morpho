@@ -1387,15 +1387,15 @@ class Show {
   _itemRgb(GraphicsPrimitive item) { return self._rgbValue(item.color) }
   _itemRgb(item) { return _defaultRgb }
 
-  /** Normalize Matrix / list / Color / ColorMap-like values to RGB (open value shapes). */
+  /** Normalize Matrix / list / Coloring values to RGB. */
+  _rgbValue(Color col) { return [col.r, col.g, col.b] }
+  _rgbValue(Coloring col) { return col.rgb(0) }
+  _rgbValue(Matrix col) { return [col[0,0], col[1,0], col[2,0]] }
+  _rgbValue(List col) { return col }
   _rgbValue(col) {
     if (isnil(col)) return _defaultRgb
-    if (ismatrix(col)) return [col[0,0], col[1,0], col[2,0]]
-    if (islist(col)) return col
-    if (isobject(col)) {
-      if (!isnil(col.r) && !isnil(col.g) && !isnil(col.b)) return [col.r, col.g, col.b]
-      return col.rgb(0)
-    }
+    // Upstream `import color` (not Coloring): shared rgb(x) interface.
+    if (isobject(col)) return col.rgb(0)
     return _defaultRgb
   }
 
@@ -1524,24 +1524,20 @@ class Show {
     return false
   }
 
-  /** Alpha from Color.a / 4-vector; default 1 if absent (e.g. upstream color). */
-  _colorAlpha(col) {
-    if (isnil(col)) return 1
-    if (isobject(col) && !islist(col) && !ismatrix(col)) {
-      if (!col.has("a")) return 1
-      var a = col.a
-      return (a < 0) ? 0 : ((a > 1) ? 1 : a)
-    }
-    if (islist(col) && col.count() >= 4) {
-      var a = col[3]
-      return (a < 0) ? 0 : ((a > 1) ? 1 : a)
-    }
-    if (ismatrix(col) && col.dimensions()[0] >= 4) {
-      var a = col[3, 0]
-      return (a < 0) ? 0 : ((a > 1) ? 1 : a)
-    }
-    return 1
+  /** Alpha from Color.a / 4-vector / Coloring (maps → opaque). */
+  _clamp01(a) { return (a < 0) ? 0 : ((a > 1) ? 1 : a) }
+
+  _colorAlpha(Color col) { return self._clamp01(col.a) }
+  _colorAlpha(Coloring col) { return 1 }
+  _colorAlpha(List col) {
+    if (col.count() < 4) return 1
+    return self._clamp01(col[3])
   }
+  _colorAlpha(Matrix col) {
+    if (col.dimensions()[0] < 4) return 1
+    return self._clamp01(col[3, 0])
+  }
+  _colorAlpha(col) { return 1 }
 
   /** Item color field (GraphicsPrimitive.color). */
   _itemColor(GraphicsPrimitive item) { return item.color }
@@ -1644,7 +1640,9 @@ class Show {
     if (includecolor) {
       if (ismatrix(col)) {
         if (col.dimensions()[1] > 1) localColor = true
-      } else if (isobject(col) && !islist(col)) col = col.rgb(0)
+      } else if (!isnil(col)) {
+        col = self._rgbValue(col)
+      }
     }
 
     for (i in 0...nv) {
@@ -1719,9 +1717,8 @@ class Show {
     if (includecolor) {
       if (ismatrix(col)) {
         if (col.dimensions()[1] > 1) localColor = true
-      } else if (isobject(col) && !islist(col)) {
-        if (!isnil(col.r) && !isnil(col.g) && !isnil(col.b)) col = [col.r, col.g, col.b]
-        else col = col.rgb(0)
+      } else if (!isnil(col)) {
+        col = self._rgbValue(col)
       }
       out.write("v \"xc\"")
     } else {

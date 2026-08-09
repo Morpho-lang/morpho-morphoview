@@ -8,7 +8,7 @@
 
 import morphoview
 import xgraphics
-import color
+import xcolor
 import constants
 import meshtools
 import optimize4

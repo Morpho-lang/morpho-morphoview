@@ -7,7 +7,7 @@
 
 import morphoview
 import xgraphics
-import color
+import xcolor
 import constants
 
 var nBodies = 100
@@ -18,27 +18,6 @@ var softK = 8.0
 var damp = 0.015
 var diffusion = 1.4   // Brownian kick strength (length / sqrt(time))
 var glass = 0.55      // POVRay-style transmit → viewer alpha
-
-fn hsv(h, s, v) {
-  var hh = h
-  while (hh < 0) hh += 360
-  while (hh >= 360) hh -= 360
-  var c = v*s
-  var sector = Int(hh/60)
-  var f = hh/60 - Float(sector)
-  var x = c*(1 - abs(2*f - 1))
-  var m = v - c
-  var r = 0
-  var g = 0
-  var b = 0
-  if (sector == 0) { r = c; g = x }
-  else if (sector == 1) { r = x; g = c }
-  else if (sector == 2) { g = c; b = x }
-  else if (sector == 3) { g = x; b = c }
-  else if (sector == 4) { r = x; b = c }
-  else { r = c; b = x }
-  return Color(r+m, g+m, b+m)
-}
 
 var pos = Matrix(3, nBodies)
 var vel = Matrix(3, nBodies)
@@ -59,7 +38,7 @@ for (i in 0...nBodies) {
   vel[0,i] = (2*random()-1)*0.8
   vel[1,i] = (2*random()-1)*0.8
   vel[2,i] = (2*random()-1)*0.8
-  var col = hsv(360*Float(i)/Float(nBodies), 0.75, 0.95)
+  var col = HSV(360*Float(i)/Float(nBodies), 0.75, 0.95)
   var proto = protoLo
   if (r > 0.16) proto = protoHi
   var id = g.display(proto, [pos[0,i], pos[1,i], pos[2,i]], scale=r, color=col)
@@ -116,7 +95,7 @@ for (frame in 1...nFrames) {
       var sp = sqrt(vel[0,i]*vel[0,i] + vel[1,i]*vel[1,i] + vel[2,i]*vel[2,i])
       var t = sp/2.5
       if (t > 1) t = 1
-      g.recolor(ids[i], hsv(220*(1-t), 0.7, 0.55 + 0.45*t))
+      g.recolor(ids[i], HSV(220*(1-t), 0.7, 0.55 + 0.45*t))
     }
   }
   g.endBatch()

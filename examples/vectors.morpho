@@ -7,7 +7,7 @@
 
 import morphoview
 import xgraphics
-import color
+import xcolor
 import constants
 
 var nX = 10

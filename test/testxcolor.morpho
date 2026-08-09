@@ -1,0 +1,95 @@
+// xcolor: Coloring hierarchy, HSV, Blend/add/scale, ColorMap.color(x).
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testxcolor.morpho
+
+import morphoview
+import xgraphics
+import xcolor
+import constants
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn approx(a, b, eps) {
+  return abs(a - b) < eps
+}
+
+/* ---- HSV ---- */
+var redish = HSV(0, 1, 1)
+expect(approx(redish.r, 1, 1e-9) && approx(redish.g, 0, 1e-9) && approx(redish.b, 0, 1e-9), "HSV red")
+expect(redish.a == 1, "HSV opaque default")
+
+var greenA = HSV(120, 1, 1, 0.4)
+expect(approx(greenA.g, 1, 1e-9) && approx(greenA.r, 0, 1e-9), "HSV green")
+expect(greenA.a == 0.4, "HSV with alpha")
+
+expect(approx(HSV(-40, 1, 1).r, HSV(320, 1, 1).r, 1e-9), "HSV negative hue wrap")
+
+/* ---- Gray / arithmetic ---- */
+expect(Gray(0.5).r == 0.5 && Gray(0.5).a == 1, "Gray")
+expect(Gray(0.5, 0.2).a == 0.2, "Gray with alpha")
+
+var mid = Blend(Red, Blue, 0.5)
+expect(approx(mid.r, 0.5, 1e-9) && approx(mid.b, 0.5, 1e-9) && mid.g == 0, "Blend RGB")
+expect(approx(Blend(Color(1,0,0,0), Color(1,0,0,1), 0.5).a, 0.5, 1e-9), "Blend alpha")
+expect(approx(Red.blend(Blue, 0.5).r, 0.5, 1e-9), "Color.blend")
+expect(approx(Red.add(Blue).r, 1, 1e-9) && approx(Red.add(Blue).b, 1, 1e-9), "Color.add")
+expect(approx(Red.scale(0.5).r, 0.5, 1e-9), "Color.scale")
+expect(approx((Red + Blue).b, 1, 1e-9) && approx((Red + Blue).r, 1, 1e-9), "Color + Color")
+expect(approx((0.5*Red).r, 0.5, 1e-9), "scalar * Color")
+expect(approx((Red*0.5).r, 0.5, 1e-9), "Color * scalar")
+expect(approx((Red - Green).g, -1, 1e-9), "Color - Color")
+expect(approx((Red*Blue).r, 0, 1e-9) && approx((Red*White).r, 1, 1e-9), "Color * Color")
+expect(approx(((1-0.5)*Red + 0.5*Blue).r, 0.5, 1e-9), "blend via operators")
+
+/* ---- Coloring hierarchy ---- */
+expect(Color.superclass() == Coloring, "Color → Coloring")
+expect(ColorMap.superclass() == Coloring, "ColorMap → Coloring")
+expect(HueMap().superclass() == ColorMap, "HueMap → ColorMap")
+expect(ViridisMap().superclass() == ChebyshevMap, "ViridisMap → ChebyshevMap")
+expect(ChebyshevMap.superclass() == ColorMap, "ChebyshevMap → ColorMap")
+
+var vir = ViridisMap()
+var vg = vir.rgb(0.5)
+expect(vg.count() == 3, "ViridisMap.rgb")
+expect(!vir.has("r"), "maps have no fixed r")
+expect(vir.alpha(0) == 1, "Coloring.alpha default")
+expect(vir.rgba(0.5).count() == 4, "Coloring.rgba")
+
+var hc = HueMap().color(0.5)
+expect(hc.clss() == Color, "ColorMap.color → Color")
+expect(hc.has("r") && hc.has("a"), "sampled Color has channels")
+
+/* ---- Show MD: Color vs Coloring ---- */
+var pos = Matrix([[0, 1, 0.5], [0, 0, 0.8], [0, 0, 0]])
+var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
+var conn = Matrix([[1], [1], [1]])
+
+var g1 = Graphics()
+g1.display(TriangleComplex(pos, nrm, Color(1, 0, 0, 0.4), conn))
+var buf1 = Buf()
+Show().write(g1, buf1)
+var foundA = false
+for (line in buf1.lines) {
+  var parts = line.split(" ")
+  if (parts.count() == 6 && parts[0] == "c" && parts[5] == "0.4") foundA = true
+}
+expect(foundA, "Show Color.a via MD")
+
+var g2 = Graphics()
+g2.display(TriangleComplex(pos, nrm, ViridisMap(), conn))
+var buf2 = Buf()
+Show().write(g2, buf2)
+expect(buf2.lines.count() > 0, "Show Coloring map as color")
+
+print "ok"

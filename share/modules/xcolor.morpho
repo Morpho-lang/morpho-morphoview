@@ -2,7 +2,21 @@
 
 import constants
 
-class Color {
+/** Shared kind: anything sampleable via red/green/blue/rgb/rgba (the color protocol). */
+class Coloring {
+  red(x) { return 0 }
+  green(x) { return 0 }
+  blue(x) { return 0 }
+  alpha(x) { return 1 }
+  rgb(x) { return [self.red(x), self.green(x), self.blue(x)] }
+  rgba(x) {
+    var c = self.rgb(x)
+    return [c[0], c[1], c[2], self.alpha(x)]
+  }
+}
+
+/** Fixed RGBA color value. */
+class Color is Coloring {
   init(r, g, b) {
     self.r = r
     self.g = g
@@ -21,6 +35,30 @@ class Color {
   alpha(x) { return self.a }
   rgb(x) { return [self.r, self.g, self.b] }
   rgba(x) { return [self.r, self.g, self.b, self.a] }
+
+  /* Binary ops: Morpho routes +/−/× via add, sub, mul/mulr.
+   * addr/subr omitted — only Color±Color is supported (left always handles it). */
+  add(Color other) {
+    return Color(self.r+other.r, self.g+other.g, self.b+other.b, self.a+other.a)
+  }
+
+  sub(Color other) {
+    return Color(self.r-other.r, self.g-other.g, self.b-other.b, self.a-other.a)
+  }
+
+  mul(Color other) {
+    return Color(self.r*other.r, self.g*other.g, self.b*other.b, self.a*other.a)
+  }
+  mul(t) { // scalar × channels (Color * t)
+    return Color(t*self.r, t*self.g, t*self.b, t*self.a)
+  }
+  mulr(t) { return self.mul(t) } // t * Color
+
+  scale(t) { return self.mul(t) }
+
+  blend(Color other, t) {
+    return (1-t)*self + t*other
+  }
 }
 
 // Some predefined colors
@@ -38,14 +76,44 @@ var Pink = Color(1,0.5,0.5)
 var Purple = Color(0.5,0,0.5)
 
 fn Gray(x) {
-  return Color(x,x,x)
+  return Color(x, x, x)
 }
 
-/* Basic color maps */
+fn Gray(x, a) {
+  return Color(x, x, x, a)
+}
 
-class ColorMap {
+/** HSV in degrees (h) and 0–1 (s, v) → Color. */
+fn HSV(h, s, v) {
+  return HSV(h, s, v, 1)
+}
+
+fn HSV(h, s, v, a) {
+  var hh = h - 360*floor(h/360) // [0, 360)
+  var c = v*s
+  var sector = Int(hh/60)
+  var f = hh/60 - Float(sector)
+  var x = c*(1 - abs(2*f - 1))
+  var m = v - c
+  var rgb = [
+    [c, x, 0], [x, c, 0], [0, c, x],
+    [0, x, c], [x, 0, c], [c, 0, x]
+  ]
+  var t = rgb[sector]
+  return Color(t[0]+m, t[1]+m, t[2]+m, a)
+}
+
+/** Linear blend in RGBA; t=0 → c1, t=1 → c2. */
+fn Blend(Color c1, Color c2, t) {
+  return c1.blend(c2, t)
+}
+
+/* Parametric maps — produce a color given a value in [0,1] */
+
+class ColorMap is Coloring {
   init() { }
-  rgb(x) { return [self.red(x), self.green(x), self.blue(x)] }
+  /** Sample map at x ∈ [0,1] as a fixed Color (for arithmetic / display). */
+  color(x) { return Color(self.red(x), self.green(x), self.blue(x)) }
 }
 
 class GradientMap is ColorMap {
@@ -70,7 +138,7 @@ class HueMap is ColorMap {
 
 var _errChebyShevOrderInconsistent = Error("ClrChbyshvOrdr", "Order of Chebyshev approximation inconsistent.") 
 
-class ChebyshevMap is Color {
+class ChebyshevMap is ColorMap {
   init(R,G,B) {
     self.R = R 
     self.G = G

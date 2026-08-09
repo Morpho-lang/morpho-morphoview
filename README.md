@@ -26,7 +26,7 @@ You may need to use `sudo`. Dependencies include GLFW, FreeType, and [czmq](http
 
     import morphoview
     import xgraphics
-    import color
+    import xcolor
 
 Fire-and-forget display:
 
