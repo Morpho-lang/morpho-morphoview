@@ -127,10 +127,10 @@ fn HSV(h, s, v, a) {
   var f = hh/60 - Float(sector)
   var x = c*(1 - abs(2*f - 1))
   var m = v - c
-  var rgb = [
-    [c, x, 0], [x, c, 0], [0, c, x],
-    [0, x, c], [x, 0, c], [c, 0, x]
-  ]
+  var rgb = (
+    (c, x, 0), (x, c, 0), (0, c, x),
+    (0, x, c), (x, 0, c), (c, 0, x)
+  )
   var t = rgb[sector]
   return Color(t[0]+m, t[1]+m, t[2]+m, a)
 }
