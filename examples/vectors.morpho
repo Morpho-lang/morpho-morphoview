@@ -18,9 +18,9 @@ var spacing = 0.32
 var tipFrac = 0.22   // Arrow tip length fraction (= aspectratio)
 var shaftAR = 0.12   // thinner shaft: R = 0.5 * L * shaftAR via _segmentSRT
 var vxScale = 0.35   // tanh scale for x-projection → color
-var cmap = GradientMap()
+var cmap = TundraMap()
 
-/** Map vx → [0,1] through GradientMap. */
+/** Map vx → [0,1] through TundraMap. */
 fn colorByVx(vx) {
   var u = 0.5 + 0.5*tanh(vx/vxScale)
   return cmap.rgb(u)

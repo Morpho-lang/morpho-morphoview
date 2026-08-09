@@ -51,7 +51,6 @@ expect(approx(mid.r, 0.5, 1e-9) && approx(mid.b, 0.5, 1e-9) && mid.g == 0, "Blen
 expect(approx(Blend(Color(1,0,0,0), Color(1,0,0,1), 0.5).a, 0.5, 1e-9), "Blend alpha")
 expect(approx(Red.blend(Blue, 0.5).r, 0.5, 1e-9), "Color.blend")
 expect(approx(Red.add(Blue).r, 1, 1e-9) && approx(Red.add(Blue).b, 1, 1e-9), "Color.add")
-expect(approx(Red.scale(0.5).r, 0.5, 1e-9), "Color.scale")
 expect(approx((Red + Blue).b, 1, 1e-9) && approx((Red + Blue).r, 1, 1e-9), "Color + Color")
 expect(approx((0.5*Red).r, 0.5, 1e-9), "scalar * Color")
 expect(approx((Red*0.5).r, 0.5, 1e-9), "Color * scalar")
@@ -62,7 +61,13 @@ expect(approx(Red.lighten(0.5).g, 0.5, 1e-9), "Color.lighten")
 expect(approx(Red.darken(0.5).r, 0.5, 1e-9), "Color.darken")
 expect(approx(Red.lighten().g, 1/3, 1e-9), "Color.lighten default")
 expect(approx(Red.darken().r, 2/3, 1e-9), "Color.darken default")
-expect(approx(Color(1,0,0,0.4).lighten(0.5).a, 0.7, 1e-9), "lighten blends alpha")
+expect(approx(Color(1,0,0,0.4).lighten(0.5).a, 0.4, 1e-9), "lighten preserves alpha")
+expect(approx(Color(1,0,0,0.8).mul(0.5).a, 0.4, 1e-9), "mul scales alpha")
+expect(approx(Color(1.2, -0.1, 0.5, 1.5).clamp().r, 1, 1e-9), "clamp high")
+expect(approx(Color(1.2, -0.1, 0.5, 1.5).clamp().g, 0, 1e-9), "clamp low")
+expect(approx(Color(1.2, -0.1, 0.5, 1.5).clamp().a, 1, 1e-9), "clamp alpha")
+expect(Transparent.a == 0 && Transparent.r == 0, "Transparent")
+expect(Red.color(0.3).r == 1, "Color.color ignores x")
 
 /* ---- Coloring hierarchy ---- */
 expect(Color.superclass() == Coloring, "Color → Coloring")
@@ -126,10 +131,54 @@ try {
   "ClrBadInit" : badInit = true
 }
 expect(badInit, "Color(Matrix) wrong length")
+badInit = false
+try {
+  Color(Matrix([[1, 0], [0, 1]]))
+} catch {
+  "ClrBadInit" : badInit = true
+}
+expect(badInit, "Color(Matrix) rejects 2x2")
 
 var hc = HueMap().color(0.5)
 expect(hc.clss() == Color, "ColorMap.color → Color")
 expect(hc.has("r") && hc.has("a"), "sampled Color has channels")
+
+/* ---- TundraMap / GradientMap / alpha via color() ---- */
+var mm = TundraMap()
+expect(mm.superclass() == ColorMap, "TundraMap → ColorMap")
+expect(approx(mm.rgb(0)[0], 0.29, 1e-9), "TundraMap at 0")
+
+var g2stop = GradientMap(Black, White)
+expect(approx(g2stop.rgb(0.5)[0], 0.5, 1e-9), "GradientMap two-stop mid")
+var gEven = GradientMap((Blue, White, Red))
+expect(approx(gEven.rgb(0)[2], 1, 1e-9) && approx(gEven.rgb(1)[0], 1, 1e-9), "GradientMap even stops")
+var gList = GradientMap([Blue, White, Red])
+expect(approx(gList.rgb(0.5)[0], gEven.rgb(0.5)[0], 1e-12), "GradientMap List of Colors")
+var gPos = GradientMap(((0.0, Black), (0.25, White), (1.0, Red)))
+expect(approx(gPos.rgb(0.25)[0], 1, 1e-9), "GradientMap positioned stop")
+var gUnsorted = GradientMap([(0.5, White), (0.0, Black), (1.0, Red)])
+expect(approx(gUnsorted.rgb(0)[0], 0, 1e-9) && approx(gUnsorted.rgb(0.5)[0], 1, 1e-9), "GradientMap sorts stops")
+
+var faded = GradientMap(Color(1,0,0,0), Color(1,0,0,1))
+var fc = faded.color(0.5)
+expect(approx(fc.a, 0.5, 1e-9) && approx(fc.r, 1, 1e-9), "color() keeps map alpha")
+var fs = faded._sample(0.25)
+expect(approx(faded.color(0.25).a, fs.a, 1e-12) && approx(faded.color(0.25).r, fs.r, 1e-12), "GradientMap.color is _sample")
+
+var gOut = GrayMap().color(1.5)
+expect(approx(gOut.r, 1.5, 1e-9), "ColorMap.color does not clamp")
+expect(approx(GrayMap().rgb(1.5)[0], 1.5, 1e-9), "GrayMap.rgb extrapolates")
+expect(approx(vir.rgb(-1)[0], vir.rgb(0)[0], 1e-12), "Chebyshev clamps domain low")
+expect(approx(vir.rgb(2)[0], vir.rgb(1)[0], 1e-12), "Chebyshev clamps domain high")
+expect(vir.rgb(0.5)[0] >= 0 && vir.rgb(0.5)[0] <= 1, "Chebyshev RGB in [0,1]")
+
+var absFail = false
+try {
+  Coloring().rgb(0)
+} catch {
+  "ClrAbstract" : absFail = true
+}
+expect(absFail, "Coloring.rgb abstract")
 
 /* ---- Show MD: Color vs Coloring ---- */
 var pos = Matrix([[0, 1, 0.5], [0, 0, 0.8], [0, 0, 0]])
