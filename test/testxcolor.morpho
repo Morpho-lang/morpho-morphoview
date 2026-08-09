@@ -35,6 +35,13 @@ expect(greenA.a == 0.4, "HSV with alpha")
 
 expect(approx(HSV(-40, 1, 1).r, HSV(320, 1, 1).r, 1e-9), "HSV negative hue wrap")
 
+/* floor sector + ramp: yellow, mid-sector, former [330,360) crash band */
+var yel = HSV(60, 1, 1)
+expect(approx(yel.r, 1, 1e-9) && approx(yel.g, 1, 1e-9) && approx(yel.b, 0, 1e-9), "HSV yellow")
+expect(approx(HSV(30, 1, 1).g, 0.5, 1e-9), "HSV 30°")
+var h330 = HSV(330, 1, 1)
+expect(approx(h330.r, 1, 1e-9) && approx(h330.b, 0.5, 1e-9), "HSV 330°")
+
 /* ---- Gray / arithmetic ---- */
 expect(Gray(0.5).r == 0.5 && Gray(0.5).a == 1, "Gray")
 expect(Gray(0.5, 0.2).a == 0.2, "Gray with alpha")

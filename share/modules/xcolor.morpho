@@ -115,7 +115,8 @@ fn Gray(x, a) {
   return Color(x, x, x, a)
 }
 
-/** Hue Saturation Value constructors: Hue is in degrees (h) and (s, v) 0–1 -> Color. */
+/** Hue Saturation Value: h in degrees, s and v in [0,1] → Color.
+ *  Use floor for the sector — Morpho Int() rounds. */
 fn HSV(h, s, v) {
   return HSV(h, s, v, 1)
 }
@@ -123,13 +124,14 @@ fn HSV(h, s, v) {
 fn HSV(h, s, v, a) {
   var hh = h - 360*floor(h/360) // [0, 360)
   var c = v*s
-  var sector = Int(hh/60)
+  var sector = Int(floor(hh/60))
   var f = hh/60 - Float(sector)
-  var x = c*(1 - abs(2*f - 1))
+  var x = c*f       // rises within sector
+  var y = c*(1 - f) // falls within sector
   var m = v - c
   var rgb = (
-    (c, x, 0), (x, c, 0), (0, c, x),
-    (0, x, c), (x, 0, c), (c, 0, x)
+    (c, x, 0), (y, c, 0), (0, c, x),
+    (0, y, c), (x, 0, c), (c, 0, y)
   )
   var t = rgb[sector]
   return Color(t[0]+m, t[1]+m, t[2]+m, a)
