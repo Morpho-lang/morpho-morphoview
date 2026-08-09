@@ -82,7 +82,7 @@ expect(anyHasAlpha(buf6.lines, "0.3"), "recolor Color.a → alpha 0.3")
 /* ---- Color API smoke ---- */
 var c = Color(0.2, 0.4, 0.6, 0.8)
 expect(c.alpha(0) == 0.8, "alpha()")
-expect(c.rgba(0).count() == 4 && c.rgba(0)[3] == 0.8, "rgba()")
+expect(istuple(c.rgba(0)) && c.rgba(0).count() == 4 && c.rgba(0)[3] == 0.8, "rgba() Tuple")
 expect(Red.a == 1, "opaque named color has a=1")
 expect(Red.alpha(0) == 1, "alpha() is 1 for opaque")
 

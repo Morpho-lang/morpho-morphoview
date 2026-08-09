@@ -2,16 +2,18 @@
 
 import constants
 
+var _ClrBadInitErr = Error("ClrBadInit", "Color expects RGB, RGBA, or a length-3/4 List, Tuple, or Matrix.")
+
 /** Shared kind: anything sampleable via red/green/blue/rgb/rgba (the color protocol). */
 class Coloring {
   red(x) { return 0 }
   green(x) { return 0 }
   blue(x) { return 0 }
   alpha(x) { return 1 }
-  rgb(x) { return [self.red(x), self.green(x), self.blue(x)] }
+  rgb(x) { return (self.red(x), self.green(x), self.blue(x)) }
   rgba(x) {
     var c = self.rgb(x)
-    return [c[0], c[1], c[2], self.alpha(x)]
+    return (c[0], c[1], c[2], self.alpha(x))
   }
 }
 
@@ -29,12 +31,26 @@ class Color is Coloring {
     self.b = b
     self.a = a
   }
+
+  /** Coerce a length-3/4 sequence into the canonical inits.
+   *  Matrix uses column-major single-index access, so the same path works. */
+  _initSeq(seq) {
+    var n = seq.count()
+    if (n == 3) { self.init(seq[0], seq[1], seq[2]); return }
+    if (n == 4) { self.init(seq[0], seq[1], seq[2], seq[3]); return }
+    _ClrBadInitErr.throw()
+  }
+  init(List col) { self._initSeq(col) }
+  init(Tuple col) { self._initSeq(col) }
+  init(Matrix col) { self._initSeq(col) }
+  init(x) { _ClrBadInitErr.throw() }
+
   red(x) { return self.r }
   green(x) { return self.g }
   blue(x) { return self.b }
   alpha(x) { return self.a }
-  rgb(x) { return [self.r, self.g, self.b] }
-  rgba(x) { return [self.r, self.g, self.b, self.a] }
+  rgb(x) { return (self.r, self.g, self.b) }
+  rgba(x) { return (self.r, self.g, self.b, self.a) }
 
   /* Binary ops: Morpho routes +/−/× via add, sub, mul/mulr.
    * addr/subr omitted — only Color±Color is supported (left always handles it). */
@@ -177,7 +193,7 @@ class ChebyshevMap is ColorMap {
       b+=c[i]*self.B[i]
     }
 
-    return [r,g,b]
+    return (r,g,b)
   }
 }
 

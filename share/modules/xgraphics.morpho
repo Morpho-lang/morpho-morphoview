@@ -1385,11 +1385,11 @@ class Show {
   _itemRgb(GraphicsPrimitive item) { return self._rgbValue(item.color) }
   _itemRgb(item) { return _defaultRgb }
 
-  /** Normalize Matrix / list / Coloring values to RGB. */
-  _rgbValue(Color col) { return [col.r, col.g, col.b] }
+  /** Normalize Matrix / list / tuple / Coloring values to RGB (via protocol, not fields). */
   _rgbValue(Coloring col) { return col.rgb(0) }
   _rgbValue(Matrix col) { return [col[0,0], col[1,0], col[2,0]] }
   _rgbValue(List col) { return col }
+  _rgbValue(Tuple col) { return col }
   _rgbValue(col) {
     if (isnil(col)) return _defaultRgb
     // Upstream `import color` (not Coloring): shared rgb(x) interface.
@@ -1522,12 +1522,15 @@ class Show {
     return false
   }
 
-  /** Alpha from Color.a / 4-vector / Coloring (maps → opaque). */
+  /** Alpha from Coloring.alpha / 4-vector (maps default opaque via protocol). */
   _clamp01(a) { return (a < 0) ? 0 : ((a > 1) ? 1 : a) }
 
-  _colorAlpha(Color col) { return self._clamp01(col.a) }
-  _colorAlpha(Coloring col) { return 1 }
+  _colorAlpha(Coloring col) { return self._clamp01(col.alpha(0)) }
   _colorAlpha(List col) {
+    if (col.count() < 4) return 1
+    return self._clamp01(col[3])
+  }
+  _colorAlpha(Tuple col) {
     if (col.count() < 4) return 1
     return self._clamp01(col[3])
   }
