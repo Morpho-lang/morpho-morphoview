@@ -4,7 +4,7 @@ import constants
 
 var _ClrBadInitErr = Error("ClrBadInit", "Color expects RGB, RGBA, or a length-3/4 List, Tuple, or Matrix.")
 
-/** Shared kind: anything sampleable via red/green/blue/rgb/rgba (the color protocol). */
+/** Defines the color protocol: anything sampleable via red/green/blue/rgb/rgba. */
 class Coloring {
   red(x) { return 0 }
   green(x) { return 0 }
@@ -99,7 +99,7 @@ fn Gray(x, a) {
   return Color(x, x, x, a)
 }
 
-/** HSV in degrees (h) and 0–1 (s, v) → Color. */
+/** Hue Saturation Value constructors: Hue is in degrees (h) and (s, v) 0–1 -> Color. */
 fn HSV(h, s, v) {
   return HSV(h, s, v, 1)
 }
