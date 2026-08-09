@@ -17,7 +17,7 @@ import xcolor
 import broadcast
 
 var _eps = 1e-15
-var _defaultRgb = [0.5, 0.5, 0.5]
+var _defaultRgb = (0.5, 0.5, 0.5)
 var _fntntfnd = Error("FntNtFnd", "Font not found.")
 var _txtdrnvrtprll = Error("TxtDrnVrtPrll", "Direction and vertical must not be parallel or zero.")
 
@@ -1387,7 +1387,7 @@ class Show {
 
   /** Normalize Matrix / list / tuple / Coloring values to RGB (via protocol, not fields). */
   _rgbValue(Coloring col) { return col.rgb(0) }
-  _rgbValue(Matrix col) { return [col[0,0], col[1,0], col[2,0]] }
+  _rgbValue(Matrix col) { return (col[0,0], col[1,0], col[2,0]) }
   _rgbValue(List col) { return col }
   _rgbValue(Tuple col) { return col }
   _rgbValue(col) {

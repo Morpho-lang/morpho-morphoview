@@ -104,7 +104,7 @@ var Magenta = Color(1,0,1)
 var Yellow = Color(1,1,0)
 var Brown = Color(0.6,0.4,0.2)
 var Orange = Color(1,0.5,0)
-var Pink = Color(1,0.5,0.5) 
+var Pink = Color(1,0.5,0.5)
 var Purple = Color(0.5,0,0.5)
 
 fn Gray(x) {
@@ -168,15 +168,15 @@ class HueMap is ColorMap {
 
 /* Color maps expanded onto Chebyshev polynomials */
 
-var _errChebyShevOrderInconsistent = Error("ClrChbyshvOrdr", "Order of Chebyshev approximation inconsistent.") 
+var _ClrChbyshvOrdrErr = Error("ClrChbyshvOrdr", "Order of Chebyshev approximation inconsistent.")
 
 class ChebyshevMap is ColorMap {
   init(R,G,B) {
-    self.R = R 
+    self.R = R
     self.G = G
     self.B = B
-    self.order = R.count() 
-    if (G.count()!=self.order || B.count()!=self.order) _errChebyShevOrderInconsistent.throw()  
+    self.order = R.count()
+    if (G.count()!=self.order || B.count()!=self.order) _ClrChbyshvOrdrErr.throw()
   }
 
   _chebyshev(t) {
