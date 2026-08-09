@@ -67,12 +67,22 @@ expect(ChebyshevMap.superclass() == ColorMap, "ChebyshevMap → ColorMap")
 var vir = ViridisMap()
 var vg = vir.rgb(0.5)
 expect(istuple(vg) && vg.count() == 3, "ViridisMap.rgb Tuple")
+expect(ismatrix(vir.R) && ismatrix(vir.G) && ismatrix(vir.B), "Chebyshev coeffs are Matrix")
 expect(!vir.has("r"), "maps have no fixed r")
 expect(vir.alpha(0) == 1, "Coloring.alpha default")
 var va = vir.rgba(0.5)
 expect(istuple(va) && va.count() == 4, "Coloring.rgba Tuple")
+expect(approx(vir.red(0.5), vg[0], 1e-12), "Chebyshev red matches rgb")
 expect(istuple(Red.rgb(0)) && Red.rgb(0).count() == 3, "Color.rgb Tuple")
 expect(istuple(Red.rgba(0)) && Red.rgba(0)[3] == 1, "Color.rgba Tuple")
+
+var badCheby = false
+try {
+  ChebyshevMap([1, 2], [1], [1, 2])
+} catch {
+  "ClrChbyshvOrdr" : badCheby = true
+}
+expect(badCheby, "Chebyshev order mismatch")
 
 /* ---- Color coerce inits ---- */
 var fromList = Color([0.1, 0.2, 0.3])
