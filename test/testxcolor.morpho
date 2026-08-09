@@ -51,6 +51,11 @@ expect(approx((Red*0.5).r, 0.5, 1e-9), "Color * scalar")
 expect(approx((Red - Green).g, -1, 1e-9), "Color - Color")
 expect(approx((Red*Blue).r, 0, 1e-9) && approx((Red*White).r, 1, 1e-9), "Color * Color")
 expect(approx(((1-0.5)*Red + 0.5*Blue).r, 0.5, 1e-9), "blend via operators")
+expect(approx(Red.lighten(0.5).g, 0.5, 1e-9), "Color.lighten")
+expect(approx(Red.darken(0.5).r, 0.5, 1e-9), "Color.darken")
+expect(approx(Red.lighten().g, 1/3, 1e-9), "Color.lighten default")
+expect(approx(Red.darken().r, 2/3, 1e-9), "Color.darken default")
+expect(approx(Color(1,0,0,0.4).lighten(0.5).a, 0.7, 1e-9), "lighten blends alpha")
 
 /* ---- Coloring hierarchy ---- */
 expect(Color.superclass() == Coloring, "Color → Coloring")
