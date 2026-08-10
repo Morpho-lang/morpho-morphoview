@@ -21,7 +21,7 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 - [ ] Keep core `graphics.morpho` free of `meshtools` (prototype: local sphere tessellation in xgraphics; examples like soapbubble may still `import meshtools`)
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
 - [ ] Extend morpho `color` module with alpha (`Color(r,g,b)` / `Color(r,g,b,a)` via MD, always store `a`; `rgba` / `alpha`); `Coloring` shared kind; ColorMap not a Color; wire `Show` via Coloring MD — **prototyped in package `xcolor` + `xgraphics`**
-- [ ] `xcolor` backlog: `Normalizer` / `LinearNorm` / `LogNorm` + `ColorScale` (under/over/bad); `ListedMap` + `reverse` / `truncate` / `discretize` / `withAlpha`; diverging maps + scientific cyclic (`PhaseMap`); optional `HueMap` → `HSVMap` alias; bulk `colors(values)` if mesh coloring needs it
+- [ ] `xcolor` backlog: `Normalizer` / `LinearNorm` / `LogNorm` + `ColorScale` (under/over/bad); `ListedMap` + `reverse` / `truncate` / `discretize` / `withAlpha`; perceptual / named scientific cyclic (`PhaseMap`); optional `HueMap` → `HSVMap` alias; bulk `colors(values)` if mesh coloring needs it
 
 ### Transport
 

@@ -165,6 +165,19 @@ expect(approx(fc.a, 0.5, 1e-9) && approx(fc.r, 1, 1e-9), "color() keeps map alph
 var fs = faded._sample(0.25)
 expect(approx(faded.color(0.25).a, fs.a, 1e-12) && approx(faded.color(0.25).r, fs.r, 1e-12), "GradientMap.color is _sample")
 
+var div = DivergingMap(Blue, White, Red)
+expect(div.superclass() == GradientMap, "DivergingMap → GradientMap")
+expect(approx(div.rgb(0.5)[0], 1, 1e-9) && approx(div.rgb(0.5)[2], 1, 1e-9), "DivergingMap mid white")
+expect(approx(div.rgb(0)[2], 1, 1e-9) && approx(div.rgb(1)[0], 1, 1e-9), "DivergingMap ends")
+var divA = DivergingMap(Blue, White, Red, 0.25)
+expect(approx(divA.rgb(0.25)[0], 1, 1e-9), "DivergingMap asymmetric center")
+
+var cyc = CyclicMap([Red, Green, Blue])
+expect(cyc.superclass() == GradientMap, "CyclicMap → GradientMap")
+expect(approx(cyc.rgb(0)[0], cyc.rgb(1)[0], 1e-12), "CyclicMap closes at 1")
+expect(approx(cyc.rgb(1.25)[0], cyc.rgb(0.25)[0], 1e-12), "CyclicMap wraps")
+expect(approx(cyc.rgb(-0.25)[0], cyc.rgb(0.75)[0], 1e-12), "CyclicMap wraps negative")
+
 var gOut = GrayMap().color(1.5)
 expect(approx(gOut.r, 1.5, 1e-9), "ColorMap.color does not clamp")
 expect(approx(GrayMap().rgb(1.5)[0], 1.5, 1e-9), "GrayMap.rgb extrapolates")

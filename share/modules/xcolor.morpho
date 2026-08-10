@@ -5,7 +5,9 @@
  * Provides a protocol (Coloring) for colors that can be sampled using RGB components,
  * as well as a spot color (Color) class that implements the protocol.
  * ColorMaps are classes that implement the Coloring protocol and can be sampled to produce a color.
- * Also provides some predefined colors and color maps (Viridis/Magma/Inferno/Plasma). 
+ * GradientMap provides arbitrary piecewise-linear maps, with
+ * DivergingMap and CyclicMap as special forms.
+ * Also provides some predefined colors and color maps (Viridis/Magma/Inferno/Plasma/Tundra). 
  ******************************************************************************************* */
 
 import constants
@@ -149,6 +151,31 @@ class GradientMap is ColorMap {
   alpha(x) { return self._sample(x).a }
 }
 
+/** low | mid | high; optional center in (0,1), default 0.5. */
+class DivergingMap is GradientMap {
+  init(Color low, Color mid, Color high) { self.init(low, mid, high, 0.5) }
+  init(Color low, Color mid, Color high, center) {
+    if (center <= 0 || center >= 1) _ClrGradInitErr.throw()
+    super.init(((0, low), (Float(center), mid), (1, high)))
+  }
+}
+
+var BlueWhiteRedMap = DivergingMap(Blue, White, Red)
+
+/** Periodic stop-based map: wraps x via x - floor(x); closes the loop to colors[0]. */
+class CyclicMap is GradientMap {
+  init(colors) {
+    var n = colors.count()
+    if (n < 2) _ClrGradInitErr.throw()
+    var stops = []
+    for (c, i in colors) stops.append((Float(i)/Float(n), c))
+    stops.append((1, colors[0]))
+    super.init(stops)
+  }
+
+  _sample(x) { return super._sample(x - floor(x)) }
+}
+
 class GrayMap is ColorMap {
   rgb(x) { return (x, x, x) }
 }
@@ -180,9 +207,7 @@ class ChebyshevMap is ColorMap {
   }
 }
 
-/* Colormaps corresponding to the MPL colormaps:
-   http://bids.github.io/colormap/ 
-   Here approximated by an expension in Chebyshev polynomials */
+/* Smooth Chebyshev approximations to the Matplotlib colormaps: http://bids.github.io/colormap/ */
 
 class ViridisMap is ChebyshevMap {
   init() {
