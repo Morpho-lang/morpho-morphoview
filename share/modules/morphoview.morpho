@@ -90,7 +90,7 @@ class View with Listener {
   }
 
   /** Bind, spawn viewer, send first chunk, wait for ok. */
-  open(commands) {
+  open(String commands) {
     if (!isnil(self.sock)) {
       print "morphoview: View already open"
       return false
@@ -110,7 +110,7 @@ class View with Listener {
     return ok
   }
 
-  update(commands) {
+  update(String commands) {
     if (self.closed) return false
     return self._sendWait(commands)
   }

@@ -1,0 +1,44 @@
+// xplot Phase 1: Plot is Scene + veneers (no GUI required).
+// Expect: prints "ok" then exits.
+//
+//   morpho6 tests/plot/phase1.morpho
+
+import meshtools
+import xplot
+import xcolor
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+var m = LineMesh(fn (t) [cos(t), sin(t), 0], 0...2*Pi:Pi/6, closed=true)
+var p = Plot(m, color=Red)
+expect(p.displaylist.count() == 12, "expected 12 line cylinders")
+expect(p.entries.contains("lines"), "missing lines entries")
+expect(p.source.count(0) == m.count(0), "source mismatch")
+
+var p2 = plotmesh(m)
+expect(p2.displaylist.count() == 12, "plotmesh veneer failed")
+
+var f = Field(m, fn (x, y, z) x)
+var pf = Plot(f)
+expect(!isnil(pf.cmin) && !isnil(pf.cmax), "field range missing")
+
+var s = Selection(m)
+var ps = Plot(s)
+expect(ps.displaylist.count() >= 1, "Plot(selection) empty")
+var ps2 = plotselection(m, s)
+expect(ps2.displaylist.count() >= 1, "plotselection veneer empty")
+
+var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
+var pf2 = Plot(am, color=Color(0.2, 0.6, 0.9))
+expect(pf2.entries.contains("faces"), "missing faces entry")
+
+var sb = ScaleBar(length=0.5, posn=[1.2, 0.5, 0])
+var pf3 = Plot(Field(am, fn (x, y, z) x), style="interpolate", scalebar=sb)
+expect(pf3.entries.contains("colorbar"), "scalebar entries missing")
+
+print "ok"

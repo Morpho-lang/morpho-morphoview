@@ -1,0 +1,22 @@
+// xplot: View(Plot(mesh / field)) — Phase 1 yardstick.
+//
+//   morpho6 examples/xplot.morpho
+//
+// Close the viewer window to exit.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+
+import morphoview
+import meshtools
+import xplot
+import xcolor
+
+var m = AreaMesh(fn (u, v) [u, v, 0.15*sin(3*u)*cos(2*v)],
+                 -1..1:0.2, -1..1:0.2)
+var f = Field(m, fn (x, y, z) x)
+
+var p = Plot(f, style="interpolate", colormap=ViridisMap(),
+             title="xplot", background=Color(0.08, 0.09, 0.11))
+
+var v = View(p, connecttimeout=20000)
+v.wait()
+if (!v.closed) v.close()
