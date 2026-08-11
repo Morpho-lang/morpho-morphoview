@@ -1,0 +1,74 @@
+// xplotripple — traveling-wave membrane with live View.morph via Plot.refresh(view).
+// Shape + colors update each frame; colormap cycles occasionally.
+//
+//   morpho6 examples/xplotripple.morpho
+//
+// Close the viewer window to exit.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+
+import morphoview
+import meshtools
+import xplot
+import xcolor
+
+var dt = 1/30
+var maps = [ViridisMap(), MagmaMap(), PlasmaMap(), InfernoMap(), BlueWhiteRedMap]
+var mapNames = ["Viridis", "Magma", "Plasma", "Inferno", "BlueWhiteRed"]
+var mapIdx = 0
+
+/** Radial packet + interfering sheet. */
+fn wave(x, y, t) {
+  var r = sqrt(x*x + y*y)
+  var packet = 0.55*exp(-0.35*r*r)*sin(6.5*r - 5*t)
+  var sheet = 0.22*sin(2.5*x + 2.2*t)*cos(2*y - 1.8*t)
+  return packet + sheet
+}
+
+fn applyWave(mesh, t) {
+  var vert = mesh.vertexmatrix().clone()
+  var nv = vert.dimensions()[1]
+  for (i in 0...nv) {
+    vert[2, i] = wave(vert[0, i], vert[1, i], t)
+  }
+  mesh.setvertexmatrix(vert)
+}
+
+fn heightField(mesh) {
+  return Field(mesh, fn (x, y, z) z)
+}
+
+var mesh = AreaMesh(fn (u, v) [u, v, 0], -1.5..1.5:0.1, -1.5..1.5:0.1)
+applyWave(mesh, 0)
+
+var p = Plot(heightField(mesh), style="interpolate", colormap=maps[0],
+             cmin=-0.7, cmax=0.7,
+             axes=true,
+             title="xplotripple (Viridis)",
+             background=Color(0.08, 0.09, 0.11))
+
+var v = View(p, connecttimeout=20000)
+var t = 0.0
+var frame = 0
+
+while (!v.closed) {
+  t += dt
+  frame += 1
+
+  applyWave(mesh, t)
+  p.source = heightField(mesh)
+
+  // Phase 5: cycle colormap / center on the Plot, then morph through the View.
+  if (mod(frame, 90) == 0) {
+    mapIdx = mod(mapIdx + 1, maps.count())
+    p.colormap = maps[mapIdx]
+    p.center = (mapIdx == 4) ? 0 : nil
+    p.title = "xplotripple (${mapNames[mapIdx]})"
+  }
+
+  if (!p.refresh(v)) break
+
+  v.poll(timeoutms=0)
+  System.sleep(dt)
+}
+
+if (!v.closed) v.close()

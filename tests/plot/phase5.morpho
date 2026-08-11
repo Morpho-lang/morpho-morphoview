@@ -1,0 +1,93 @@
+// xplot Phase 5: semantic Scene mutations (axes / colormap / range / center).
+// Expect: prints "ok" then exits.
+//
+//   morpho6 tests/plot/phase5.morpho
+
+import meshtools
+import xplot
+import xcolor
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn approx(a, b) { return abs(a - b) < 1e-9 }
+fn approxEps(a, b, eps) { return abs(a - b) < eps }
+
+fn faceRgb0(plot) {
+  var face = plot.findEntry(plot.entries["faces"][0]).item
+  return face.color.column(0)
+}
+
+/* ---- axes(false/true) ---- */
+var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
+var pAx = Plot(am, color=Red, axes=true)
+expect(pAx.entries.contains("axes"), "axes present after construct")
+var nBefore = pAx.displaylist.count()
+expect(pAx.axes(false), "axes(false) ok")
+expect(!pAx.entries.contains("axes"), "axes role cleared")
+expect(pAx.displaylist.count() < nBefore, "axes entries removed from scene")
+expect(pAx.wantAxes == false, "wantAxes false")
+
+expect(pAx.axes(true), "axes(true) ok")
+expect(pAx.entries.contains("axes"), "axes redrawn")
+expect(pAx.entries["axes"].count() > 1, "wire + labels")
+expect(pAx.wantAxes, "wantAxes true")
+
+/* ---- field semantic methods store kwargs ---- */
+var f = Field(am, fn (x, y, z) x)
+var p = Plot(f, style="interpolate", colormap=ViridisMap(), colorbar=true,
+             cmin=0, cmax=1)
+expect(p.style == "interpolate", "stores style")
+expect(approx(p.cmin, 0) && approx(p.cmax, 1), "stores range")
+expect(p.entries.contains("faces") && p.entries.contains("colorbar"), "faces+colorbar")
+
+var rgbViridis0 = Matrix(ViridisMap().rgb(0))
+var rgb0 = faceRgb0(p)
+expect(approxEps(rgb0[0], rgbViridis0[0], 1e-5) &&
+       approxEps(rgb0[1], rgbViridis0[1], 1e-5) &&
+       approxEps(rgb0[2], rgbViridis0[2], 1e-5), "initial colormap at low end")
+
+/* ---- colormap(...) rebuilds geometry colors ---- */
+var nFaces = p.entries["faces"].count()
+expect(p.colormap(MagmaMap()), "colormap swap")
+expect(p.entries.contains("faces"), "faces after colormap")
+expect(p.entries["faces"].count() == nFaces, "same face entry count")
+expect(p.entries.contains("colorbar"), "colorbar rebuilt")
+
+var rgbMagma0 = Matrix(MagmaMap().rgb(0))
+rgb0 = faceRgb0(p)
+expect(approxEps(rgb0[0], rgbMagma0[0], 1e-5) &&
+       approxEps(rgb0[1], rgbMagma0[1], 1e-5) &&
+       approxEps(rgb0[2], rgbMagma0[2], 1e-5), "Magma at low end after swap")
+
+/* ---- range(...) ---- */
+expect(p.range(0.5, 1), "range ok")
+expect(approx(p.cmin, 0.5) && approx(p.cmax, 1), "range stored")
+// x=0 is below cmin → clamped → t=0 → still Magma(0)
+rgb0 = faceRgb0(p)
+expect(approxEps(rgb0[0], rgbMagma0[0], 1e-5) &&
+       approxEps(rgb0[1], rgbMagma0[1], 1e-5) &&
+       approxEps(rgb0[2], rgbMagma0[2], 1e-5), "clamped low stays map(0)")
+
+/* ---- center(...) for diverging ---- */
+var pDiv = Plot(f, style="interpolate", colormap=BlueWhiteRedMap, cmin=-1, cmax=1)
+expect(pDiv.center(0), "center ok")
+expect(approx(pDiv.center, 0), "center stored")
+// At x=0 → normalized 0.5 → white mid of BlueWhiteRed
+var mid = Matrix(BlueWhiteRedMap.rgb(0.5))
+rgb0 = faceRgb0(pDiv)
+expect(approxEps(rgb0[0], mid[0], 1e-5) &&
+       approxEps(rgb0[1], mid[1], 1e-5) &&
+       approxEps(rgb0[2], mid[2], 1e-5), "center maps mid to white")
+
+/* ---- no-op on non-Field ---- */
+var pMesh = Plot(am, color=Blue)
+expect(!pMesh.colormap(ViridisMap()), "colormap rejected on mesh")
+expect(!pMesh.range(0, 1), "range rejected on mesh")
+expect(!pMesh.center(0), "center rejected on mesh")
+
+print "ok"

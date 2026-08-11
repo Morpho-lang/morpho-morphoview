@@ -7,6 +7,7 @@
  * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot.
  * Presentation: axes=true (domain frame) + colorbar=true / ColorBar (ScaleBar alias).
  * Field coloring: linear normalize (safe on uniform fields) + optional center= for diverging maps.
+ * Live: axes(bool), colormap(...), range(...), center(...) mutate Scene entries (not recolor for fields).
  * Mesh helpers still come from upstream meshtools (AreaMesh / MeshMerge for ColorBar).
  ******************************************************************************************* */
 
@@ -580,6 +581,13 @@ class Plot is Scene {
     self.cmin = nil
     self.cmax = nil
     self.center = nil
+    // Draw kwargs retained for live colormap/range refresh (Field plots).
+    self.selection = nil
+    self.grade = nil
+    self.style = nil
+    self.scale = true
+    self.filter = nil
+    self.transmit = nil
   }
 
   _finish() {
@@ -591,6 +599,13 @@ class Plot is Scene {
     if (isnil(id)) return
     if (!self.entries.contains(role)) self.entries[role] = []
     self.entries[role].append(id)
+  }
+
+  /** Remove every entry under a semantic role and drop the role key. */
+  _clearRole(role) {
+    if (!self.entries.contains(role)) return
+    for (id in self.entries[role]) self.remove(id)
+    self.entries.remove(role)
   }
 
   _drawAxes(nticks=5) {
@@ -626,6 +641,121 @@ class Plot is Scene {
 
     var bar = _colorBarNew(length=length, posn=posn, colormap=self.colormap)
     _mergeGraphicsInto(self, bar.draw(self.cmin, self.cmax), "colorbar")
+  }
+
+  /** Toggle domain-frame chrome via stored entry IDs. */
+  axes(show) {
+    if (show) {
+      self.wantAxes = true
+      if (!self.entries.contains("axes")) self._drawAxes()
+    } else {
+      self.wantAxes = false
+      self._clearRole("axes")
+    }
+    return true
+  }
+
+  /** Re-sample Field → rebuild data entries (+ colorbar if present). Not for Mesh/Selection.
+   *  With a View argument: morph interpolate faces via U V (live animation). */
+  _refreshField() {
+    return self._refreshFieldWithView(nil)
+  }
+
+  _refreshField(view) {
+    return self._refreshFieldWithView(view)
+  }
+
+  _refreshFieldWithView(view) {
+    if (!isfield(self.source)) return false
+
+    var hadColorbar = self.entries.contains("colorbar") || self.wantColorbar
+    var info = _fieldColors(self.source, selection=self.selection, grade=self.grade,
+                            colormap=self.colormap, style=self.style, scale=self.scale,
+                            cmin=self.cmin, cmax=self.cmax, center=self.center)
+    var mesh = info[0], sel = info[1], showgrades = info[2], col = info[3], cm = info[4], bnd = info[5]
+    self.colormap = cm
+    self.cmin = bnd[0]
+    self.cmax = bnd[1]
+
+    // Live path: same-length faces TriangleComplex → View.morph (U V).
+    if (!isnil(view) && _styleHas(self.style, "interpolate") &&
+        self.entries.contains("faces") && self.entries["faces"].count() == 1 &&
+        !self.entries.contains("points") && !self.entries.contains("lines")) {
+      var vertMat = _vertexMatrix3(mesh)
+      var bb = _scientificBounds(mesh)
+      self.bounds = bb
+      var planar = _planarAxis(bb)
+      var centroid = Matrix(3)
+      for (x, i in bb) centroid[i] = x[0] + (x[1] - x[0])/2
+      var got = self._facesItem(mesh, sel, col, self.filter, self.transmit,
+                                vertMat, bb, planar, centroid)
+      if (isnil(got)) return false
+      var id = self.entries["faces"][0]
+      var entry = self.findEntry(id)
+      if (!isnil(entry)) entry.flat = got[1]
+      return view.morph(id, got[0])
+    }
+
+    self._clearRole("points")
+    self._clearRole("lines")
+    self._clearRole("faces")
+    self._meshInto(mesh, selection=sel, grade=showgrades, color=col,
+                   filter=self.filter, transmit=self.transmit, style=self.style)
+
+    if (hadColorbar) {
+      self._clearRole("colorbar")
+      self._drawColorbar()
+    }
+    return true
+  }
+
+  /** Re-sample Field and rebuild geometry. Headless / full redefine. */
+  refresh() {
+    if (!isfield(self.source)) return false
+    return self._refreshField()
+  }
+
+  /** Re-sample Field and morph faces through a live View (U V). */
+  refresh(view) {
+    if (!isfield(self.source)) return false
+    return self._refreshField(view)
+  }
+
+  /** Replace field colormap and rebuild colored geometry. */
+  colormap(cm) {
+    if (!isfield(self.source)) return false
+    self.colormap = isnil(cm) ? ViridisMap() : cm
+    return self._refreshField()
+  }
+
+  /** Set explicit field value range and rebuild. */
+  range(cmin, cmax) {
+    if (!isfield(self.source)) return false
+    self.cmin = cmin
+    self.cmax = cmax
+    return self._refreshField()
+  }
+
+  /** Clear explicit range (use data bounds) and rebuild. */
+  range() {
+    if (!isfield(self.source)) return false
+    self.cmin = nil
+    self.cmax = nil
+    return self._refreshField()
+  }
+
+  /** Set diverging-map center and rebuild. */
+  center(c) {
+    if (!isfield(self.source)) return false
+    self.center = c
+    return self._refreshField()
+  }
+
+  /** Clear diverging-map center and rebuild. */
+  center() {
+    if (!isfield(self.source)) return false
+    self.center = nil
+    return self._refreshField()
   }
 
   /** Grade 0: PointCloud by default; style spheres/thick → Sphere loop. */
@@ -713,10 +843,11 @@ class Plot is Scene {
   }
 
   /** Grade 2: TriangleComplex; discrete colors → GraphicsEntry.flat.
-   *  Interpolate path uses smooth vertex normals; discrete uses per-face normals. */
-  _facesInto(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid) {
+   *  Interpolate path uses smooth vertex normals; discrete uses per-face normals.
+   *  Returns [TriangleComplex, flat] or nil. */
+  _facesItem(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid) {
     var faces = mesh.connectivitymatrix(0, 2)
-    if (!issparse(faces)) return
+    if (!issparse(faces)) return nil
 
     var fcol = _plotColorForGrade(2, color)
     var nf = mesh.count(2)
@@ -769,11 +900,16 @@ class Plot is Scene {
       nnt += 1
     }
 
+    return [TriangleComplex(nvert, norm, ncol, tri, filter=filter, transmit=transmit),
+            !interpolate]
+  }
+
+  _facesInto(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid) {
+    var got = self._facesItem(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid)
+    if (isnil(got)) return
     // Discrete face/selection colors: unlit facets (GraphicsEntry.flat).
     // Interpolated per-vertex field colors + smooth normals keep shaded lighting.
-    self._recordEntry("faces",
-      self.display(TriangleComplex(nvert, norm, ncol, tri, filter=filter, transmit=transmit),
-                   flat=!interpolate))
+    self._recordEntry("faces", self.display(got[0], flat=got[1]))
   }
 
   /** Display mesh grades. Default: PointCloud / LineSet / TriangleComplex. */
@@ -811,6 +947,13 @@ class Plot is Scene {
 
   _drawField(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
              filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil, center=nil) {
+    self.selection = selection
+    self.grade = grade
+    self.style = style
+    self.scale = scale
+    self.filter = filter
+    self.transmit = transmit
+
     var info = _fieldColors(field, selection=selection, grade=grade, colormap=colormap,
                             style=style, scale=scale, cmin=cmin, cmax=cmax, center=center)
     var mesh = info[0], sel = info[1], showgrades = info[2], col = info[3], cm = info[4], bnd = info[5]

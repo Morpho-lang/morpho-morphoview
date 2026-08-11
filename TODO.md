@@ -22,7 +22,7 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
 - [ ] Extend morpho `color` module with alpha (`Color(r,g,b)` / `Color(r,g,b,a)` via MD, always store `a`; `rgba` / `alpha`); `Coloring` shared kind; ColorMap not a Color; wire `Show` via Coloring MD — **prototyped in package `xcolor` + `xgraphics`**
 - [ ] `xcolor` backlog: `Normalizer` / `LinearNorm` / `LogNorm` + `ColorScale` (under/over/bad); `ListedMap` + `reverse` / `truncate` / `discretize`; perceptual / named scientific cyclic (`PhaseMap`); optional `HueMap` → `HSVMap` alias; bulk `colors(values)` if mesh coloring needs it
-- [ ] Modernize morpho `plot` against xgraphics / xcolor — **prototyped in package `xplot`** (Phases 1–4: `Plot is Scene`, bulk primitives, axes/`ColorBar`, linear normalize + `center=`; ScaleBar still uses upstream `meshtools`; Phases 5–6 pending)
+- [ ] Modernize morpho `plot` against xgraphics / xcolor — **prototyped in package `xplot`** (Phases 1–5: `Plot is Scene`, bulk primitives, axes/`ColorBar`, linear normalize + `center=`, live `axes`/`colormap`/`range`/`center`; ScaleBar still uses upstream `meshtools`; Phase 6 `filter`/`transmit` excision pending; optional `plotvectors` deferred)
 
 ### Transport
 
@@ -42,6 +42,7 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 
 ### Viewer polish
 
+- [ ] **Per-vertex alpha** — today `v "xnc"` is opaque RGB and translucency is uniform only (`C` RGBA / `Color.a` / `transmit`+`filter`), which drops vertex colors (`xn`). Add a format such as `v "xnca"` (position + normal + RGB + alpha) so interpolated field plots can honor `Opacity(colormap, a)` / maps with varying alpha without falling back to uniform albedo. Wire through Show (`TriangleComplex` / PointCloud / LineSet), `U V`, and transparent sort (still object-centroid until finer OIT). Motivated by `Plot(field, colormap=Opacity(ViridisMap(), …))`.
 - [ ] Transparent centroid cache — recompute object AABB centroid only when geometry changes, not every frame
 - [ ] Draw-list hygiene — merge adjacent draws that share VAO/material when packing the renderlist (matters at larger object counts)
 
