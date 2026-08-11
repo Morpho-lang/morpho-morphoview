@@ -22,7 +22,7 @@ mesh.addgrade(1)
 
 // Color by height so the surface reads clearly inside the frame.
 var f = Field(mesh, fn (x, y, z) z)
-var p = Plot(f, style="interpolate", colormap=ViridisMap(),
+var p = Plot(f, style="interpolate", colormap=Opacity(ViridisMap(), 0.4),
              axes=true,
              title="xplottorus",
              background=Color(0.08, 0.09, 0.11))

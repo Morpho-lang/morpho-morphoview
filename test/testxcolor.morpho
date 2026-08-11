@@ -66,7 +66,20 @@ expect(approx(Color(1,0,0,0.8).mul(0.5).a, 0.4, 1e-9), "mul scales alpha")
 expect(approx(Color(1.2, -0.1, 0.5, 1.5).clamp().r, 1, 1e-9), "clamp high")
 expect(approx(Color(1.2, -0.1, 0.5, 1.5).clamp().g, 0, 1e-9), "clamp low")
 expect(approx(Color(1.2, -0.1, 0.5, 1.5).clamp().a, 1, 1e-9), "clamp alpha")
-expect(Transparent.a == 0 && Transparent.r == 0, "Transparent")
+expect(Clear.a == 0 && Clear.r == 0, "Clear")
+expect(approx(Red.opacity(0.3).a, 0.3, 1e-9) && Red.opacity(0.3).r == 1, "Color.opacity")
+
+/* ---- ColorDelegate: Lighten / Darken / Opacity on maps ---- */
+var lit = Lighten(GrayMap(), 0.5)
+expect(lit.superclass() == ColorDelegate, "Lighten → ColorDelegate")
+expect(approx(lit.rgb(0)[0], 0.5, 1e-9), "Lighten map at 0")
+expect(approx(GrayMap().lighten(0.5).rgb(0)[0], 0.5, 1e-9), "ColorMap.lighten sugar")
+expect(approx(Darken(White, 0.5).rgb(0)[0], 0.5, 1e-9), "Darken Color via ctor")
+var faded = Opacity(ViridisMap(), 0.4)
+expect(approx(faded.alpha(0.5), 0.4, 1e-9), "Opacity map alpha")
+expect(approx(ViridisMap().opacity(0.25).color(0.5).a, 0.25, 1e-9), "ColorMap.opacity sugar")
+expect(approx(Opacity(Lighten(Red, 0.5), 0.2).color(0).g, 0.5, 1e-9), "delegate compose")
+expect(approx(Opacity(Lighten(Red, 0.5), 0.2).color(0).a, 0.2, 1e-9), "delegate compose alpha")
 expect(Red.color(0.3).r == 1, "Color.color ignores x")
 
 /* ---- Coloring hierarchy ---- */
