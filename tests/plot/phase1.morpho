@@ -16,12 +16,12 @@ fn expect(cond, msg) {
 
 var m = LineMesh(fn (t) [cos(t), sin(t), 0], 0...2*Pi:Pi/6, closed=true)
 var p = Plot(m, color=Red)
-expect(p.displaylist.count() == 12, "expected 12 line cylinders")
+expect(p.displaylist.count() == 1, "expected one LineSet")
 expect(p.entries.contains("lines"), "missing lines entries")
 expect(p.source.count(0) == m.count(0), "source mismatch")
 
 var p2 = plotmesh(m)
-expect(p2.displaylist.count() == 12, "plotmesh veneer failed")
+expect(p2.displaylist.count() == 1, "plotmesh veneer failed")
 
 var f = Field(m, fn (x, y, z) x)
 var pf = Plot(f)

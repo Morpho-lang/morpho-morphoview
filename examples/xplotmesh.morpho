@@ -1,0 +1,35 @@
+// xplot Phase 2 yardstick: PointCloud + LineSet on a surface mesh.
+//
+//   morpho6 examples/xplotmesh.morpho
+//
+// Close the viewer window to exit.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+//
+// AreaMesh ships without edge elements — call addgrade(1) before plotting lines.
+// Default style is PointCloud / LineSet. Use style="thick" for spheres/tubes.
+
+import morphoview
+import meshtools
+import xplot
+import xcolor
+
+var n = 40
+var m = AreaMesh(fn (u, v) [u, v, 0.2*sin(2*u)*cos(3*v)],
+                 -Pi..Pi:2*Pi/Float(n), -Pi..Pi:2*Pi/Float(n))
+m.addgrade(1) // invent edges from faces (needed for LineSet wireframe)
+
+// Points + edges only so bulk primitives are obvious (no opaque faces on top).
+var p = Plot(m, grade=[0, 1],
+             color=[Color(1, 0.85, 0.35), Color(0.85, 0.88, 0.95)],
+             title="xplotmesh (PointCloud + LineSet)",
+             background=Color(0.08, 0.09, 0.11))
+
+// Optional: translucent faces on top of the wireframe
+// p = p + Plot(m, grade=2, color=Color(0.25, 0.55, 0.85, 0.35))
+
+// Compare thick style:
+// var p = Plot(m, grade=[0, 1], style="thick", title="xplotmesh (spheres/tubes)")
+
+var v = View(p, connecttimeout=20000)
+v.wait()
+if (!v.closed) v.close()

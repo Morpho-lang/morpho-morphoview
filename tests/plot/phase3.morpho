@@ -1,0 +1,60 @@
+// xplot Phase 3: bounds, axes chrome, ColorBar / colorbar=true.
+// Expect: prints "ok" then exits.
+//
+//   morpho6 tests/plot/phase3.morpho
+
+import meshtools
+import xplot
+import xcolor
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+/* ---- scientific bounds from mesh dimensionality ---- */
+var m2 = LineMesh(fn (t) [cos(t), sin(t)], 0...2*Pi:Pi/6, closed=true)
+var p2 = Plot(m2, color=Red)
+expect(!isnil(p2.bounds), "2D mesh stores bounds")
+expect(p2.bounds.count() == 2, "2D bounds length matches vertex dim")
+
+var m3 = LineMesh(fn (t) [cos(t), sin(t), 0], 0...2*Pi:Pi/6, closed=true)
+var p3 = Plot(m3, color=Blue)
+expect(p3.bounds.count() == 3, "3D bounds length matches vertex dim")
+
+/* ---- axes=true records chrome under entries["axes"] ---- */
+var pAx = Plot(m3, color=Green, axes=true)
+expect(pAx.entries.contains("axes"), "axes entries present")
+expect(pAx.entries["axes"].count() > 1, "wire + labels/ticks")
+
+var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
+var pFlat = Plot(am, color=Red, axes=true)
+expect(pFlat.bounds.count() == 3, "AreaMesh vertex dim is 3 even if planar")
+expect(pFlat.entries.contains("axes"), "planar 3D still gets axes")
+
+/* ---- shared nice ticks ---- */
+var ticks = _niceTicks(-1.2, 3.4, 5)
+expect(ticks.count() <= 5, "nice ticks respect nmax")
+
+/* ---- ColorBar alias + colorbar=true ---- */
+var cb = ColorBar(length=0.5, posn=[1.2, 0.5, 0])
+var sb = ScaleBar(length=0.5, posn=[1.2, 0.5, 0])
+expect(!isnil(cb) && !isnil(sb), "ColorBar / ScaleBar construct")
+
+var f = Field(am, fn (x, y, z) x)
+var pf = Plot(f, style="interpolate", axes=true, colorbar=true)
+expect(pf.entries.contains("colorbar"), "colorbar=true draws bar")
+expect(pf.entries.contains("axes"), "field plot can have both axes and colorbar")
+
+/* ---- explicit scalebar= suppresses duplicate auto colorbar ---- */
+var sb2 = ScaleBar(length=0.4, posn=[1.3, 0.5, 0])
+var pf2 = Plot(f, style="interpolate", colorbar=true, scalebar=sb2)
+expect(pf2.entries.contains("colorbar"), "explicit scalebar still recorded")
+
+/* ---- mesh + colorbar=true is a no-op (no field range) ---- */
+var pMeshBar = Plot(am, color=Red, colorbar=true)
+expect(!pMeshBar.entries.contains("colorbar"), "colorbar=true ignored without field colormap")
+
+print "ok"

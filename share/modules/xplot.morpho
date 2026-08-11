@@ -5,7 +5,8 @@
  * Canonical API: Plot(Mesh) / Plot(Selection) / Plot(Field) — class Plot is Scene.
  * Extend by subclassing Plot (override _drawMesh / _drawSelection / _drawField / _finish).
  * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot.
- * Mesh helpers still come from upstream meshtools (AreaMesh / MeshMerge for ScaleBar).
+ * Presentation: axes=true (domain frame) + colorbar=true / ColorBar (ScaleBar alias).
+ * Mesh helpers still come from upstream meshtools (AreaMesh / MeshMerge for ColorBar).
  ******************************************************************************************* */
 
 import xgraphics
@@ -15,17 +16,37 @@ import meshtools
 var _pltmshcolerr = Error("PltMshCl", "Color specification for plotmesh should be either a color, a list of [r,g,b] values or a list of colors for each grade.")
 var _pltinvldcolerr = Error("PltInvldCl", "Could not convert color to matrix.")
 
-/* 3d cross product */
-fn cross3D(a, b) {
+/** Filled after ScaleBar/ColorBar is defined (breaks Plot↔plotfield cycle). */
+var _colorBarNew = nil
+
+/* 3d cross product (module-private; not xgraphics._cross3D (MD collision)). */
+fn _plotCross3D(a, b) {
   return Matrix([ a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0] ])
 }
 
-/* Finds a bounding box from a vertex matrix */
+/** Bounding box from a vertex matrix: list of [min,max] per coordinate row. */
 fn _boundingBox(m) {
   var col = m.transpose()
   var bnds = []
   for (i in 0...col.dimensions()[1]) bnds.append(bounds(col.column(i)))
   return bnds
+}
+
+/** Scientific bounds from mesh dimensionality (vertexmatrix rows), not planarity. */
+fn _scientificBounds(mesh) {
+  return _boundingBox(mesh.vertexmatrix())
+}
+
+/** Pad scientific bounds to 3D lo/hi Matrices. Returns [lo, hi, dim]. */
+fn _boundsLoHi(bnds) {
+  var dim = bnds.count()
+  var lo = Matrix(3)
+  var hi = Matrix(3)
+  for (i in 0...dim) {
+    lo[i] = bnds[i][0]
+    hi[i] = bnds[i][1]
+  }
+  return [lo, hi, dim]
 }
 
 /** Zero-extent coordinate axis for planar normal picking (not GraphicsEntry.flat). */
@@ -42,6 +63,13 @@ fn _wantsGrade(grade, g) {
   if (islist(grade)) return grade.ismember(g)
   if (isnumber(grade)) return grade==g
   return true
+}
+
+/** style= may be a string or list: "interpolate", "spheres", "tubes", "thick", … */
+fn _styleHas(style, name) {
+  if (isnil(style)) return false
+  if (islist(style) || isarray(style)) return style.ismember(name)
+  return style == name
 }
 
 fn _asPlotColor(Coloring c) { return c }
@@ -93,6 +121,26 @@ fn _vertTo3D(vert) {
   return out
 }
 
+/** Pad/truncate a vertex matrix to 3×n. */
+fn _vertexMatrix3(mesh) {
+  var v = mesh.vertexmatrix()
+  var d = v.dimensions()[0]
+  var n = v.dimensions()[1]
+  if (d == 3) return v
+  var out = Matrix(3, n)
+  var m = min(d, 3)
+  for (i in 0...n) {
+    for (j in 0...m) out[j, i] = v[j, i]
+  }
+  return out
+}
+
+/** True if color is a per-element RGB matrix (one column per element). */
+fn _isPerElementColor(color, nel) {
+  if (!ismatrix(color)) return false
+  return color.dimensions()[1] == nel
+}
+
 /** Resolve mesh for a Selection: explicit mesh=, else Selection.mesh(). */
 fn _selectionMesh(sel, mesh) {
   if (!isnil(mesh)) return mesh
@@ -138,7 +186,7 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
   var col[ngrades+1]
 
   var cm=colormap
-  if (cm==nil) cm = ViridisMap()
+  if (isnil(cm)) cm = ViridisMap()
 
   var bnd=bounds(field)
   if (!isnil(cmin)) bnd[0] = cmin
@@ -146,7 +194,7 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
   var sc = bnd[1]-bnd[0]
   if (abs(sc)>1e-16) sc=1/sc else sc = 1
 
-  if (style=="interpolate") {
+  if (_styleHas(style, "interpolate")) {
     if (!_wantsGrade(grade, 2)) return [mesh, sel, showgrades, col, cm, bnd]
 
     var nv=mesh.count(0)
@@ -205,6 +253,165 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
 }
 
 /* *******************************************************************************************
+ * Presentation chrome — ticks, domain frame, axes labels (Phase 3)
+ ******************************************************************************************* */
+
+/** Candidate tick locations for interval [a,b] with step dw. */
+fn _ticksForStep(a, b, dw) {
+  var la = dw*ceil(a/dw), lb = dw*floor(b/dw)
+  return la..lb:dw
+}
+
+/** Nice ticks on [a,b] with at most nmax marks (1,2,5×10ⁿ spacing). */
+fn _niceTicks(a, b, nmax) {
+  var width = (b-a)
+  if (abs(width) < 1e-16) return a..a:1
+
+  var dw = 10^(floor(log10(width/nmax))-1)
+
+  while (dw < width) {
+    for (x in [dw, 2*dw, 5*dw]) {
+      var r = _ticksForStep(a, b, x)
+      if (r.count() <= nmax) return r
+    }
+    dw *= 10
+  }
+
+  return a..b:(b-a)/nmax
+}
+
+/** Format a tick label without excess zeros. */
+fn _tickLabel(t) {
+  return Float(t).format("%0.4g")
+}
+
+/** Unit wireframe box as a LineSet (12 edges). lo/hi are length-3 lists or Matrices. */
+fn _wirebox(lo, hi, color) {
+  var x0 = lo[0], x1 = hi[0]
+  var y0 = lo[1], y1 = hi[1]
+  var z0 = lo[2], z1 = hi[2]
+  var pos = Matrix([
+    [x0, x1, x1, x0, x0, x1, x1, x0],
+    [y0, y0, y1, y1, y0, y0, y1, y1],
+    [z0, z0, z0, z0, z1, z1, z1, z1]
+  ])
+  var edges = [
+    [0, 1], [1, 2], [2, 3], [3, 0],
+    [4, 5], [5, 6], [6, 7], [7, 4],
+    [0, 4], [1, 5], [2, 6], [3, 7]
+  ]
+  return LineSet(pos, edges, color=color)
+}
+
+/** Domain frame LineSet from scientific bounds (1D line / 2D rect / 3D box). */
+fn _domainWire(bnds, color) {
+  var info = _boundsLoHi(bnds)
+  var lo = info[0], hi = info[1], dim = info[2]
+
+  if (dim <= 1) {
+    return LineSet(Matrix([
+      [lo[0], hi[0]], [lo[1], hi[1]], [lo[2], hi[2]]
+    ]), color=color)
+  }
+
+  if (dim == 2) {
+    var x0 = lo[0], x1 = hi[0]
+    var y0 = lo[1], y1 = hi[1]
+    var z = lo[2]
+    var pos = Matrix([
+      [x0, x1, x1, x0],
+      [y0, y0, y1, y1],
+      [z, z, z, z]
+    ])
+    return LineSet(pos, [[0, 1], [1, 2], [2, 3], [3, 0]], color=color)
+  }
+
+  return _wirebox(lo, hi, color)
+}
+
+/** RGB spines + axis names + nice numerical ticks for the first `dim` axes. */
+fn _frameLabels(bnds, size=18, ticksize=12, nticks=5) {
+  var info = _boundsLoHi(bnds)
+  var lo = info[0], hi = info[1], dim = info[2]
+  var g = Graphics()
+  if (dim < 1) return g
+
+  var sx = hi[0] - lo[0]
+  var sy = hi[1] - lo[1]
+  var sz = hi[2] - lo[2]
+  var tip = 1.08
+  var extent = abs(sx)
+  if (dim >= 2 && abs(sy) > extent) extent = abs(sy)
+  if (dim >= 3 && abs(sz) > extent) extent = abs(sz)
+  if (extent < 1e-12) extent = 1
+  var ticklen = 0.06 * extent
+  var labeloff = 1.8 * ticklen
+  var tickColor = Color(0.75, 0.75, 0.8)
+  var names = ["x", "y", "z"]
+  var spineColor = [Red, Green, Blue]
+
+  // Axis spines + names
+  for (ax in 0...dim) {
+    var p0 = Matrix(3)
+    var p1 = Matrix(3)
+    for (j in 0...3) {
+      p0[j] = lo[j]
+      p1[j] = lo[j]
+    }
+    p1[ax] = hi[ax]
+    g.display(LineSet(Matrix([
+      [p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]]
+    ]), color=spineColor[ax]))
+
+    var namepos = Matrix(3)
+    for (j in 0...3) namepos[j] = lo[j]
+    namepos[ax] = lo[ax] + tip*(hi[ax]-lo[ax])
+    g.display(Text(names[ax], namepos,
+                   dirn=[1, 0, 0], vertical=[0, 1, 0], size=size, color=White))
+  }
+
+  // Numerical ticks
+  for (ax in 0...dim) {
+    var ticks = _niceTicks(lo[ax], hi[ax], nticks)
+    for (t in ticks) {
+      var p0 = Matrix(3)
+      var p1 = Matrix(3)
+      for (j in 0...3) {
+        p0[j] = lo[j]
+        p1[j] = lo[j]
+      }
+      p0[ax] = t
+      p1[ax] = t
+      // Tick mark into a secondary direction (prefer -y for x/z, -x for y)
+      var mark = (ax == 1) ? 0 : 1
+      p1[mark] = lo[mark] - ticklen
+
+      g.display(LineSet(Matrix([
+        [p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]]
+      ]), color=tickColor))
+
+      var lp = Matrix(3)
+      for (j in 0...3) lp[j] = lo[j]
+      lp[ax] = t
+      lp[mark] = lo[mark] - labeloff
+      g.display(Text(_tickLabel(t), lp,
+                     dirn=[1, 0, 0], vertical=[0, 1, 0], size=ticksize, color=White))
+    }
+  }
+
+  return g
+}
+
+/** Merge a Graphics displaylist into Plot, recording each id under role. */
+fn _mergeGraphicsInto(plot, gfx, role) {
+  for (el in gfx.displaylist) {
+    var id = plot._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate,
+                          color=el.color, flat=el.flat, notify=false)
+    plot._recordEntry(role, id)
+  }
+}
+
+/* *******************************************************************************************
  * Plot — scientific visualization as a Scene
  * Extend by subclassing and overriding _drawMesh / _drawSelection / _drawField / _finish.
  ******************************************************************************************* */
@@ -223,8 +430,10 @@ class Plot is Scene {
     self.cmax = nil
   }
 
-  /** Common presentation (axes / colorbar) — chrome lands in Phase 3. */
+  /** Common presentation (axes / colorbar). */
   _finish() {
+    if (self.wantAxes) self._drawAxes()
+    if (self.wantColorbar) self._drawColorbar()
   }
 
   /** Record a graphics id under a semantic role (always a list). */
@@ -234,15 +443,61 @@ class Plot is Scene {
     self.entries[role].append(id)
   }
 
-  /** Display mesh grades (Sphere / Cylinder / TriangleComplex — Phase 1). */
-  _meshInto(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil) {
+  /** Domain frame + tick labels from scientific bounds. */
+  _drawAxes(nticks=5) {
+    if (isnil(self.bounds)) return
+    var frameColor = Color(0.55, 0.55, 0.6)
+    var id = self.display(_domainWire(self.bounds, frameColor))
+    self._recordEntry("axes", id)
+    _mergeGraphicsInto(self, _frameLabels(self.bounds, nticks=nticks), "axes")
+  }
+
+  /** Default ColorBar when colorbar=true (skips if one was already drawn). */
+  _drawColorbar() {
+    if (self.entries.contains("colorbar")) return
+    if (isnil(self.colormap) || isnil(self.cmin) || isnil(self.cmax)) return
+
+    var length = 1.0
+    var posn = Matrix([1, 0, 0])
+    if (!isnil(self.bounds)) {
+      var info = _boundsLoHi(self.bounds)
+      var lo = info[0], hi = info[1], dim = info[2]
+      var sx = hi[0] - lo[0]
+      var sy = (dim >= 2) ? (hi[1] - lo[1]) : 1.0
+      var sz = (dim >= 3) ? (hi[2] - lo[2]) : 0.0
+      var span = abs(sy)
+      if (abs(sz) > span) span = abs(sz)
+      if (span < 1e-12) span = abs(sx)
+      if (span < 1e-12) span = 1.0
+      length = span
+      var gap = 0.15 * ((abs(sx) > 1e-12) ? abs(sx) : span)
+      posn = Matrix([
+        hi[0] + gap,
+        (dim >= 2) ? 0.5*(lo[1]+hi[1]) : 0,
+        (dim >= 3) ? 0.5*(lo[2]+hi[2]) : 0
+      ])
+    }
+
+    var bar = _colorBarNew(length=length, posn=posn, colormap=self.colormap)
+    _mergeGraphicsInto(self, bar.draw(self.cmin, self.cmax), "colorbar")
+  }
+
+  /** Display mesh grades. Default: PointCloud / LineSet / TriangleComplex.
+   *  style="spheres"|"tubes"|"thick" restores Sphere/Cylinder loops.
+   *  style may be a list, e.g. ["interpolate","tubes"]. */
+  _meshInto(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
     var glist = []
     if (isnil(grade)) glist.append(mesh.maxgrade())
     if (islist(grade)) for (q in grade) glist.append(q)
     if (isnumber(grade)) glist.append(grade)
 
+    var thickPts = _styleHas(style, "spheres") || _styleHas(style, "thick")
+    var thickLines = _styleHas(style, "tubes") || _styleHas(style, "thick")
+
     var vert = _vertTo3D(mesh.vertexmatrix())
-    var bb = _boundingBox(mesh.vertexmatrix())
+    var vertMat = _vertexMatrix3(mesh)
+    var bb = _scientificBounds(mesh)
+    self.bounds = bb
     var planar = _planarAxis(bb)
     var centroid = Matrix(3)
     var size[bb.count()]
@@ -254,10 +509,32 @@ class Plot is Scene {
     if (glist.ismember(0)) {
       var vcol=_plotColorForGrade(0, color)
       var np = mesh.count(0)
-      for (i in 0...np) {
-        if (isselection(selection) && !selection.isselected(0, i)) continue
-        var id = self.display(Sphere(vert[i], 0.025, color=_plotColorForElement(vcol, i), filter=filter, transmit=transmit))
-        self._recordEntry("points", id)
+      if (thickPts) {
+        for (i in 0...np) {
+          if (isselection(selection) && !selection.isselected(0, i)) continue
+          var id = self.display(Sphere(vert[i], 0.025, color=_plotColorForElement(vcol, i), filter=filter, transmit=transmit))
+          self._recordEntry("points", id)
+        }
+      } else {
+        var ids = []
+        for (i in 0...np) {
+          if (isselection(selection) && !selection.isselected(0, i)) continue
+          ids.append(i)
+        }
+        var nshow = ids.count()
+        if (nshow > 0) {
+          var pos = Matrix(3, nshow)
+          var perVert = _isPerElementColor(vcol, np)
+          var pcol = vcol
+          if (perVert) pcol = Matrix(3, nshow)
+          for (k in 0...nshow) {
+            var i = ids[k]
+            pos.setColumn(k, vertMat.column(i))
+            if (perVert) pcol.setColumn(k, _plotColorToMatrix(_plotColorForElement(vcol, i)))
+          }
+          var id = self.display(PointCloud(pos, color=pcol, filter=filter, transmit=transmit))
+          self._recordEntry("points", id)
+        }
       }
     }
 
@@ -266,12 +543,54 @@ class Plot is Scene {
       var lines=mesh.connectivitymatrix(0,1)
       if (issparse(lines)) {
         var nl = mesh.count(1)
-        for (i in 0...nl) {
-          if (isselection(selection) && !selection.isselected(1, i)) continue
-          var el = lines.rowindices(i)
-          var id = self.display(Cylinder(vert[el[0]], vert[el[1]],
-                            aspectratio=0.05, color=_plotColorForElement(lcol, i), filter=filter, transmit=transmit))
-          self._recordEntry("lines", id)
+        if (thickLines) {
+          for (i in 0...nl) {
+            if (isselection(selection) && !selection.isselected(1, i)) continue
+            var el = lines.rowindices(i)
+            var id = self.display(Cylinder(vert[el[0]], vert[el[1]],
+                              aspectratio=0.05, color=_plotColorForElement(lcol, i), filter=filter, transmit=transmit))
+            self._recordEntry("lines", id)
+          }
+        } else {
+          var perEdge = _isPerElementColor(lcol, nl)
+          if (perEdge) {
+            // Independent edge colors: duplicate endpoints (plan Phase 2 rule).
+            var segs = []
+            for (i in 0...nl) {
+              if (isselection(selection) && !selection.isselected(1, i)) continue
+              segs.append(i)
+            }
+            var ns = segs.count()
+            if (ns > 0) {
+              var pos = Matrix(3, 2*ns)
+              var ecol = Matrix(3, 2*ns)
+              var edges = []
+              for (k in 0...ns) {
+                var i = segs[k]
+                var el = lines.rowindices(i)
+                pos.setColumn(2*k, vertMat.column(el[0]))
+                pos.setColumn(2*k+1, vertMat.column(el[1]))
+                var rgb = _plotColorToMatrix(_plotColorForElement(lcol, i))
+                ecol.setColumn(2*k, rgb)
+                ecol.setColumn(2*k+1, rgb)
+                edges.append([2*k, 2*k+1])
+              }
+              var id = self.display(LineSet(pos, edges, color=ecol, filter=filter, transmit=transmit))
+              self._recordEntry("lines", id)
+            }
+          } else {
+            // Uniform color: share mesh vertices; connectivity is selected edges.
+            var edges = []
+            for (i in 0...nl) {
+              if (isselection(selection) && !selection.isselected(1, i)) continue
+              var el = lines.rowindices(i)
+              edges.append([el[0], el[1]])
+            }
+            if (edges.count() > 0) {
+              var id = self.display(LineSet(vertMat, edges, color=lcol, filter=filter, transmit=transmit))
+              self._recordEntry("lines", id)
+            }
+          }
         }
       }
     }
@@ -307,7 +626,7 @@ class Plot is Scene {
             normal=Matrix(bb.count())
             normal[planar]=1
           } else {
-            normal=cross3D(v[2]-v[1], v[1]-v[0])
+            normal=_plotCross3D(v[2]-v[1], v[1]-v[0])
             if (normal.inner(v[0]-centroid)<0) {
               normal=-normal
             }
@@ -335,15 +654,15 @@ class Plot is Scene {
     }
   }
 
-  _drawMesh(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil) {
-    self._meshInto(mesh, selection=selection, grade=grade, color=color, filter=filter, transmit=transmit)
+  _drawMesh(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
+    self._meshInto(mesh, selection=selection, grade=grade, color=color, filter=filter, transmit=transmit, style=style)
   }
 
-  _drawSelection(sel, mesh=nil, grade=nil, color=nil, filter=nil, transmit=nil) {
+  _drawSelection(sel, mesh=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
     var m = _selectionMesh(sel, mesh)
     var col = color
     if (isnil(col)) col = _selectionColors(m, sel, grade)
-    self._meshInto(m, grade=grade, color=col, filter=filter, transmit=transmit)
+    self._meshInto(m, grade=grade, color=col, filter=filter, transmit=transmit, style=style)
   }
 
   _drawField(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
@@ -354,31 +673,26 @@ class Plot is Scene {
     self.colormap = cm
     self.cmin = bnd[0]
     self.cmax = bnd[1]
-    self._meshInto(mesh, selection=sel, grade=showgrades, color=col, filter=filter, transmit=transmit)
+    self._meshInto(mesh, selection=sel, grade=showgrades, color=col, filter=filter, transmit=transmit, style=style)
 
-    if (isobject(scalebar)) {
+    if (!isnil(scalebar)) {
       var s = scalebar
       s.colormap = cm
-      var bar = s.draw(bnd[0], bnd[1])
-      for (el in bar.displaylist) {
-        var id = self._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate,
-                           color=el.color, flat=el.flat, notify=false)
-        self._recordEntry("colorbar", id)
-      }
+      _mergeGraphicsInto(self, s.draw(bnd[0], bnd[1]), "colorbar")
     }
   }
 
   init(Mesh mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil,
-       title=nil, background=nil, axes=false) {
-    self._setup(mesh, title=title, background=background, axes=axes)
-    self._drawMesh(mesh, selection=selection, grade=grade, color=color, filter=filter, transmit=transmit)
+       title=nil, background=nil, axes=false, colorbar=false, style=nil) {
+    self._setup(mesh, title=title, background=background, axes=axes, colorbar=colorbar)
+    self._drawMesh(mesh, selection=selection, grade=grade, color=color, filter=filter, transmit=transmit, style=style)
     self._finish()
   }
 
   init(Selection sel, mesh=nil, grade=nil, color=nil, filter=nil, transmit=nil,
-       title=nil, background=nil, axes=false) {
-    self._setup(sel, title=title, background=background, axes=axes)
-    self._drawSelection(sel, mesh=mesh, grade=grade, color=color, filter=filter, transmit=transmit)
+       title=nil, background=nil, axes=false, colorbar=false, style=nil) {
+    self._setup(sel, title=title, background=background, axes=axes, colorbar=colorbar)
+    self._drawSelection(sel, mesh=mesh, grade=grade, color=color, filter=filter, transmit=transmit, style=style)
     self._finish()
   }
 
@@ -404,16 +718,16 @@ class Plot is Scene {
                       can be a single color
                       a matrix with columns corresponding to elements
                       a list of such matrices for each grade */
-fn plotmesh(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil) {
-  return Plot(mesh, selection=selection, grade=grade, color=color, filter=filter, transmit=transmit)
+fn plotmesh(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
+  return Plot(mesh, selection=selection, grade=grade, color=color, filter=filter, transmit=transmit, style=style)
 }
 
 /** Visualizes a selection
  * @param[in] mesh - mesh to plot (ignored when Selection.mesh() exists; still passed for Morpho 0.6.x)
  * @param[in] selection - selection
  * @param[in] grade - Grades to show */
-fn plotselection(mesh, selection, grade=nil, filter=nil, transmit=nil) {
-  return Plot(selection, mesh=mesh, grade=grade, filter=filter, transmit=transmit)
+fn plotselection(mesh, selection, grade=nil, filter=nil, transmit=nil, style=nil) {
+  return Plot(selection, mesh=mesh, grade=grade, filter=filter, transmit=transmit, style=style)
 }
 
 /** Visualizes a field
@@ -497,7 +811,7 @@ fn plotmeshlabels(mesh, grade=0, selection=nil, fontsize=10, offset=nil, dirn=ni
   return gout
 }
 
-// Scalebars
+// Scalebars / ColorBar
 class ScaleBar {
   _vector(val, default, normalize=false) {
     var out
@@ -510,13 +824,13 @@ class ScaleBar {
 
   init(nticks=5, colormap=nil, length=1, posn=nil, dirn=nil, tickdirn=nil, textdirn=nil, textvertical=nil, textcolor=nil, fontsize=16) {
     self.nticks = nticks
-    self.length = length // Length of scalebar
-    self.radius = 0.1*length // Radius of scalebar
+    self.length = length // Length of colorbar
+    self.radius = 0.1*length // Radius of colorbar
     self.nptsamples = 5 // Number of samples
     self.npts = 16 // Number of azimuthal samples
     self.fontsize = fontsize // Maximum font size for labels
     self.colormap = colormap
-    if (!self.colormap) self.colormap=ViridisMap()
+    if (isnil(self.colormap)) self.colormap=ViridisMap()
 
     self.posn = self._vector(posn, [1,0,0])
     self.dirn = self._vector(dirn, [0,1,0], normalize=true)
@@ -525,33 +839,16 @@ class ScaleBar {
     if (abs(lambda-1)>1e-8) { self.tickdirn -= lambda*self.dirn }
     self.tickdirn/=self.tickdirn.norm()
 
-    self.perp = cross3D(self.tickdirn, self.dirn)
+    self.perp = _plotCross3D(self.tickdirn, self.dirn)
 
     self.textdirn = self._vector(textdirn, self.tickdirn, normalize=true)
     self.textvertical = self._vector(textvertical, self.dirn, normalize=true)
     self.textcolor = textcolor
   }
 
-  _ticksforstep(a, b, dw) { // Creates a possible range given bounds and a stepsize
-    var la=dw*ceil(a/dw), lb=dw*floor(b/dw) // Multiples of dw such that la>a and lb<b
-    return la..lb:dw
-  }
-
-  /* Creates a range corresponding to a sequence of ticks for
-   and interval [a,b] and with no more than nmax ticks */
+  /* Nice ticks on [a,b] — shared with axes chrome via _niceTicks. */
   ticks(a, b, nmax) {
-    var width=(b-a)
-    var dw = 10^(floor(log10(width/nmax))-1) // Guess an initial order of magnitude for the tick spacing
-
-    while(dw<width) {
-      for (x in [dw,2*dw,5*dw]) {
-        var r = self._ticksforstep(a, b, x)
-        if (r.count()<=nmax) return r
-      }
-      dw*=10
-    }
-
-    return a..b:(b-a)/nmax
+    return _niceTicks(a, b, nmax)
   }
 
   coords(x,y,z) {
@@ -602,3 +899,12 @@ class ScaleBar {
     return self.drawbar() + self.drawlabel(min,max)
   }
 }
+
+/** Modern constructor alias for ScaleBar. */
+fn ColorBar(nticks=5, colormap=nil, length=1, posn=nil, dirn=nil, tickdirn=nil, textdirn=nil, textvertical=nil, textcolor=nil, fontsize=16) {
+  return ScaleBar(nticks=nticks, colormap=colormap, length=length, posn=posn, dirn=dirn,
+                  tickdirn=tickdirn, textdirn=textdirn, textvertical=textvertical,
+                  textcolor=textcolor, fontsize=fontsize)
+}
+
+_colorBarNew = ScaleBar

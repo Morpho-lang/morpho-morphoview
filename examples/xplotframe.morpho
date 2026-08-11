@@ -1,7 +1,6 @@
-// xplot: View(Plot(field)) — interpolated surface (faces still TriangleComplex).
-// Mesh edges/points use PointCloud/LineSet by default (see examples/xplotmesh.morpho).
+// xplot Phase 3 yardstick: domain frame axes + optional colorbar.
 //
-//   morpho6 examples/xplot.morpho
+//   morpho6 examples/xplotframe.morpho
 //
 // Close the viewer window to exit.
 // Requires: morphoview on PATH, morpho-zeromq, display.
@@ -12,11 +11,13 @@ import xplot
 import xcolor
 
 var m = AreaMesh(fn (u, v) [u, v, 0.15*sin(3*u)*cos(2*v)],
-                 -1..1:0.2, -1..1:0.2)
+                 -1..1:0.25, -1..1:0.25)
 var f = Field(m, fn (x, y, z) x)
 
 var p = Plot(f, style="interpolate", colormap=ViridisMap(),
-             title="xplot", background=Color(0.08, 0.09, 0.11))
+             axes=true, colorbar=true,
+             title="xplotframe (axes + colorbar)",
+             background=Color(0.08, 0.09, 0.11))
 
 var v = View(p, connecttimeout=20000)
 v.wait()

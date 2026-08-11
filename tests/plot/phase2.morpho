@@ -1,0 +1,49 @@
+// xplot Phase 2: PointCloud / LineSet defaults (+ optional thick style).
+// Expect: prints "ok" then exits.
+//
+//   morpho6 tests/plot/phase2.morpho
+
+import meshtools
+import xplot
+import xcolor
+import xgraphics
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+var m = LineMesh(fn (t) [cos(t), sin(t), 0], 0...2*Pi:Pi/6, closed=true)
+
+/* ---- default bulk primitives ---- */
+var p = Plot(m, color=Red)
+expect(p.displaylist.count() == 1, "one LineSet for closed polyline")
+expect(p.entries.contains("lines"), "lines entry")
+expect(p.entries["lines"].count() == 1, "single lines id")
+
+var item = p.findEntry(p.entries["lines"][0]).item
+expect(item.position.dimensions()[1] == 12, "shared mesh vertices")
+
+/* ---- thick tubes opt-in ---- */
+var pThick = Plot(m, color=Blue, style="tubes")
+expect(pThick.displaylist.count() == 12, "tubes → one Cylinder per edge")
+
+/* ---- points as PointCloud ---- */
+var pPts = Plot(m, grade=0, color=Green)
+expect(pPts.displaylist.count() == 1, "one PointCloud")
+expect(pPts.findEntry(pPts.entries["points"][0]).item.position.dimensions()[1] == 12, "all vertices")
+
+var pSph = Plot(m, grade=0, style="spheres")
+expect(pSph.displaylist.count() == 12, "spheres → one Sphere per vertex")
+
+/* ---- per-edge colors duplicate endpoints ---- */
+var nl = m.count(1)
+var ecol = Matrix(3, nl)
+for (i in 0...nl) ecol.setColumn(i, Matrix([Float(i)/Float(nl), 0.2, 0.8]))
+var pEdge = Plot(m, color=ecol)
+var ls = pEdge.findEntry(pEdge.entries["lines"][0]).item
+expect(ls.position.dimensions()[1] == 2*nl, "per-edge colors duplicate endpoints")
+
+print "ok"
