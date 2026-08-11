@@ -7,7 +7,7 @@
  * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot.
  * Presentation: axes=true (domain frame) + colorbar=true / ColorBar (ScaleBar alias).
  * Field coloring: linear normalize (safe on uniform fields) + optional center= for diverging maps.
- * Live: axes(bool), colormap(...), range(...), center(...) mutate Scene entries (not recolor for fields).
+ * Live: axes / colormap / range / center / refresh [view] mutate Scene (fields: morph via View, not recolor).
  * Mesh helpers still come from upstream meshtools (AreaMesh / MeshMerge for ColorBar).
  ******************************************************************************************* */
 
@@ -19,10 +19,10 @@ import meshtools
  * Errors
  * -------------------------- */
 
-var _pltmshcolerr = Error("PltMshCl", "Color specification for plotmesh should be either a color, a list of [r,g,b] values or a list of colors for each grade.")
-var _pltinvldcolerr = Error("PltInvldCl", "Could not convert color to matrix.")
-var _pltFldIntErr = Error("PltFldInt", "Can't use 'interpolate' style: Field lacks values on vertices.")
-var _pltSlctnEmptyErr = Error("PltSlctnEmpty", "Selection is empty.")
+var _PltMshClErr = Error("PltMshCl", "Color specification for plotmesh should be either a color, a list of [r,g,b] values or a list of colors for each grade.")
+var _PltInvldClErr = Error("PltInvldCl", "Could not convert color to matrix.")
+var _PltFldIntErr = Error("PltFldInt", "Can't use 'interpolate' style: Field lacks values on vertices.")
+var _PltSlctnEmptyErr = Error("PltSlctnEmpty", "Selection is empty.")
 
 /** Filled after ScaleBar is defined (breaks Plot↔plotfield cycle). */
 var _colorBarNew = nil
@@ -59,6 +59,13 @@ fn _boundsLoHi(bnds) {
     hi[i] = bnds[i][1]
   }
   return [lo, hi, dim]
+}
+
+/** Midpoint of scientific bounds as Matrix(3). */
+fn _boundsCentroid(bb) {
+  var c = Matrix(3)
+  for (x, i in bb) c[i] = x[0] + (x[1] - x[0])/2
+  return c
 }
 
 /** Zero-extent coordinate axis for planar normal picking (not GraphicsEntry.flat). */
@@ -154,7 +161,7 @@ fn _selectedIds(mesh, selection, grade) {
 
 fn _asPlotColor(Coloring c) { return c }
 fn _asPlotColor(Matrix c) { return c }
-fn _asPlotColor(c) { _pltmshcolerr.throw(); return nil }
+fn _asPlotColor(c) { _PltMshClErr.throw(); return nil }
 
 /** Deduces the plot color for a given grade. */
 fn _plotColorForGrade(grade, color) {
@@ -175,7 +182,7 @@ fn _plotColorToMatrix(Matrix color) { return color }
 fn _plotColorToMatrix(List color) { return Matrix(color) }
 fn _plotColorToMatrix(Tuple color) { return Matrix(color) }
 fn _plotColorToMatrix(Coloring color) { return Matrix(color.rgb(0)) }
-fn _plotColorToMatrix(color) { _pltinvldcolerr.throw(); return nil }
+fn _plotColorToMatrix(color) { _PltInvldClErr.throw(); return nil }
 
 /** True if color is a per-element RGB matrix (one column per element). */
 fn _isPerElementColor(color, nel) {
@@ -276,7 +283,7 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
     var nv = mesh.count(0)
     var cmat = Matrix(3, nv)
 
-    if (field.shape()[0] == 0) _pltFldIntErr.throw()
+    if (field.shape()[0] == 0) _PltFldIntErr.throw()
 
     if (!isnil(sel)) {
       if (sel.count(2) == 0) {
@@ -286,7 +293,7 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
         sel = sel.clone()
         sel.addgrade(0)
       }
-      if (sel.count(2) == 0 || sel.count(0) == 0) _pltSlctnEmptyErr.throw()
+      if (sel.count(2) == 0 || sel.count(0) == 0) _PltSlctnEmptyErr.throw()
     }
 
     for (i in 0...nv) {
@@ -655,17 +662,9 @@ class Plot is Scene {
     return true
   }
 
-  /** Re-sample Field → rebuild data entries (+ colorbar if present). Not for Mesh/Selection.
-   *  With a View argument: morph interpolate faces via U V (live animation). */
-  _refreshField() {
-    return self._refreshFieldWithView(nil)
-  }
-
-  _refreshField(view) {
-    return self._refreshFieldWithView(view)
-  }
-
-  _refreshFieldWithView(view) {
+  /** Re-sample Field → rebuild data entries (+ colorbar if present).
+   *  MD: refresh() / refresh(view). Optional-nil arity is a Morpho trap — keep overloads. */
+  _rebuildField(view) {
     if (!isfield(self.source)) return false
 
     var hadColorbar = self.entries.contains("colorbar") || self.wantColorbar
@@ -685,10 +684,8 @@ class Plot is Scene {
       var bb = _scientificBounds(mesh)
       self.bounds = bb
       var planar = _planarAxis(bb)
-      var centroid = Matrix(3)
-      for (x, i in bb) centroid[i] = x[0] + (x[1] - x[0])/2
       var got = self._facesItem(mesh, sel, col, self.filter, self.transmit,
-                                vertMat, bb, planar, centroid)
+                                vertMat, bb, planar, _boundsCentroid(bb))
       if (isnil(got)) return false
       var id = self.entries["faces"][0]
       var entry = self.findEntry(id)
@@ -709,23 +706,21 @@ class Plot is Scene {
     return true
   }
 
-  /** Re-sample Field and rebuild geometry. Headless / full redefine. */
+  /** Headless / full redefine. */
   refresh() {
-    if (!isfield(self.source)) return false
-    return self._refreshField()
+    return self._rebuildField(nil)
   }
 
-  /** Re-sample Field and morph faces through a live View (U V). */
+  /** Morph faces through a live View (U V). */
   refresh(view) {
-    if (!isfield(self.source)) return false
-    return self._refreshField(view)
+    return self._rebuildField(view)
   }
 
   /** Replace field colormap and rebuild colored geometry. */
   colormap(cm) {
     if (!isfield(self.source)) return false
     self.colormap = isnil(cm) ? ViridisMap() : cm
-    return self._refreshField()
+    return self._rebuildField(nil)
   }
 
   /** Set explicit field value range and rebuild. */
@@ -733,7 +728,7 @@ class Plot is Scene {
     if (!isfield(self.source)) return false
     self.cmin = cmin
     self.cmax = cmax
-    return self._refreshField()
+    return self._rebuildField(nil)
   }
 
   /** Clear explicit range (use data bounds) and rebuild. */
@@ -741,21 +736,21 @@ class Plot is Scene {
     if (!isfield(self.source)) return false
     self.cmin = nil
     self.cmax = nil
-    return self._refreshField()
+    return self._rebuildField(nil)
   }
 
   /** Set diverging-map center and rebuild. */
   center(c) {
     if (!isfield(self.source)) return false
     self.center = c
-    return self._refreshField()
+    return self._rebuildField(nil)
   }
 
   /** Clear diverging-map center and rebuild. */
   center() {
     if (!isfield(self.source)) return false
     self.center = nil
-    return self._refreshField()
+    return self._rebuildField(nil)
   }
 
   /** Grade 0: PointCloud by default; style spheres/thick → Sphere loop. */
@@ -919,9 +914,7 @@ class Plot is Scene {
     var bb = _scientificBounds(mesh)
     self.bounds = bb
     var planar = _planarAxis(bb)
-
-    var centroid = Matrix(3)
-    for (x, i in bb) centroid[i] = x[0] + (x[1] - x[0])/2
+    var centroid = _boundsCentroid(bb)
 
     if (glist.ismember(0)) {
       self._pointsInto(mesh, selection, color, filter, transmit, style, vertMat)
@@ -1032,11 +1025,11 @@ fn plotmeshlabels(mesh, grade=0, selection=nil, fontsize=10, offset=nil, dirn=ni
   var dir = isnil(dirn) ? [1, 0, 0] : dirn
   var vert = isnil(vertical) ? [0, 1, 0] : vertical
 
-  fn _defaultoffset(x) { return 0.05*(x + Matrix([0.001, 0, 0])) }
+  fn _defaultOffset(x) { return 0.05*(x + Matrix([0.001, 0, 0])) }
 
   var off = offset
   if (islist(off)) off = Matrix(offset)
-  if (isnil(off)) off = _defaultoffset
+  if (isnil(off)) off = _defaultOffset
   var dcol = isnil(color) ? White : color
 
   for (g in gradelist) {
@@ -1102,15 +1095,16 @@ class ScaleBar {
     return self.posn + x*self.tickdirn + y*self.perp + z*self.dirn
   }
 
-  getfontsize(ticks) {
+  getFontSize(ticks) {
     var size = self.fontsize
     var csize = (size/72) // Size of a line in our units
     var vsep = self.length/ticks.count() // Separation between ticks
     if (csize > vsep) size = floor((vsep/csize)*size)
     return size
   }
+  getfontsize(ticks) { return self.getFontSize(ticks) } // legacy
 
-  drawbar() { // Draws the actual color bar
+  drawBar() {
     var L = self.length/2
     var r = self.radius
     var m1 = AreaMesh(fn (u, v) self.coords(r*cos(u), r*sin(u), v),
@@ -1123,12 +1117,13 @@ class ScaleBar {
     return plotfield(Field(m, fn (x, y, z) Matrix([x, y, z]).inner(self.dirn)),
                      style="interpolate", colormap=self.colormap)
   }
+  drawbar() { return self.drawBar() } // legacy
 
-  drawlabel(min, max) { // Draws the labels and ticks
+  drawLabel(min, max) {
     var ticks = self.ticks(min, max, self.nticks)
     var w = max - min
     var g = Graphics()
-    var fsize = self.getfontsize(ticks)
+    var fsize = self.getFontSize(ticks)
     var toffset = abs(self.dirn.inner(self.textdirn))
     var tvert = sqrt(1 - toffset^2)
 
@@ -1146,9 +1141,10 @@ class ScaleBar {
     }
     return g
   }
+  drawlabel(min, max) { return self.drawLabel(min, max) } // legacy
 
   draw(min, max) {
-    return self.drawbar() + self.drawlabel(min, max)
+    return self.drawBar() + self.drawLabel(min, max)
   }
 }
 
