@@ -36,35 +36,42 @@ fn _planarAxis(bb) {
   return nil
 }
 
+/** True if grade= includes g (nil means all grades). */
+fn _wantsGrade(grade, g) {
+  if (isnil(grade)) return true
+  if (islist(grade)) return grade.ismember(g)
+  if (isnumber(grade)) return grade==g
+  return true
+}
+
+fn _asPlotColor(Coloring c) { return c }
+fn _asPlotColor(Matrix c) { return c }
+fn _asPlotColor(c) { _pltmshcolerr.throw(); return nil }
+
 /** Deduces the plot color for a given grade */
 fn _plotColorForGrade(grade, color) {
-  if (isnil(color)) return Gray(0.5) // No color provided, so use a default color
+  if (isnil(color)) return Gray(0.5)
   if (islist(color) || isarray(color)) {
-      if (color.count()==3 && isnumber(color[0]) && isnumber(color[1]) && isnumber(color[2])) return color // Color was given as a simple list
-
-      // Different colors for each grade
-      if (isobject(color[grade]) ||
-          islist(color[grade]) ||
-          ismatrix(color[grade])) return color[grade]
-
-      if (isnil(color[grade])) return Gray(0.5)
+    if (color.count()==3 && isnumber(color[0]) && isnumber(color[1]) && isnumber(color[2])) return color
+    if (isnil(color[grade])) return Gray(0.5)
+    return color[grade]
   }
-  if (isobject(color)) return color
-  _pltmshcolerr.throw()
+  if (istuple(color) && color.count()==3 && isnumber(color[0])) return color
+  return _asPlotColor(color)
 }
 
 /** Finds the appropriate color for a given element */
 fn _plotColorForElement(color, element) {
-  var col=color
-  if (ismatrix(col)) col=color.column(element)
-  return col
+  if (ismatrix(color)) return color.column(element)
+  return color
 }
 
-/** Converts a color to a matrix */
+/** Converts a color to an RGB column matrix */
+fn _plotColorToMatrix(Matrix color) { return color }
+fn _plotColorToMatrix(List color) { return Matrix(color) }
+fn _plotColorToMatrix(Tuple color) { return Matrix(color) }
+fn _plotColorToMatrix(Coloring color) { return Matrix(color.rgb(0)) }
 fn _plotColorToMatrix(color) {
-  if (ismatrix(color)) return color
-  if (islist(color)) return Matrix(color)
-  if (isobject(color)) return Matrix(color.rgb(0))
   _pltinvldcolerr.throw()
   return nil
 }
@@ -108,11 +115,11 @@ fn _selectionColors(mesh, selection, grade) {
     var nel = mesh.count(g)
     var cmat = Matrix(3, nel)
     for (i in 0...nel) {
-      cmat.setcolumn(i, Matrix([0.5,0.5,0.5]))
+      cmat.setColumn(i, Matrix([0.5,0.5,0.5]))
     }
 
     for (i in selected) {
-      cmat.setcolumn(i, Matrix([1,0,0]))
+      cmat.setColumn(i, Matrix([1,0,0]))
     }
 
     col[g]=cmat
@@ -140,6 +147,8 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
   if (abs(sc)>1e-16) sc=1/sc else sc = 1
 
   if (style=="interpolate") {
+    if (!_wantsGrade(grade, 2)) return [mesh, sel, showgrades, col, cm, bnd]
+
     var nv=mesh.count(0)
     var cmat = Matrix(3, nv)
 
@@ -165,7 +174,7 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
       if (!isnil(cmin)) val = max(cmin, val)
       if (!isnil(cmax)) val = min(cmax, val)
       if (scale) val=(val-bnd[0])*sc
-      cmat.setcolumn(i, Matrix(cm.rgb(val)))
+      cmat.setColumn(i, Matrix(cm.rgb(val)))
     }
 
     col[2]=cmat
@@ -173,6 +182,7 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
   } else {
     for (g in 0...ngrades) {
       if (shape[g]==0) continue
+      if (!_wantsGrade(grade, g)) continue
 
       var nel=mesh.count(g)
       var cmat = Matrix(3, nel)
@@ -183,7 +193,7 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
         if (!isnil(cmin)) val = max(cmin, val)
         if (!isnil(cmax)) val = min(cmax, val)
         if (scale) val=(val-bnd[0])*sc
-        cmat.setcolumn(i, Matrix(cm.rgb(val)))
+        cmat.setColumn(i, Matrix(cm.rgb(val)))
       }
 
       col[g]=cmat
@@ -307,16 +317,19 @@ class Plot is Scene {
           if (!interpolate) tcol = _plotColorToMatrix(_plotColorForElement(fcol, i))
           for (j in 0...3) {
             tri[nnv,nnt]=1
-            nvert.setcolumn(nnv, v[j])
-            norm.setcolumn(nnv, normal)
+            nvert.setColumn(nnv, v[j])
+            norm.setColumn(nnv, normal)
             if (interpolate) tcol = _plotColorToMatrix(_plotColorForElement(fcol, el[j]))
-            ncol.setcolumn(nnv, tcol)
+            ncol.setColumn(nnv, tcol)
             nnv+=1
           }
           nnt+=1
         }
 
-        var id = self.display(TriangleComplex(nvert, norm, ncol, tri, filter=filter, transmit=transmit))
+        // Discrete face/selection colors: unlit facets (GraphicsEntry.flat).
+        // Interpolated per-vertex field colors keep shaded lighting.
+        var id = self.display(TriangleComplex(nvert, norm, ncol, tri, filter=filter, transmit=transmit),
+                              flat=!interpolate)
         self._recordEntry("faces", id)
       }
     }
@@ -476,10 +489,6 @@ fn plotmeshlabels(mesh, grade=0, selection=nil, fontsize=10, offset=nil, dirn=ni
       if (iscallable(vertical)) vert=vertical(x)
       var offset = off
       if (iscallable(off)) offset = off(x)
-
-      if (abs(Matrix(vert).inner(Matrix(dir))-1) < 1e-10) {
-        Error("PltLblDirn", "Text direction and vertical are colinear for element ${id} at [${x[0]}, ${x[1]}, ${x[2]}].").throw()
-      }
 
       gout.display(Text("${id}", x+offset, size=fontsize, dirn=dir, vertical=vert, color=col))
     }
