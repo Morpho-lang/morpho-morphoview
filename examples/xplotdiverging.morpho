@@ -1,0 +1,29 @@
+// xplot Phase 4 yardstick: diverging colormap with center=.
+// Signed field on a warped surface — zero maps to white (BlueWhiteRed mid).
+//
+//   morpho6 examples/xplotdiverging.morpho
+//
+// Close the viewer window to exit.
+// Requires: morphoview on PATH, morpho-zeromq, display.
+
+import morphoview
+import meshtools
+import xplot
+import xcolor
+
+var m = AreaMesh(fn (u, v) [u, v, 0.2*sin(2*u)*cos(3*v)],
+                 -Pi..Pi:Pi/12, -Pi..Pi:Pi/12)
+
+// Signed height-ish quantity: blue (neg) | white (0) | red (pos)
+var f = Field(m, fn (x, y, z) x)
+
+var p = Plot(f, style="interpolate",
+             colormap=BlueWhiteRedMap,
+             cmin=-Pi, cmax=Pi, center=0,
+             axes=true, colorbar=true,
+             title="xplotdiverging (center=0)",
+             background=Color(0.08, 0.09, 0.11))
+
+var v = View(p, connecttimeout=20000)
+v.wait()
+if (!v.closed) v.close()

@@ -1,0 +1,69 @@
+// xplot Phase 4: linear normalize + center= (no GUI required).
+// Expect: prints "ok" then exits.
+//
+//   morpho6 tests/plot/phase4.morpho
+
+import meshtools
+import xplot
+import xcolor
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn approx(a, b) { return abs(a - b) < 1e-9 }
+fn approxEps(a, b, eps) { return abs(a - b) < eps }
+
+/* ---- unit normalize helpers ---- */
+expect(approx(_linearNormalize(0, 0, 1), 0), "0→0")
+expect(approx(_linearNormalize(1, 0, 1), 1), "1→1")
+expect(approx(_linearNormalize(0.5, 0, 1), 0.5), "mid")
+
+// Uniform field (zero span): mid colormap, no divide-by-zero
+expect(approx(_linearNormalize(3, 3, 3), 0.5), "uniform → 0.5")
+expect(approx(_linearNormalize(0, 0, 0), 0.5), "zero field → 0.5")
+expect(approx(_linearNormalize(-1, -1, -1, center=-1), 0.5), "uniform+center → 0.5")
+
+// Two-slope / diverging
+expect(approx(_linearNormalize(-2, -2, 4, center=0), 0), "div low")
+expect(approx(_linearNormalize(0, -2, 4, center=0), 0.5), "div center")
+expect(approx(_linearNormalize(4, -2, 4, center=0), 1), "div high")
+expect(approx(_linearNormalize(2, -2, 4, center=0), 0.75), "div half-high")
+
+// Clamping via _fieldSampleNorm
+expect(approx(_fieldSampleNorm(-10, 0, 1), 0), "clamp low")
+expect(approx(_fieldSampleNorm(10, 0, 1), 1), "clamp high")
+expect(approx(_fieldSampleNorm(5, 0, 1, scale=false), 5), "scale=false raw")
+
+/* ---- Plot: uniform field must not explode ---- */
+var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
+var fConst = Field(am, fn (x, y, z) 7)
+var pConst = Plot(fConst, style="interpolate")
+expect(pConst.entries.contains("faces"), "uniform field plots")
+expect(approx(pConst.cmin, 7) && approx(pConst.cmax, 7), "uniform range")
+
+var face = pConst.findEntry(pConst.entries["faces"][0]).item
+var rgb0 = face.color.column(0)
+var rgb1 = face.color.column(1)
+expect(approx(rgb0[0], rgb1[0]) && approx(rgb0[1], rgb1[1]) && approx(rgb0[2], rgb1[2]),
+       "uniform → constant color")
+
+// Mid-colormap sample for Viridis at t=0.5 (not endpoints)
+var mid = Matrix(ViridisMap().rgb(0.5))
+expect(approxEps(rgb0[0], mid[0], 1e-6) && approxEps(rgb0[1], mid[1], 1e-6) && approxEps(rgb0[2], mid[2], 1e-6),
+       "uniform → mid colormap")
+
+/* ---- center= with diverging map ---- */
+var fSigned = Field(am, fn (x, y, z) x) // on [0,1]
+var pDiv = Plot(fSigned, style="interpolate", colormap=BlueWhiteRedMap,
+                cmin=-1, cmax=1, center=0)
+expect(approx(pDiv.center, 0), "stores center")
+expect(approx(pDiv.cmin, -1) && approx(pDiv.cmax, 1), "explicit range")
+
+var pVeneer = plotfield(fSigned, style="interpolate", colormap=BlueWhiteRedMap, center=0)
+expect(approx(pVeneer.center, 0), "plotfield center=")
+
+print "ok"

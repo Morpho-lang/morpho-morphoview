@@ -6,6 +6,7 @@
  * Extend by subclassing Plot (override _drawMesh / _drawSelection / _drawField / _finish).
  * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot.
  * Presentation: axes=true (domain frame) + colorbar=true / ColorBar (ScaleBar alias).
+ * Field coloring: linear normalize (safe on uniform fields) + optional center= for diverging maps.
  * Mesh helpers still come from upstream meshtools (AreaMesh / MeshMerge for ColorBar).
  ******************************************************************************************* */
 
@@ -210,16 +211,51 @@ fn _selectionColors(mesh, selection, grade) {
   return col
 }
 
-/** Clamp and optionally normalize a field sample into colormap domain. */
-fn _scaledFieldValue(val, bnd, sc, scale, cmin, cmax) {
-  if (!isnil(cmin)) val = max(cmin, val)
-  if (!isnil(cmax)) val = min(cmax, val)
-  if (scale) val = (val - bnd[0])*sc
-  return val
+/* --------------------------
+ * Field value → colormap [0,1]
+ * -------------------------- */
+
+fn _plotClamp01(x) { return (x < 0) ? 0 : ((x > 1) ? 1 : x) }
+
+/** Linear map of val into [0,1] for colormap sampling.
+ *  Zero data range (uniform field) → 0.5; never divides by zero.
+ *  With center=: two-slope map vmin→0, center→0.5, vmax→1 (diverging). */
+fn _linearNormalize(val, vmin, vmax, center=nil) {
+  if (!isnil(center)) {
+    if (val >= center) {
+      var hi = vmax - center
+      if (abs(hi) < 1e-16) return 0.5
+      return 0.5 + 0.5*_plotClamp01((val - center)/hi)
+    }
+    var lo = center - vmin
+    if (abs(lo) < 1e-16) return 0.5
+    return 0.5*_plotClamp01((val - vmin)/lo)
+  }
+
+  var span = vmax - vmin
+  if (abs(span) < 1e-16) return 0.5 // uniform field → mid colormap
+  return _plotClamp01((val - vmin)/span)
+}
+
+/** Clamp to [vmin,vmax] then normalize when scale=true; else return raw val. */
+fn _fieldSampleNorm(val, vmin, vmax, scale=true, center=nil) {
+  if (!scale) return val
+  if (val < vmin) val = vmin
+  if (val > vmax) val = vmax
+  return _linearNormalize(val, vmin, vmax, center=center)
+}
+
+/** Resolve display range [vmin,vmax] from field bounds and optional cmin/cmax. */
+fn _fieldRange(field, cmin=nil, cmax=nil) {
+  var bnd = bounds(field)
+  if (!isnil(cmin)) bnd[0] = cmin
+  if (!isnil(cmax)) bnd[1] = cmax
+  return bnd
 }
 
 /** Map a field to per-grade color matrices + grades to show. */
-fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true, cmin=nil, cmax=nil) {
+fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
+                cmin=nil, cmax=nil, center=nil) {
   var mesh = field.mesh()
   var shape = field.shape()
   var sel = selection
@@ -230,11 +266,8 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
   var cm = colormap
   if (isnil(cm)) cm = ViridisMap()
 
-  var bnd = bounds(field)
-  if (!isnil(cmin)) bnd[0] = cmin
-  if (!isnil(cmax)) bnd[1] = cmax
-  var sc = bnd[1] - bnd[0]
-  if (abs(sc) > 1e-16) sc = 1/sc else sc = 1
+  var bnd = _fieldRange(field, cmin=cmin, cmax=cmax)
+  var vmin = bnd[0], vmax = bnd[1]
 
   if (_styleHas(style, "interpolate")) {
     if (!_wantsGrade(grade, 2)) return [mesh, sel, showgrades, col, cm, bnd]
@@ -257,8 +290,8 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
 
     for (i in 0...nv) {
       if (!isnil(sel) && !sel[0, i]) continue
-      var val = _scaledFieldValue(field[0, i], bnd, sc, scale, cmin, cmax)
-      cmat.setColumn(i, Matrix(cm.rgb(val)))
+      var t = _fieldSampleNorm(field[0, i], vmin, vmax, scale=scale, center=center)
+      cmat.setColumn(i, Matrix(cm.rgb(t)))
     }
 
     col[2] = cmat
@@ -272,8 +305,8 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
       var cmat = Matrix(3, nel)
       for (i in 0...nel) {
         if (!isnil(sel) && !sel[g, i]) continue
-        var val = _scaledFieldValue(field[g, i], bnd, sc, scale, cmin, cmax)
-        cmat.setColumn(i, Matrix(cm.rgb(val)))
+        var t = _fieldSampleNorm(field[g, i], vmin, vmax, scale=scale, center=center)
+        cmat.setColumn(i, Matrix(cm.rgb(t)))
       }
       col[g] = cmat
       showgrades.append(g)
@@ -416,6 +449,121 @@ fn _mergeGraphicsInto(plot, gfx, role) {
   }
 }
 
+/** Face normal from triangle winding (no centroid flip). */
+fn _faceNormal(v0, v1, v2) {
+  return _plotCross3D(v2 - v1, v1 - v0)
+}
+
+/** Face normal oriented outward relative to centroid (flat shading only). */
+fn _orientedFaceNormal(v0, v1, v2, centroid) {
+  var normal = _faceNormal(v0, v1, v2)
+  if (normal.inner(v0 - centroid) < 0) normal = -normal
+  return normal
+}
+
+/** +1 if face winding contains a→b, -1 if b→a, else 0. */
+fn _faceEdgeDir(el, a, b) {
+  for (j in 0...3) {
+    var u = el[j]
+    var v = el[(j == 2) ? 0 : j+1]
+    if (u == a && v == b) return 1
+    if (u == b && v == a) return -1
+  }
+  return 0
+}
+
+/** Orient face normals consistently across the mesh (fixes alternating AreaMesh winding),
+ *  then area-weighted average onto vertices. */
+fn _smoothVertexNormals(mesh, vertMat, centroid, selection=nil) {
+  var nv = mesh.count(0)
+  var nf = mesh.count(2)
+  var acc = Matrix(3, nv)
+  var faces = mesh.connectivitymatrix(0, 2)
+  if (!issparse(faces)) return acc
+
+  // Raw winding normals + undirected edge → incident faces.
+  var fnorm = Matrix(3, nf)
+  var edgefaces = Dictionary()
+  for (i in 0...nf) {
+    if (isselection(selection) && !selection.isselected(2, i)) continue
+    var el = faces.rowindices(i)
+    fnorm.setColumn(i, _faceNormal(vertMat.column(el[0]), vertMat.column(el[1]),
+                                   vertMat.column(el[2])))
+    for (e in [[el[0], el[1]], [el[1], el[2]], [el[2], el[0]]]) {
+      var a = e[0], b = e[1]
+      var k = (a < b) ? "${a}_${b}" : "${b}_${a}"
+      if (!edgefaces.contains(k)) edgefaces[k] = []
+      edgefaces[k].append(i)
+    }
+  }
+
+  // Face adjacency from shared edges.
+  var neigh[nf]
+  for (i in 0...nf) neigh[i] = []
+  for (k in edgefaces) {
+    var fs = edgefaces[k]
+    if (fs.count() != 2) continue
+    neigh[fs[0]].append(fs[1])
+    neigh[fs[1]].append(fs[0])
+  }
+
+  // Flood-fill: adjacent faces must traverse a shared edge in opposite directions.
+  var sign[nf]
+  var seen[nf]
+  for (i in 0...nf) { sign[i] = 1; seen[i] = false }
+
+  for (seed in 0...nf) {
+    if (seen[seed]) continue
+    if (isselection(selection) && !selection.isselected(2, seed)) continue
+    seen[seed] = true
+    // Prefer +z for the seed hemisphere (AreaMesh / open surfaces).
+    sign[seed] = (fnorm.column(seed)[2] < 0) ? -1 : 1
+    var queue = [seed]
+    var qi = 0
+    while (qi < queue.count()) {
+      var f = queue[qi]
+      qi += 1
+      var elf = faces.rowindices(f)
+      for (g in neigh[f]) {
+        if (seen[g]) continue
+        if (isselection(selection) && !selection.isselected(2, g)) continue
+        var elg = faces.rowindices(g)
+        // Find a shared edge and compare winding direction.
+        var flipped = false
+        var found = false
+        for (j in 0...3) {
+          var a = elf[j], b = elf[(j == 2) ? 0 : j+1]
+          var dirg = _faceEdgeDir(elg, a, b)
+          if (dirg == 0) continue
+          found = true
+          // f has a→b; consistent neighbor has b→a (dirg == -1).
+          flipped = (dirg == 1)
+          break
+        }
+        if (!found) continue
+        sign[g] = flipped ? -sign[f] : sign[f]
+        seen[g] = true
+        queue.append(g)
+      }
+    }
+  }
+
+  for (i in 0...nf) {
+    if (isselection(selection) && !selection.isselected(2, i)) continue
+    var n = sign[i]*fnorm.column(i)
+    var el = faces.rowindices(i)
+    for (pidx in el) acc.setColumn(pidx, acc.column(pidx) + n)
+  }
+
+  for (i in 0...nv) {
+    var n = acc.column(i)
+    var len = n.norm()
+    if (len > 1e-16) acc.setColumn(i, n/len)
+    else acc.setColumn(i, Matrix([0, 0, 1]))
+  }
+  return acc
+}
+
 /* *******************************************************************************************
  * Plot — scientific visualization as a Scene
  ******************************************************************************************* */
@@ -431,6 +579,7 @@ class Plot is Scene {
     self.colormap = nil
     self.cmin = nil
     self.cmax = nil
+    self.center = nil
   }
 
   _finish() {
@@ -563,7 +712,8 @@ class Plot is Scene {
     }
   }
 
-  /** Grade 2: TriangleComplex; discrete colors → GraphicsEntry.flat. */
+  /** Grade 2: TriangleComplex; discrete colors → GraphicsEntry.flat.
+   *  Interpolate path uses smooth vertex normals; discrete uses per-face normals. */
   _facesInto(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid) {
     var faces = mesh.connectivitymatrix(0, 2)
     if (!issparse(faces)) return
@@ -576,6 +726,12 @@ class Plot is Scene {
     if (ismatrix(fcol) &&
         fcol.dimensions()[1] != nf &&
         fcol.dimensions()[1] == mesh.count(0)) interpolate = true
+
+    // Smooth normals only when interpolating on a non-planar mesh.
+    var vnorm = nil
+    if (interpolate && isnil(planar)) {
+      vnorm = _smoothVertexNormals(mesh, vertMat, centroid, selection=selection)
+    }
 
     var nvert = Matrix(3, 3*nnt)
     var norm = Matrix(3, 3*nnt)
@@ -591,13 +747,12 @@ class Plot is Scene {
       var v[3]
       for (pidx, j in el) v[j] = vertMat.column(pidx)
 
-      var normal
+      var faceNormal
       if (!isnil(planar)) {
-        normal = Matrix(bb.count())
-        normal[planar] = 1
-      } else {
-        normal = _plotCross3D(v[2] - v[1], v[1] - v[0])
-        if (normal.inner(v[0] - centroid) < 0) normal = -normal
+        faceNormal = Matrix(bb.count())
+        faceNormal[planar] = 1
+      } else if (isnil(vnorm)) {
+        faceNormal = _orientedFaceNormal(v[0], v[1], v[2], centroid)
       }
 
       var tcol
@@ -605,7 +760,8 @@ class Plot is Scene {
       for (j in 0...3) {
         tri[nnv, nnt] = 1
         nvert.setColumn(nnv, v[j])
-        norm.setColumn(nnv, normal)
+        if (!isnil(vnorm)) norm.setColumn(nnv, vnorm.column(el[j]))
+        else norm.setColumn(nnv, faceNormal)
         if (interpolate) tcol = _plotColorToMatrix(_plotColorForElement(fcol, el[j]))
         ncol.setColumn(nnv, tcol)
         nnv += 1
@@ -614,7 +770,7 @@ class Plot is Scene {
     }
 
     // Discrete face/selection colors: unlit facets (GraphicsEntry.flat).
-    // Interpolated per-vertex field colors keep shaded lighting.
+    // Interpolated per-vertex field colors + smooth normals keep shaded lighting.
     self._recordEntry("faces",
       self.display(TriangleComplex(nvert, norm, ncol, tri, filter=filter, transmit=transmit),
                    flat=!interpolate))
@@ -654,13 +810,14 @@ class Plot is Scene {
   }
 
   _drawField(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
-             filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil) {
+             filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil, center=nil) {
     var info = _fieldColors(field, selection=selection, grade=grade, colormap=colormap,
-                            style=style, scale=scale, cmin=cmin, cmax=cmax)
+                            style=style, scale=scale, cmin=cmin, cmax=cmax, center=center)
     var mesh = info[0], sel = info[1], showgrades = info[2], col = info[3], cm = info[4], bnd = info[5]
     self.colormap = cm
     self.cmin = bnd[0]
     self.cmax = bnd[1]
+    self.center = center
     self._meshInto(mesh, selection=sel, grade=showgrades, color=col,
                    filter=filter, transmit=transmit, style=style)
 
@@ -687,12 +844,12 @@ class Plot is Scene {
   }
 
   init(Field field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
-       filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil,
+       filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil, center=nil,
        title=nil, background=nil, axes=false, colorbar=false) {
     self._setup(field, title=title, background=background, axes=axes, colorbar=colorbar)
     self._drawField(field, selection=selection, grade=grade, colormap=colormap, style=style,
                     scale=scale, filter=filter, transmit=transmit, scalebar=scalebar,
-                    cmin=cmin, cmax=cmax)
+                    cmin=cmin, cmax=cmax, center=center)
     self._finish()
   }
 }
@@ -711,9 +868,9 @@ fn plotselection(mesh, selection, grade=nil, filter=nil, transmit=nil, style=nil
 }
 
 fn plotfield(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
-             filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil) {
+             filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil, center=nil) {
   return Plot(field, selection=selection, grade=grade, colormap=colormap, style=style, scale=scale,
-              filter=filter, transmit=transmit, scalebar=scalebar, cmin=cmin, cmax=cmax)
+              filter=filter, transmit=transmit, scalebar=scalebar, cmin=cmin, cmax=cmax, center=center)
 }
 
 /** Arrow RGB triad (distinct from axes=true domain frame). */
