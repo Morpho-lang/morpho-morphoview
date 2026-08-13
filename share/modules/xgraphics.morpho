@@ -119,7 +119,7 @@ fn _axisAngleFromTo(from, to) {
 
 /** start→end + aspectratio → [position, scale Matrix(R,R,L), rotate]; nil if degenerate.
  *  Unit shaft is +z, height 1, radius 1; world radius = 0.5 * length * aspectratio. */
-fn _segmentSRT(start, end, aspectratio) {
+fn segmentSRT(start, end, aspectratio) {
   var x1 = _asPosition(start)
   var x2 = _asPosition(end)
   var dx = x2 - x1
@@ -918,7 +918,7 @@ class Graphics {
 
   /** Unit shaft item + SRT from start→end; nil if degenerate. */
   _displaySegment(unitItem, start, end, aspectratio, color=nil, flat=nil) {
-    var srt = _segmentSRT(start, end, aspectratio)
+    var srt = segmentSRT(start, end, aspectratio)
     if (isnil(srt)) return nil
     return self._displayUnit(unitItem, srt[0], scale=srt[1], rotate=srt[2],
                              color=color, flat=flat)
@@ -1123,7 +1123,7 @@ class Scene is Graphics with Broadcaster {
 var _mvbin = nil
 var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command); please upgrade morphopm.")
 
-fn _morphoViewBin() {
+fn findMorphoViewBin() {
   if (!isnil(_mvbin)) return _mvbin
 
   var exe = (System.platform()=="windows" ? "morphoview.exe" : "morphoview")
@@ -1201,7 +1201,7 @@ class Show {
     var fname = self._randomAlphanumString(10)
     var path = Folder.normalizePath("${tempFolder}/morpho${fname}.draw")
     var out = File(path, "w")
-    var bin = _morphoViewBin()
+    var bin = findMorphoViewBin()
 
     self.write(g, out)
 

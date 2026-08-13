@@ -18,25 +18,25 @@ fn approx(a, b) { return abs(a - b) < 1e-9 }
 fn approxEps(a, b, eps) { return abs(a - b) < eps }
 
 /* ---- unit normalize helpers ---- */
-expect(approx(_linearNormalize(0, 0, 1), 0), "0→0")
-expect(approx(_linearNormalize(1, 0, 1), 1), "1→1")
-expect(approx(_linearNormalize(0.5, 0, 1), 0.5), "mid")
+expect(approx(linearNormalize(0, 0, 1), 0), "0→0")
+expect(approx(linearNormalize(1, 0, 1), 1), "1→1")
+expect(approx(linearNormalize(0.5, 0, 1), 0.5), "mid")
 
 // Uniform field (zero span): mid colormap, no divide-by-zero
-expect(approx(_linearNormalize(3, 3, 3), 0.5), "uniform → 0.5")
-expect(approx(_linearNormalize(0, 0, 0), 0.5), "zero field → 0.5")
-expect(approx(_linearNormalize(-1, -1, -1, center=-1), 0.5), "uniform+center → 0.5")
+expect(approx(linearNormalize(3, 3, 3), 0.5), "uniform → 0.5")
+expect(approx(linearNormalize(0, 0, 0), 0.5), "zero field → 0.5")
+expect(approx(linearNormalize(-1, -1, -1, center=-1), 0.5), "uniform+center → 0.5")
 
 // Two-slope / diverging
-expect(approx(_linearNormalize(-2, -2, 4, center=0), 0), "div low")
-expect(approx(_linearNormalize(0, -2, 4, center=0), 0.5), "div center")
-expect(approx(_linearNormalize(4, -2, 4, center=0), 1), "div high")
-expect(approx(_linearNormalize(2, -2, 4, center=0), 0.75), "div half-high")
+expect(approx(linearNormalize(-2, -2, 4, center=0), 0), "div low")
+expect(approx(linearNormalize(0, -2, 4, center=0), 0.5), "div center")
+expect(approx(linearNormalize(4, -2, 4, center=0), 1), "div high")
+expect(approx(linearNormalize(2, -2, 4, center=0), 0.75), "div half-high")
 
-// Clamping via _fieldSampleNorm
-expect(approx(_fieldSampleNorm(-10, 0, 1), 0), "clamp low")
-expect(approx(_fieldSampleNorm(10, 0, 1), 1), "clamp high")
-expect(approx(_fieldSampleNorm(5, 0, 1, scale=false), 5), "scale=false raw")
+// Clamping via fieldSampleNorm
+expect(approx(fieldSampleNorm(-10, 0, 1), 0), "clamp low")
+expect(approx(fieldSampleNorm(10, 0, 1), 1), "clamp high")
+expect(approx(fieldSampleNorm(5, 0, 1, scale=false), 5), "scale=false raw")
 
 /* ---- Plot: uniform field must not explode ---- */
 var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)

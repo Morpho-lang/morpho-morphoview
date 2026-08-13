@@ -17,7 +17,7 @@ var v = View(g)
 for (i in 1...8) {
   if (v.closed) break
   var L = 0.8 + 0.1*Float(i)
-  var srt = _segmentSRT([0.05*Float(i), 0, 0], [0.05*Float(i), 0, L], 0.2)
+  var srt = segmentSRT([0.05*Float(i), 0, 0], [0.05*Float(i), 0, L], 0.2)
   g.move(id, srt[0], scale=srt[1], rotate=srt[2])
   System.sleep(0.05)
   v.poll(timeoutms=0)

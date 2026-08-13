@@ -34,8 +34,8 @@ var pFlat = Plot(am, color=Red, axes=true)
 expect(pFlat.bounds.count() == 3, "AreaMesh vertex dim is 3 even if planar")
 expect(pFlat.entries.contains("axes"), "planar 3D still gets axes")
 
-/* ---- shared nice ticks ---- */
-var ticks = _niceTicks(-1.2, 3.4, 5)
+/* ---- shared nice ticks (public ColorBar.ticks) ---- */
+var ticks = ColorBar().ticks(-1.2, 3.4, 5)
 expect(ticks.count() <= 5, "nice ticks respect nmax")
 
 /* ---- ColorBar alias + colorbar=true ---- */

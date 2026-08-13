@@ -295,7 +295,7 @@ class View with Listener {
   }
 
   _spawn() {
-    var bin = _morphoViewBin()
+    var bin = findMorphoViewBin()
     if (System.platform()=="windows") {
       system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-c', '${self.ep}'\"")
     } else {

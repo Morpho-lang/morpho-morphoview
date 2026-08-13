@@ -228,7 +228,7 @@ fn _plotClamp01(x) { return (x < 0) ? 0 : ((x > 1) ? 1 : x) }
 /** Linear map of val into [0,1] for colormap sampling.
  *  Zero data range (uniform field) → 0.5; never divides by zero.
  *  With center=: two-slope map vmin→0, center→0.5, vmax→1 (diverging). */
-fn _linearNormalize(val, vmin, vmax, center=nil) {
+fn linearNormalize(val, vmin, vmax, center=nil) {
   if (!isnil(center)) {
     if (val >= center) {
       var hi = vmax - center
@@ -246,11 +246,11 @@ fn _linearNormalize(val, vmin, vmax, center=nil) {
 }
 
 /** Clamp to [vmin,vmax] then normalize when scale=true; else return raw val. */
-fn _fieldSampleNorm(val, vmin, vmax, scale=true, center=nil) {
+fn fieldSampleNorm(val, vmin, vmax, scale=true, center=nil) {
   if (!scale) return val
   if (val < vmin) val = vmin
   if (val > vmax) val = vmax
-  return _linearNormalize(val, vmin, vmax, center=center)
+  return linearNormalize(val, vmin, vmax, center=center)
 }
 
 /** Resolve display range [vmin,vmax] from field bounds and optional cmin/cmax. */
@@ -298,7 +298,7 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
 
     for (i in 0...nv) {
       if (!isnil(sel) && !sel[0, i]) continue
-      var t = _fieldSampleNorm(field[0, i], vmin, vmax, scale=scale, center=center)
+      var t = fieldSampleNorm(field[0, i], vmin, vmax, scale=scale, center=center)
       cmat.setColumn(i, Matrix(cm.rgb(t)))
     }
 
@@ -313,7 +313,7 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
       var cmat = Matrix(3, nel)
       for (i in 0...nel) {
         if (!isnil(sel) && !sel[g, i]) continue
-        var t = _fieldSampleNorm(field[g, i], vmin, vmax, scale=scale, center=center)
+        var t = fieldSampleNorm(field[g, i], vmin, vmax, scale=scale, center=center)
         cmat.setColumn(i, Matrix(cm.rgb(t)))
       }
       col[g] = cmat

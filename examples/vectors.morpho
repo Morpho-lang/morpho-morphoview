@@ -16,7 +16,7 @@ var nFrames = 600
 var dt = 1/50
 var spacing = 0.32
 var tipFrac = 0.22   // Arrow tip length fraction (= aspectratio)
-var shaftAR = 0.12   // thinner shaft: R = 0.5 * L * shaftAR via _segmentSRT
+var shaftAR = 0.12   // thinner shaft: R = 0.5 * L * shaftAR via segmentSRT
 var vxScale = 0.35   // tanh scale for x-projection → color
 var cmap = TundraMap()
 
@@ -47,7 +47,7 @@ for (ix in 0...nX) {
     var f0 = field(ox, oy, 0)
     var start = [ox, oy, oz]
     var end = [ox, oy, oz + 0.35]
-    var srt = _segmentSRT(start, end, shaftAR)
+    var srt = segmentSRT(start, end, shaftAR)
     arrIds.append(g.display(proto, srt[0], scale=srt[1], rotate=srt[2],
                             color=colorByVx(f0[0])))
   }
@@ -66,7 +66,7 @@ for (frame in 1...nFrames) {
     if (!(nrm > 1e-8)) continue
     var len = 0.22 + 0.18*tanh(nrm)
     var tip = o + (len/nrm)*f
-    var srt = _segmentSRT(o, tip, shaftAR)
+    var srt = segmentSRT(o, tip, shaftAR)
     if (!isnil(srt)) {
       g.move(arrIds[i], srt[0], scale=srt[1], rotate=srt[2])
       g.recolor(arrIds[i], colorByVx(f[0]))
