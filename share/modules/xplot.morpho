@@ -4,7 +4,8 @@
  * Modernization of morpho `plot` against xgraphics / xcolor.
  * Canonical API: Plot(Mesh) / Plot(Selection) / Plot(Field) — class Plot is Scene.
  * Extend by subclassing Plot (override _drawMesh / _drawSelection / _drawField / _finish).
- * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot.
+ * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot
+ * (default style="thick": spheres + tubes, matching classic plot).
  * Presentation: axes=true (domain frame) + colorbar=true / ColorBar (ScaleBar alias).
  * Field coloring: linear normalize (safe on uniform fields) + optional center= for diverging maps.
  * Live: axes / colormap / range / center / refresh [view] mutate Scene (fields: morph via View, not recolor).
@@ -143,6 +144,12 @@ fn _styleHas(style, name) {
   if (isnil(style)) return false
   if (islist(style) || isarray(style)) return style.ismember(name)
   return style == name
+}
+
+/** Classic plotmesh look: Sphere / Cylinder unless the caller set style=. */
+fn _legacyStyle(style) {
+  if (isnil(style)) return "thick"
+  return style
 }
 
 /** Element ids of `grade` that pass an optional selection. */
@@ -1002,17 +1009,20 @@ class Plot is Scene {
 
 fn plotmesh(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
   return Plot(mesh, selection=selection, grade=grade, color=color,
-              filter=filter, transmit=transmit, style=style)
+              filter=filter, transmit=transmit, style=_legacyStyle(style))
 }
 
 fn plotselection(mesh, selection, grade=nil, filter=nil, transmit=nil, style=nil) {
-  return Plot(selection, mesh=mesh, grade=grade, filter=filter, transmit=transmit, style=style)
+  return Plot(selection, mesh=mesh, grade=grade, filter=filter, transmit=transmit,
+              style=_legacyStyle(style))
 }
 
 fn plotfield(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
              filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil, center=nil) {
-  return Plot(field, selection=selection, grade=grade, colormap=colormap, style=style, scale=scale,
-              filter=filter, transmit=transmit, scalebar=scalebar, cmin=cmin, cmax=cmax, center=center)
+  return Plot(field, selection=selection, grade=grade, colormap=colormap,
+              style=_legacyStyle(style), scale=scale,
+              filter=filter, transmit=transmit, scalebar=scalebar,
+              cmin=cmin, cmax=cmax, center=center)
 }
 
 /** Arrow RGB triad (distinct from axes=true domain frame). */
