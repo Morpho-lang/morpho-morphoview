@@ -139,7 +139,7 @@ fn _wantsGrade(grade, g) {
   return true
 }
 
-/** style= may be a string or list: "interpolate", "spheres", "tubes", "thick", … */
+/** style= may be a string or list: "interpolate", "shaded", "spheres", "tubes", "thick", … */
 fn _styleHas(style, name) {
   if (isnil(style)) return false
   if (islist(style) || isarray(style)) return style.ismember(name)
@@ -170,16 +170,61 @@ fn _asPlotColor(Coloring c) { return c }
 fn _asPlotColor(Matrix c) { return c }
 fn _asPlotColor(c) { _PltMshClErr.throw(); return nil }
 
-/** Deduces the plot color for a given grade. */
-fn _plotColorForGrade(grade, color) {
-  if (isnil(color)) return Gray(0.5)
+fn _asColoring(Coloring c) { return c }
+fn _asColoring(c) { return Color(c) }
+
+/** True if color= is one shared color (not a per-grade list / per-element matrix). */
+fn _isSharedPlotColor(color) {
+  if (isnil(color)) return true
+  if (ismatrix(color)) return false
   if (islist(color) || isarray(color)) {
-    if (color.count() == 3 && isnumber(color[0]) && isnumber(color[1]) && isnumber(color[2])) return color
-    if (isnil(color[grade])) return Gray(0.5)
-    return color[grade]
+    return color.count() == 3 && isnumber(color[0]) && isnumber(color[1]) && isnumber(color[2])
   }
-  if (istuple(color) && color.count() == 3 && isnumber(color[0])) return color
-  return _asPlotColor(color)
+  if (istuple(color) && color.count() == 3 && isnumber(color[0])) return true
+  return true
+}
+
+fn _gradeMax(glist) {
+  var m = glist[0]
+  for (g in glist) {
+    if (g > m) m = g
+  }
+  return m
+}
+
+/** Grades in `glist` that the mesh actually has. */
+fn _presentGrades(mesh, glist) {
+  var out = []
+  for (g in glist) {
+    if (mesh.count(g) > 0) out.append(g)
+  }
+  return out
+}
+
+/** Deduces the plot color for a given grade.
+ *  Shared color + a higher grade present → Darken (points/edges against faces). */
+fn _plotColorForGrade(grade, color, drawn=nil) {
+  var col
+  if (isnil(color)) {
+    col = Gray(0.5)
+  } else if (islist(color) || isarray(color)) {
+    if (color.count() == 3 && isnumber(color[0]) && isnumber(color[1]) && isnumber(color[2])) {
+      col = color
+    } else if (isnil(color[grade])) {
+      col = Gray(0.5)
+    } else {
+      col = color[grade]
+    }
+  } else if (istuple(color) && color.count() == 3 && isnumber(color[0])) {
+    col = color
+  } else {
+    col = _asPlotColor(color)
+  }
+
+  if (isnil(drawn) || drawn.count() == 0 || !_isSharedPlotColor(color)) return col
+  var gap = _gradeMax(drawn) - grade
+  if (gap <= 0) return col
+  return Darken(_asColoring(col), 1 - (2/3)^gap)
 }
 
 fn _plotColorForElement(Matrix color, element) { return color.column(element) }
@@ -698,7 +743,7 @@ class Plot is Scene {
       self.bounds = bb
       var planar = _planarAxis(bb)
       var got = self._facesItem(mesh, sel, col, self.filter, self.transmit,
-                                vertMat, bb, planar, _boundsCentroid(bb))
+                                vertMat, bb, planar, _boundsCentroid(bb), style=self.style)
       if (isnil(got)) return false
       var id = self.entries["faces"][0]
       var entry = self.findEntry(id)
@@ -767,8 +812,8 @@ class Plot is Scene {
   }
 
   /** Grade 0: PointCloud by default; style spheres/thick → Sphere loop. */
-  _pointsInto(mesh, selection, color, filter, transmit, style, vertMat) {
-    var vcol = _plotColorForGrade(0, color)
+  _pointsInto(mesh, selection, color, filter, transmit, style, vertMat, drawn=nil) {
+    var vcol = _plotColorForGrade(0, color, drawn=drawn)
     var np = mesh.count(0)
 
     if (_styleHas(style, "spheres") || _styleHas(style, "thick")) {
@@ -799,11 +844,11 @@ class Plot is Scene {
 
   /** Grade 1: LineSet by default; style tubes/thick → Cylinder loop.
    *  Per-edge colors duplicate endpoints; uniform color shares mesh verts. */
-  _linesInto(mesh, selection, color, filter, transmit, style, vertMat) {
+  _linesInto(mesh, selection, color, filter, transmit, style, vertMat, drawn=nil) {
     var lines = mesh.connectivitymatrix(0, 1)
     if (!issparse(lines)) return
 
-    var lcol = _plotColorForGrade(1, color)
+    var lcol = _plotColorForGrade(1, color, drawn=drawn)
     var nl = mesh.count(1)
 
     if (_styleHas(style, "tubes") || _styleHas(style, "thick")) {
@@ -850,14 +895,15 @@ class Plot is Scene {
     }
   }
 
-  /** Grade 2: TriangleComplex; discrete colors → GraphicsEntry.flat.
-   *  Interpolate path uses smooth vertex normals; discrete uses per-face normals.
-   *  Returns [TriangleComplex, flat] or nil. */
-  _facesItem(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid) {
+  /** Grade 2: TriangleComplex.
+   *  Default / per-element / selection → unlit (GraphicsEntry.flat).
+   *  style="shaded" or "interpolate" → Phong; smooth vertex normals if non-planar.
+   *  Returns [TriangleComplex, unlit] or nil. */
+  _facesItem(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid, drawn=nil, style=nil) {
     var faces = mesh.connectivitymatrix(0, 2)
     if (!issparse(faces)) return nil
 
-    var fcol = _plotColorForGrade(2, color)
+    var fcol = _plotColorForGrade(2, color, drawn=drawn)
     var nf = mesh.count(2)
     var nnt = isselection(selection) ? selection.idlistforgrade(2).count() : nf
 
@@ -866,9 +912,11 @@ class Plot is Scene {
         fcol.dimensions()[1] != nf &&
         fcol.dimensions()[1] == mesh.count(0)) interpolate = true
 
-    // Smooth normals only when interpolating on a non-planar mesh.
+    // Lit only when asked (shaded) or interpolating a field. Per-element hues stay unlit.
+    var wantShade = interpolate || _styleHas(style, "shaded")
+    var unlit = !wantShade || (_isPerElementColor(fcol, nf) && !interpolate)
     var vnorm = nil
-    if (interpolate && isnil(planar)) {
+    if (!unlit && isnil(planar)) {
       vnorm = _smoothVertexNormals(mesh, vertMat, centroid, selection=selection)
     }
 
@@ -909,20 +957,21 @@ class Plot is Scene {
     }
 
     return [TriangleComplex(nvert, norm, ncol, tri, filter=filter, transmit=transmit),
-            !interpolate]
+            unlit]
   }
 
-  _facesInto(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid) {
-    var got = self._facesItem(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid)
+  _facesInto(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid, drawn=nil, style=nil) {
+    var got = self._facesItem(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid,
+                             drawn=drawn, style=style)
     if (isnil(got)) return
-    // Discrete face/selection colors: unlit facets (GraphicsEntry.flat).
-    // Interpolated per-vertex field colors + smooth normals keep shaded lighting.
+    // Unlit facets unless style="shaded" or interpolate (Phong; smooth normals if curved).
     self._recordEntry("faces", self.display(got[0], flat=got[1]))
   }
 
   /** Display mesh grades. Default: PointCloud / LineSet / TriangleComplex. */
   _meshInto(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
     var glist = _gradeList(mesh, grade)
+    var drawn = _presentGrades(mesh, glist)
     var vertMat = _vertexMatrix3(mesh)
     var bb = _scientificBounds(mesh)
     self.bounds = bb
@@ -930,13 +979,14 @@ class Plot is Scene {
     var centroid = _boundsCentroid(bb)
 
     if (glist.ismember(0)) {
-      self._pointsInto(mesh, selection, color, filter, transmit, style, vertMat)
+      self._pointsInto(mesh, selection, color, filter, transmit, style, vertMat, drawn=drawn)
     }
     if (glist.ismember(1)) {
-      self._linesInto(mesh, selection, color, filter, transmit, style, vertMat)
+      self._linesInto(mesh, selection, color, filter, transmit, style, vertMat, drawn=drawn)
     }
     if (glist.ismember(2)) {
-      self._facesInto(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid)
+      self._facesInto(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid,
+                     drawn=drawn, style=style)
     }
   }
 

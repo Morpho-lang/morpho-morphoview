@@ -1,0 +1,96 @@
+// Diffusion-limited aggregation — live walker + growing cluster.
+// Adapted from morpho's examples/dla: a particle diffuses in from a
+// spawn sphere and sticks on first contact. Shared unit Sphere + pose.
+//
+//   morpho6 examples/dla.morpho
+//
+// Close the viewer window to exit early.
+
+import morphoview
+import xgraphics
+import xcolor
+import kdtree
+
+var Np = 120          // particles to attach (plus the seed)
+var r = 0.05          // particle radius (matches morpho examples/dla)
+var R = 3*r           // spawn-sphere radius (grows with the cluster)
+var delta = r         // Brownian step size
+var stepsPerFrame = 6 // walk steps between viewer updates
+var dt = 1/50
+var stick = 2*r       // centers sit this far apart on contact
+
+var seedCol = Color(1, 0.82, 0.38)
+var walkerCol = Color(0.95, 0.97, 1)
+var proto = Sphere([0, 0, 0], 1, color=White, maxrefine=2)
+
+fn randompt() {
+  var x = Matrix([randomnormal(), randomnormal(), randomnormal()])
+  return R*x/x.norm()
+}
+
+fn clusterColor(n) {
+  return HSV(200 - 140*Float(n)/Float(Np), 0.7, 0.95)
+}
+
+/** Place x on the sphere of radius `stick` around `nbr` (just-touching). */
+fn contactPoint(nbr, x) {
+  var d = x - nbr
+  var dist = d.norm()
+  if (dist < 1e-12) return nbr + Matrix([stick, 0, 0])
+  return nbr + (stick/dist)*d
+}
+
+var origin = Matrix([0, 0, 0])
+var pts = [origin]
+var tree = KDTree(pts)
+
+var g = Scene(title="DLA", background=Color(0.07, 0.08, 0.1))
+g.display(proto, origin, scale=r, color=seedCol)
+
+var x = randompt()
+var walker = g.display(proto, x, scale=r, color=walkerCol)
+var v = View(g, connecttimeout=20000)
+
+var n = 0
+while (n < Np) {
+  if (v.closed) break
+
+  var stuck = false
+  for (s in 0...stepsPerFrame) {
+    x += Matrix([delta*randomnormal(), delta*randomnormal(), delta*randomnormal()])
+
+    var nbr = tree.nearest(x).location
+    if ((nbr - x).norm() < stick) {
+      x = contactPoint(nbr, x)
+      tree.insert(x)
+      pts.append(x)
+      if (x.norm() > R/2) R = 2*x.norm()
+      n += 1
+      stuck = true
+      break
+    }
+
+    if (x.norm() > 2*R) x = randompt()
+  }
+
+  if (stuck) {
+    g.beginBatch()
+    g.move(walker, x)
+    g.recolor(walker, clusterColor(n))
+    x = randompt()
+    walker = g.display(proto, x, scale=r, color=walkerCol)
+    g.endBatch()
+  } else {
+    g.move(walker, x)
+  }
+
+  System.sleep(dt)
+  v.poll(timeoutms=0)
+}
+
+if (!v.closed) {
+  g.remove(walker)
+  v.wait()
+}
+if (!v.closed) v.close()
+print "ok"
