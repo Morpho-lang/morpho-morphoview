@@ -615,6 +615,12 @@ class Plot is Scene {
     self.entries.remove(role)
   }
 
+  /** Union with Graphics (`plot + g`). Returns Scene; left-hand ids kept. */
+  add(Graphics x) { return super.add(x) }
+
+  /** In-place union (`plot += g`). */
+  addr(Graphics x) { return super.addr(x) }
+
   _drawAxes(nticks=5) {
     if (isnil(self.bounds)) return
     self._recordEntry("axes", self.display(_domainWire(self.bounds, Color(0.55, 0.55, 0.6))))

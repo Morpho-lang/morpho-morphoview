@@ -97,6 +97,13 @@ expect(u.displaylist[2].id == 3 && u.displaylist[3].id == 4, "right ids remapped
 expect(b.displaylist[0].id == 1, "right Graphics unchanged")
 expect(u.display(PointCloud(Matrix([[3], [0], [0]]))) == 5, "ids continue after add")
 
+var uOp = a + b
+expect(uOp.displaylist.count() == 4, "a+b operator")
+var acc = Graphics()
+acc.display(PointCloud(Matrix([[0], [0], [0]])))
+acc.addr(b)
+expect(acc.displaylist.count() == 3, "addr appends in place")
+
 /* ---- Show still works from entries ---- */
 var buf = Buf()
 Show().write(gs, buf)

@@ -1,0 +1,51 @@
+// xplot Phase 6: Plot + Graphics (qtensor-style overlay).
+// Expect: prints "ok" then exits.
+//
+//   morpho6 tests/plot/phase6.morpho
+
+import meshtools
+import xplot
+import xcolor
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+var m = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
+var p = Plot(m, color=Red)
+var nPlot = p.displaylist.count()
+
+var g = Graphics()
+g.display(Cylinder([0, 0, 0], [1, 0, 0], aspectratio=0.1, color=Blue))
+g.display(Cylinder([0, 0, 0], [0, 1, 0], aspectratio=0.1, color=Green))
+expect(g.displaylist.count() == 2, "two cylinders")
+
+var u = p + g
+expect(u.displaylist.count() == nPlot + 2, "plot + graphics count")
+expect(p.displaylist.count() == nPlot, "+ leaves Plot unchanged")
+expect(g.displaylist.count() == 2, "+ leaves Graphics unchanged")
+
+var u2 = p.add(g)
+expect(u2.displaylist.count() == nPlot + 2, "Plot.add(Graphics) count")
+
+var p2 = Plot(m, color=Red)
+var n2 = p2.displaylist.count()
+p2.addr(g)
+expect(p2.displaylist.count() == n2 + 2, "addr grows Plot")
+
+var S = Field(m, fn (x, y, z) x)
+var splot = plotfield(S, style="interpolate", colormap=ViridisMap())
+var overlay = Graphics()
+var vmat = m.vertexmatrix()
+for (i in 0...m.count(0)) {
+  var x = vmat.column(i)
+  overlay.display(Cylinder(x - Matrix([0.05, 0, 0]), x + Matrix([0.05, 0, 0]),
+                           aspectratio=0.3))
+}
+var gdisp = splot + overlay
+expect(gdisp.displaylist.count() > splot.displaylist.count(), "plotfield + overlay")
+
+print "ok"
