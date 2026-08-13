@@ -118,6 +118,10 @@ class ColorDelegate is Coloring {
   transform(Color c) { return c }
   color(x) { return self.transform(Color(self.inner.rgba(x))) }
   rgb(x) { var c = self.color(x); return (c.r, c.g, c.b) }
+  rgba(x) {
+    var c = self.color(x)
+    return (c.r, c.g, c.b, c.a)
+  }
   alpha(x) { return self.color(x).a }
 }
 
