@@ -99,25 +99,25 @@ fn _effectiveRadius(scale) {
   return scale
 }
 
-/** Angle-axis [phi, ax, ay, az] rotating unit @p from onto unit @p to.
- *  Aligned → [0, 1, 0, 0] (so move can clear a prior tilt). */
+/** Angle-axis (phi, ax, ay, az) rotating unit @p from onto unit @p to.
+ *  Aligned → (0, 1, 0, 0) (so move can clear a prior tilt). */
 fn _axisAngleFromTo(from, to) {
   var d = from.inner(to)
-  if (d > 1 - 1e-8) return [0, 1, 0, 0]
+  if (d > 1 - 1e-8) return (0, 1, 0, 0)
   if (d < -1 + 1e-8) {
     var ax = _normalVector(from)
     var n = ax.norm()
     if (n < _eps) ax = Matrix([1, 0, 0])
     else ax = ax/n
-    return [Pi, ax[0], ax[1], ax[2]]
+    return (Pi, ax[0], ax[1], ax[2])
   }
   var axis = _cross3D(from, to)
   axis = axis/axis.norm()
   var phi = acos(d)
-  return [phi, axis[0], axis[1], axis[2]]
+  return (phi, axis[0], axis[1], axis[2])
 }
 
-/** start→end + aspectratio → [position, scale Matrix(R,R,L), rotate]; nil if degenerate.
+/** start→end + aspectratio → (position, scale Matrix(R,R,L), rotate); nil if degenerate.
  *  Unit shaft is +z, height 1, radius 1; world radius = 0.5 * length * aspectratio. */
 fn segmentSRT(start, end, aspectratio) {
   var x1 = _asPosition(start)
@@ -127,28 +127,30 @@ fn segmentSRT(start, end, aspectratio) {
   if (!(length > 1e-8)) return nil
   var R = 0.5*length*aspectratio
   var rotate = _axisAngleFromTo(Matrix([0, 0, 1]), dx/length)
-  return [x1, Matrix([R, R, length]), rotate]
+  return (x1, Matrix([R, R, length]), rotate)
 }
+
+fn _asColoring(Coloring c) { return c }
+fn _asColoring(c) { return asColoring(c) }
 
 /* **************************************
  * Graphics primitives
  **************************************** */
 
-/** Shared albedo + POVRay-style opacity flags for every displayable item.
- *  Typed MD on GraphicsPrimitive collapses Show color/opacity lookups. */
+/** Shared albedo for every displayable item. Transparency is Color.a / Coloring. */
 class GraphicsPrimitive {
-  init(color=nil, filter=nil, transmit=nil) {
-    self.color = color
-    self.filter = filter
-    self.transmit = transmit
+  init(color=nil) {
+    self.color = _asColoring(color)
   }
+
+  toTriangleComplex() { return nil }
 }
 
 /** TriangleComplexes are a basic graphical unit that draw a set of triangles
    from a given set of vertices. */
 class TriangleComplex is GraphicsPrimitive {
-  init(position, normals, color, connectivity, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit)
+  init(position, normals, color, connectivity) {
+    super.init(color=color)
     self.position = position /* Vertex position matrix */
     self.normals = normals /* Matrix of normal vectors */
     self.connectivity = connectivity /* Connectivity matrix; columns are triangles */
@@ -163,8 +165,8 @@ class TriangleComplex is GraphicsPrimitive {
   @param[in] n - number of faces to use
   @param[in] color - Color of the cylinder */
 class Cylinder is GraphicsPrimitive {
-  init(start, end, aspectratio=0.1, n=10, color=nil, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit)
+  init(start, end, aspectratio=0.1, n=10, color=nil) {
+    super.init(color=color)
     self.start = Matrix(start)
     self.end = Matrix(end)
     self.aspectratio = aspectratio
@@ -317,8 +319,8 @@ fn _uvSphere(level) {
 
 /** Draws a sphere */
 class Sphere is GraphicsPrimitive {
-  init(center, r, color=nil, maxrefine=3, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit)
+  init(center, r, color=nil, maxrefine=3) {
+    super.init(color=color)
     self.center = center
     self.r = r
     self.maxrefine = maxrefine
@@ -342,8 +344,7 @@ class Sphere is GraphicsPrimitive {
     var r = scale ? self.r : 1
     if (!scale) x0 = Matrix([0, 0, 0])
     for (i in 0...nv) v.setcolumn(i, x0 + r * unit.column(i))
-    return TriangleComplex(v, unit.clone(), col, mesh[1].clone(),
-                           filter=self.filter, transmit=self.transmit)
+    return TriangleComplex(v, unit.clone(), col, mesh[1].clone())
   }
 }
 
@@ -354,8 +355,8 @@ class Sphere is GraphicsPrimitive {
   @param[in] n - number of faces to use
   @param[in] color - Color of the arrow */
 class Arrow is GraphicsPrimitive {
-  init(start, end, aspectratio=0.1, n=10, color=nil, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit)
+  init(start, end, aspectratio=0.1, n=10, color=nil) {
+    super.init(color=color)
     self.start = Matrix(start)
     self.end = Matrix(end)
     self.aspectratio = aspectratio
@@ -494,8 +495,8 @@ class Tube is GraphicsPrimitive {
     return out
   }
 
-  init(pts, rad, n=10, color=nil, closed=false, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit)
+  init(pts, rad, n=10, color=nil, closed=false) {
+    super.init(color=color)
     self.pts = pts
     self.radius = rad
     self.n = n
@@ -618,7 +619,7 @@ class Tube is GraphicsPrimitive {
       }
     }
 
-    return TriangleComplex(vertices, normals, col, conn, filter=self.filter, transmit=self.transmit)
+    return TriangleComplex(vertices, normals, col, conn)
   }
 
 }
@@ -628,8 +629,8 @@ class Tube is GraphicsPrimitive {
  **************************************** */
 
 class Text is GraphicsPrimitive {
-  init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit)
+  init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil) {
+    super.init(color=color)
     self.posn = posn
     if (islist(self.posn)) self.posn = Matrix(self.posn)
 
@@ -666,8 +667,7 @@ class Text is GraphicsPrimitive {
 /** Copy Text with origin posn — pose lives on the GraphicsEntry (Phase 5f). */
 fn _textAtOrigin(Text item) {
   return Text(item.string, [0, 0, 0], dirn=item.dirn, vertical=item.vertical,
-              size=item.size, font=item.font, color=item.color,
-              filter=item.filter, transmit=item.transmit)
+              size=item.size, font=item.font, color=item.color)
 }
 
 class Font {
@@ -692,8 +692,8 @@ fn _asVertexMatrix(pts) { // list of points
 /** Point cloud — positions as Matrix columns (or list of points).
   Optional uniform or per-vertex `color`. Emits viewer points (`p`), not spheres. */
 class PointCloud is GraphicsPrimitive {
-  init(position, color=nil, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit)
+  init(position, color=nil) {
+    super.init(color=color)
     self.position = _asVertexMatrix(position)
   }
 }
@@ -705,16 +705,16 @@ class PointCloud is GraphicsPrimitive {
   Color and flags are keyword args (Morpho optionals are not positional). */
 class LineSet is GraphicsPrimitive {
   // Polyline through successive vertices
-  init(position, color=nil, closed=false, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit)
+  init(position, color=nil, closed=false) {
+    super.init(color=color)
     self.position = _asVertexMatrix(position)
     self.connectivity = nil
     self.closed = closed
   }
 
   // Explicit segments
-  init(position, connectivity, color=nil, closed=false, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit)
+  init(position, connectivity, color=nil, closed=false) {
+    super.init(color=color)
     self.position = _asVertexMatrix(position)
     self.connectivity = connectivity
     self.closed = closed
@@ -774,8 +774,15 @@ class GraphicsEntry {
     self.position = _asPosition(position)
     self.scale = _asScale(scale)
     self.rotate = rotate
-    self.color = color             // presentation albedo (Sphere / recolor); nil → item
+    self.color = _asColoring(color) // presentation albedo (Sphere / recolor); nil → item
     self.flat = false              // unlit draw (set true for solid facet colors)
+  }
+
+  /** Axis-angle rotate → 3×3; nil if identity / missing. */
+  rotationMatrix() {
+    var r = self.rotate
+    if (isnil(r) || abs(r[0]) < 1e-8) return nil
+    return _rotation(r[0], [r[1], r[2], r[3]])
   }
 }
 
@@ -836,20 +843,19 @@ class GraphicsEventReplaced is GraphicsEvent {}
 
 /** Unit Sphere for entry storage (pose lives on the GraphicsEntry). */
 fn _unitSphere(Sphere item) {
-  return Sphere([0, 0, 0], 1, color=item.color, maxrefine=item.maxrefine,
-                filter=item.filter, transmit=item.transmit)
+  return Sphere([0, 0, 0], 1, color=item.color, maxrefine=item.maxrefine)
 }
 
 /** Unit Cylinder for entry storage (pose lives on the GraphicsEntry). */
 fn _unitCylinder(Cylinder item) {
   return Cylinder([0, 0, 0], [0, 0, 1], aspectratio=item.aspectratio, n=item.n,
-                  color=item.color, filter=item.filter, transmit=item.transmit)
+                  color=item.color)
 }
 
 /** Unit Arrow for entry storage (pose lives on the GraphicsEntry). */
 fn _unitArrow(Arrow item) {
   return Arrow([0, 0, 0], [0, 0, 1], aspectratio=item.aspectratio, n=item.n,
-               color=item.color, filter=item.filter, transmit=item.transmit)
+               color=item.color)
 }
 
 /** Show mesh-cache key for a unit primitive (entry.scale used by Sphere refine). */
@@ -875,8 +881,8 @@ class Graphics {
     self._nextId = 1
     self.title = title
     if (!self.title) self.title="Morpho" // Title to show
-    self.background = background
-    if (!self.background) self.background = Black
+    self.background = isnil(background) ? Black : _asColoring(background)
+    if (isnil(self.background)) self.background = Black
   }
 
   /** Look up an entry by Graphics-owned id; nil if missing. */
@@ -924,16 +930,13 @@ class Graphics {
                              color=color, flat=flat)
   }
 
-  /** Append a non-Sphere item (identity SRT). Returns Graphics-owned id, or nil. */
-  display(item, color=nil, flat=nil) {
-    if (!isobject(item)) return nil
+  /** Append a GraphicsPrimitive (identity SRT). Returns Graphics-owned id. */
+  display(GraphicsPrimitive item, color=nil, flat=nil) {
     return self._append(item, color=color, flat=flat)
   }
 
-  /** Non-Sphere with pose: 2nd positional position + scale=/rotate=/color=/flat=.
-   *  Returns Graphics-owned id, or nil. */
-  display(item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    if (!isobject(item)) return nil
+  /** GraphicsPrimitive with pose: 2nd positional position + scale=/rotate=/color=/flat=. */
+  display(GraphicsPrimitive item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
     return self._append(item, position=position, scale=scale, rotate=rotate,
                         color=color, flat=flat)
   }
@@ -985,6 +988,24 @@ class Graphics {
     var col = isnil(color) ? item.color : color
     return self._append(_textAtOrigin(item), position=position, scale=scale,
                         rotate=rotate, color=col, flat=flat)
+  }
+
+  /** PointCloud defaults to unlit (entry.flat). */
+  display(PointCloud item, color=nil, flat=nil) {
+    return self._append(item, color=color, flat=isnil(flat) ? true : flat)
+  }
+  display(PointCloud item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
+    return self._append(item, position=position, scale=scale, rotate=rotate,
+                        color=color, flat=isnil(flat) ? true : flat)
+  }
+
+  /** LineSet defaults to unlit (entry.flat). */
+  display(LineSet item, color=nil, flat=nil) {
+    return self._append(item, color=color, flat=isnil(flat) ? true : flat)
+  }
+  display(LineSet item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
+    return self._append(item, position=position, scale=scale, rotate=rotate,
+                        color=color, flat=isnil(flat) ? true : flat)
   }
 
   /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
@@ -1053,7 +1074,7 @@ class Scene is Graphics with Broadcaster {
   recolor(id, color) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    e.color = color
+    e.color = _asColoring(color)
     self.notify(GraphicsEventRecolored(id))
     return true
   }
@@ -1069,9 +1090,9 @@ class Scene is Graphics with Broadcaster {
   }
 
   /** Replace entry item; SRT unchanged. Full redefine in the viewer (not same-length U V). */
-  replace(id, item) {
+  replace(id, GraphicsPrimitive item) {
     var e = self.findEntry(id)
-    if (isnil(e) || !isobject(item)) return false
+    if (isnil(e)) return false
     e.item = item
     self.notify(GraphicsEventReplaced(id))
     return true
@@ -1103,12 +1124,16 @@ class Scene is Graphics with Broadcaster {
 
   /** Same-length mesh swap: set entry.item only. Pair with View.refreshMesh or View.morph.
    *  Connectivity changes need replace. */
-  morph(id, item) {
+  morph(id, GraphicsPrimitive item) {
     var e = self.findEntry(id)
-    if (isnil(e) || !isobject(item)) return false
+    if (isnil(e)) return false
     e.item = item
     return true
   }
+
+  morph(id, item) { return false }
+
+  replace(id, item) { return false }
 
   /** Union as Scene. Entry copies; no Defined notifications. */
   add(Graphics right) {
@@ -1168,6 +1193,83 @@ fn findMorphoViewBin() {
   return _mvbin
 }
 
+/** Resolve font files and common font roles across platforms.
+ *  Returns a font *name* for `Text(..., font=...)`, or nil → Show default. */
+class FontFinder {
+  init() { }
+
+  folders() {
+    var platform = System.platform()
+    if (platform=="macos") return ["/System/Library/Fonts"]
+    if (platform=="windows") return [Folder.normalizePath("C:/Windows/Fonts")]
+    return ["/usr/share/fonts", "/usr/local/share/fonts"]
+  }
+
+  match(file, font) {
+    var parts = file.split(".")
+    var n = parts.count()
+    if (n < 2) return false
+    var ext = parts[n-1]
+    var base = file.substring(0, file.count() - ext.count() - 1)
+    return base==font && (ext=="ttc" || ext=="ttf")
+  }
+
+  search(folder, font) {
+    if (!Folder.isFolder(folder)) return nil
+    for (f in Folder.contents(folder)) {
+      var path = Folder.normalizePath("${folder}/${f}")
+      if (self.match(f, font)) return path
+      if (Folder.isFolder(path)) {
+        var nested = self.search(path, font)
+        if (nested) return nested
+      }
+    }
+    return nil
+  }
+
+  /** Filesystem path for a font name, or nil. */
+  find(font) {
+    for (folder in self.folders()) {
+      var found = self.search(folder, font)
+      if (found) return found
+    }
+    return nil
+  }
+
+  /** First candidate that resolves on this machine, else nil. */
+  pick(candidates) {
+    for (name in candidates) {
+      if (self.find(name)) return name
+    }
+    return nil
+  }
+
+  /** Platform default body face (Helvetica / arial / FreeSans). */
+  default() {
+    var platform = System.platform()
+    var candidates
+    if (platform=="macos") {
+      candidates = ["Helvetica", "Arial", "DejaVuSans", "FreeSans"]
+    } else if (platform=="windows") {
+      candidates = ["arial", "segoeui", "calibri", "tahoma"]
+    } else {
+      candidates = ["DejaVuSans", "FreeSans", "LiberationSans", "NimbusSans-Regular", "Ubuntu-R"]
+    }
+    var name = self.pick(candidates)
+    return isnil(name) ? candidates[0] : name
+  }
+
+  /** Math / emoji / symbol coverage when available. */
+  symbol() {
+    return self.pick(["Apple Symbols", "seguisym", "DejaVuSans", "FreeSans", "Symbola"])
+  }
+
+  /** CJK body face when available. */
+  cjk() {
+    return self.pick(["Hiragino Sans GB", "msyh", "NotoSansCJK-Regular", "NotoSansCJKjp-Regular", "TakaoPGothic"])
+  }
+}
+
 /* **************************************
  * Show a graphics object
  *
@@ -1190,7 +1292,6 @@ class Show {
     self.textIds = Dictionary()      // graphicsId → true if TEXT draw-slot (no `X O`)
     self.vertexLayout = Dictionary() // graphicsId → "xn" | "xnc" (TriangleComplex)
     self.meshCache = Dictionary()    // mesh key → viewer object id (shared geometry)
-    self._currentEntry = nil
     self._lastColorId = nil
     self._lastVertexLayout = nil
   }
@@ -1264,19 +1365,16 @@ class Show {
     return Float(x).format("%0.3g")
   }
 
-  /* Bake via item.toTriangleComplex(). Separate from visit(item) so typed overloads
-   * can fall back without recursing into themselves. */
-  visitGeneric(item, out) {
+  /* Bake via item.toTriangleComplex(). Separate from visit(entry, item) so typed
+   * overloads can fall back without recursing into themselves. */
+  visitGeneric(entry, item, out) {
     var tri = item.toTriangleComplex()
     if (isnil(tri)) return // e.g. zero-length Cylinder/Arrow
-    // Most converters drop filter/transmit (Tube keeps them); copy from source.
-    if (!isnil(item.filter)) tri.filter = item.filter
-    if (!isnil(item.transmit)) tri.transmit = item.transmit
-    self.visit(tri, out)
+    self.visit(entry, tri, out)
   }
 
-  visit(item, out) {
-    self.visitGeneric(item, out)
+  visit(entry, GraphicsPrimitive item, out) {
+    self.visitGeneric(entry, item, out)
   }
 
   /** Emit entry i / s / r (no translation, no draw). */
@@ -1323,15 +1421,8 @@ class Show {
     }
   }
 
-  /** Entry for a draw under visit: prefer `_currentEntry`, else synthetic id 0. */
-  _drawEntry(item) {
-    if (!isnil(self._currentEntry)) return self._currentEntry
-    return GraphicsEntry(0, item)
-  }
-
   /** Record graphicsId → viewer id (and optional draw color / flat shade / layout). */
-  _recordObject(viewerid, colorid=nil, flat=false) {
-    var entry = self._currentEntry
+  _recordObject(entry, viewerid, colorid=nil, flat=false) {
     if (isnil(entry) || entry.id == 0) return
     self.objectMap[entry.id] = viewerid
     if (!isnil(colorid)) self.entryColorId[entry.id] = colorid
@@ -1342,8 +1433,7 @@ class Show {
   }
 
   /** Record a TEXT draw-slot (objectMap sentinel = graphicsId; never emit `X O`). */
-  _recordText(colorid=nil) {
-    var entry = self._currentEntry
+  _recordText(entry, colorid=nil) {
     if (isnil(entry) || entry.id == 0) return
     self.objectMap[entry.id] = entry.id
     self.textIds[entry.id] = true
@@ -1394,17 +1484,12 @@ class Show {
   _itemRgb(GraphicsPrimitive item) { return self._rgbValue(item.color) }
   _itemRgb(item) { return _defaultRgb }
 
-  /** Normalize Matrix / list / tuple / Coloring values to RGB (via protocol, not fields). */
+  _perElement(ColorTable col) { return col.count() > 1 }
+  _perElement(Coloring col) { return false }
+  _perElement(col) { return false }
+
   _rgbValue(Coloring col) { return col.rgb(0) }
-  _rgbValue(Matrix col) { return (col[0,0], col[1,0], col[2,0]) }
-  _rgbValue(List col) { return col }
-  _rgbValue(Tuple col) { return col }
-  _rgbValue(col) {
-    if (isnil(col)) return _defaultRgb
-    // Upstream `import color` (not Coloring): shared rgb(x) interface.
-    if (isobject(col)) return col.rgb(0)
-    return _defaultRgb
-  }
+  _rgbValue(col) { return _defaultRgb }
 
   /** Recolor: ensure `c`/`C`, then `d <graphicsId>` with no transforms (matrix preserved). */
   emitEntryRecolor(graphic, graphicsId, out) {
@@ -1531,60 +1616,21 @@ class Show {
     return false
   }
 
-  /** Alpha from Coloring.alpha / 4-vector (maps default opaque via protocol). */
+  /** Alpha from Coloring. ColorTable is per-element; do not collapse on first-vertex alpha. */
   _clamp01(a) { return (a < 0) ? 0 : ((a > 1) ? 1 : a) }
 
+  _colorAlpha(ColorTable col) { return 1 }
   _colorAlpha(Coloring col) { return self._clamp01(col.alpha(0)) }
-  _colorAlpha(List col) {
-    if (col.count() < 4) return 1
-    return self._clamp01(col[3])
-  }
-  _colorAlpha(Tuple col) {
-    if (col.count() < 4) return 1
-    return self._clamp01(col[3])
-  }
-  _colorAlpha(Matrix col) {
-    if (col.dimensions()[0] < 4) return 1
-    return self._clamp01(col[3, 0])
-  }
   _colorAlpha(col) { return 1 }
 
   /** Item color field (GraphicsPrimitive.color). */
   _itemColor(GraphicsPrimitive item) { return item.color }
   _itemColor(item) { return nil }
 
-  /** True if POVRay-style transmit/filter was supplied on the item. */
-  _hasTransmitFilter(item) {
-    return !isnil(item.transmit) || !isnil(item.filter)
-  }
-
-  /** POVRay transmit/filter → OpenGL alpha: a = 1 - clamp(transmit + filter, 0, 1). */
-  _transmitFilterAlpha(item) {
-    var t = isnil(item.transmit) ? 0 : item.transmit
-    var f = isnil(item.filter) ? 0 : item.filter
-    var a = 1 - (t + f)
-    return (a < 0) ? 0 : ((a > 1) ? 1 : a)
-  }
-
   /** Presentation / item Color.a (entry.color wins over item color). */
-  _entryColorAlpha(entry) {
+  opacity(GraphicsEntry entry) {
     if (!isnil(entry.color)) return self._colorAlpha(entry.color)
     return self._colorAlpha(self._itemColor(entry.item))
-  }
-
-  /** Prefer transmit/filter when set (graphics/POVRay); else Color.a.
-   *  Color stays a simple RGBA value; opacity policy lives here. */
-  opacity(GraphicsEntry entry) {
-    if (self._hasTransmitFilter(entry.item)) return self._transmitFilterAlpha(entry.item)
-    return self._entryColorAlpha(entry)
-  }
-
-  opacity(item) {
-    if (self._hasTransmitFilter(item)) return self._transmitFilterAlpha(item)
-    if (!isnil(self._currentEntry) && !isnil(self._currentEntry.color)) {
-      return self._colorAlpha(self._currentEntry.color)
-    }
-    return self._colorAlpha(self._itemColor(item))
   }
 
   /** Uniform RGB for a TriangleComplex (first vertex if per-vertex colors). */
@@ -1637,34 +1683,25 @@ class Show {
     }
   }
 
-  /** Position + normal [+ color] float rows only (shared by define `v` and `U V`). */
+  /** Position + normal [+ RGB] float rows only (shared by define `v` and `U V`).
+   *  ColorTable per-element alpha is dropped until viewer xnca. */
   _triangleComplexVertexFloats(item, out, includecolor=true) {
     var x = item.position
     var n = item.normals
     var col = item.color
-    var localColor = false
+    var indexed = self._perElement(col)
+    var rgb = indexed ? nil : self._rgbValue(col)
     var dimensions = x.dimensions()
     var dim = dimensions[0]
     var nv = dimensions[1]
-
-    if (includecolor) {
-      if (ismatrix(col)) {
-        if (col.dimensions()[1] > 1) localColor = true
-      } else if (!isnil(col)) {
-        col = self._rgbValue(col)
-      }
-    }
 
     for (i in 0...nv) {
       var line = ""
       for (j in 0...dim) line += "${self.fmt(x[j,i])} "
       for (j in 0...dim) line += "${self.fmt(n[j,i])} "
       if (includecolor) {
-        if (localColor) {
-          for (j in 0...3) line += "${self.fmt(col[j,i])} "
-        } else {
-          for (j in 0...col.count()) line += "${self.fmt(col[j])} "
-        }
+        var c = indexed ? col.rgb(i) : rgb
+        line += "${self.fmt(c[0])} ${self.fmt(c[1])} ${self.fmt(c[2])} "
       }
       out.write(line)
     }
@@ -1682,13 +1719,14 @@ class Show {
 
   /** Define a TriangleComplex (`o`/`v`/`f`, optional `C`); returns viewer object id.
    *  Sets `self._lastColorId` when a uniform `C` is selected (else nil).
-   *  Sets `self._lastVertexLayout` to `"xn"` (translucent) or `"xnc"` (opaque). */
-  defineTriangleComplex(item, out) {
+   *  Sets `self._lastVertexLayout` to `"xn"` (translucent) or `"xnc"` (opaque).
+   *  ColorTable meshes stay `"xnc"` (per-vertex RGB; alpha deferred). */
+  defineTriangleComplex(entry, item, out) {
     var id = self.uid()
-    var alpha = self.opacity(item)
+    var indexed = isnil(entry.color) && self._perElement(item.color)
+    var alpha = indexed ? 1 : self.opacity(entry)
     self._lastColorId = nil
     if (alpha < 0.999) {
-      // Uniform albedo + alpha (viewer transparent pass); vertex colors deferred.
       var cid = self.addRgb(self.uniformRgb(item), alpha, out)
       self._lastColorId = cid
       self._lastVertexLayout = "xn"
@@ -1703,33 +1741,22 @@ class Show {
     return id
   }
 
-  /** From visitGeneric (baked Sphere/Cylinder/…): draw with `_currentEntry` when set. */
-  visit(TriangleComplex item, out) {
-    var vid = self.defineTriangleComplex(item, out)
-    self._recordObject(vid, colorid=self._lastColorId)
-    self.emitEntryDraw(self._drawEntry(item), out, viewerid=vid)
-  }
-
   /** Uniform RGB for PointCloud / LineSet color field. */
   pointLineRgb(item) {
     return self._rgbValue(item.color)
   }
 
-  /** Emit vertex positions (+ optional per-vertex color) for points/lines. */
+  /** Emit vertex positions (+ optional per-vertex RGB) for points/lines. */
   pointLineVertexData(item, out, includecolor=true) {
     var x = item.position
     var col = item.color
-    var localColor = false
+    var indexed = self._perElement(col)
+    var rgb = indexed ? nil : self._rgbValue(col)
     var dimensions = x.dimensions()
     var dim = dimensions[0]
     var nv = dimensions[1]
 
     if (includecolor) {
-      if (ismatrix(col)) {
-        if (col.dimensions()[1] > 1) localColor = true
-      } else if (!isnil(col)) {
-        col = self._rgbValue(col)
-      }
       out.write("v \"xc\"")
     } else {
       out.write("v \"x\"")
@@ -1739,24 +1766,18 @@ class Show {
       var line = ""
       for (j in 0...dim) line += "${self.fmt(x[j,i])} "
       if (includecolor) {
-        if (localColor) {
-          for (j in 0...3) line += "${self.fmt(col[j,i])} "
-        } else if (islist(col) || (isobject(col) && !ismatrix(col))) {
-          for (j in 0...col.count()) line += "${self.fmt(col[j])} "
-        } else if (ismatrix(col)) {
-          for (j in 0...3) line += "${self.fmt(col[j,0])} "
-        } else {
-          line += "0.5 0.5 0.5 "
-        }
+        var c = indexed ? col.rgb(i) : rgb
+        line += "${self.fmt(c[0])} ${self.fmt(c[1])} ${self.fmt(c[2])} "
       }
       out.write(line)
     }
   }
 
   /** Define PointCloud geometry (`o`/`v`/`p`); sets `_lastColorId`. Returns viewer id or nil. */
-  definePointCloud(item, out) {
+  definePointCloud(entry, item, out) {
     var id = self.uid()
-    var alpha = self.opacity(item)
+    var indexed = isnil(entry.color) && self._perElement(item.color)
+    var alpha = indexed ? 1 : self.opacity(entry)
     var nv = item.position.dimensions()[1]
     if (nv < 1) return nil
     self._lastColorId = nil
@@ -1778,9 +1799,10 @@ class Show {
   }
 
   /** Define LineSet geometry (`o`/`v`/`l`); sets `_lastColorId`. Returns viewer id or nil. */
-  defineLineSet(item, out) {
+  defineLineSet(entry, item, out) {
     var id = self.uid()
-    var alpha = self.opacity(item)
+    var indexed = isnil(entry.color) && self._perElement(item.color)
+    var alpha = indexed ? 1 : self.opacity(entry)
     var nv = item.position.dimensions()[1]
     var segs = item._segmentIndices()
     if (nv < 1 || segs.count() < 2) return nil
@@ -1802,78 +1824,8 @@ class Show {
     return id
   }
 
-  visit(PointCloud item, out) {
-    out.write("M flat")
-    var id = self.definePointCloud(item, out)
-    if (isnil(id)) { out.write("M shaded"); return }
-    self._recordObject(id, colorid=self._lastColorId, flat=true)
-    self.emitEntryDraw(self._drawEntry(item), out, viewerid=id)
-    out.write("M shaded")
-  }
-
-  visit(LineSet item, out) {
-    out.write("M flat")
-    var id = self.defineLineSet(item, out)
-    if (isnil(id)) { out.write("M shaded"); return }
-    self._recordObject(id, colorid=self._lastColorId, flat=true)
-    self.emitEntryDraw(self._drawEntry(item), out, viewerid=id)
-    out.write("M shaded")
-  }
-
-  fontPath() {
-    var platform = System.platform()
-    if (platform=="macos") {
-      return ["/System/Library/Fonts"]
-    } else if (platform=="windows") {
-      return [Folder.normalizePath("C:/Windows/Fonts")]
-    } else return ["/usr/share/fonts","/usr/local/share/fonts"]
-  }
-
-  matchFontFile(file, font) {
-    var fname = file.split(".")
-    if (fname[0]==font &&
-        (fname[1]=="ttc" || fname[1]=="ttf")) return true
-    return false
-  }
-
-  searchFontFolder(folder, font) {
-    for (f in Folder.contents(folder)) {
-      var path = Folder.normalizePath("${folder}/${f}")
-      if (self.matchFontFile(f, font)) return path
-
-      if (Folder.isFolder(path)) { // Recurse
-        var result = self.searchFontFolder(path, font)
-        if (result) return result
-      }
-    }
-    return nil
-  }
-
-  findFont(font) {
-    var base = self.fontPath()
-    for (f in base) {
-      var found = self.searchFontFolder(f, font)
-      if (found) return found
-    }
-    return nil
-  }
-
-  /** First resolvable face for this platform (falls back to a conventional name). */
-  defaultFontName() {
-    var platform = System.platform()
-    var candidates
-    if (platform=="macos") {
-      candidates = ["Helvetica", "Arial", "DejaVuSans", "FreeSans"]
-    } else if (platform=="windows") {
-      candidates = ["arial", "segoeui", "calibri", "tahoma"]
-    } else {
-      candidates = ["DejaVuSans", "FreeSans", "LiberationSans", "NimbusSans-Regular", "Ubuntu-R"]
-    }
-    for (name in candidates) {
-      if (self.findFont(name)) return name
-    }
-    return candidates[0]
-  }
+  findFont(font) { return FontFinder().find(font) }
+  defaultFontName() { return FontFinder().default() }
 
   addFont(font, size, out) {
     var path = self.findFont(font)
@@ -1891,28 +1843,6 @@ class Show {
       if (f.name == font && f.size == size) return f.id
     }
     return self.addFont(font, size, out)
-  }
-
-  visit(Text item, out) {
-    /* Bare Text (no entry): legacy append `T <fontid> "…"` with item.posn baked. */
-    var font = item.font
-    if (isnil(font) || !font) font = self.defaultFontName()
-    var fid = self.findFontId(font, item.size, out)
-
-    if (!isnil(item.color)) {
-      var cid = self.addRgb(self._rgbValue(item.color), 1, out)
-      out.write("C ${cid}")
-    }
-
-    out.write("i")
-    var m = item.transformationMatrix()
-    if (!isnil(m)) {
-      var str = "m"
-      for (i in 0..3) for (j in 0..3) str+=" "+self.fmt(m[i,j])
-      out.write(str)
-    }
-    out.write("t ${self.fmt(item.posn[0])} ${self.fmt(item.posn[1])} ${self.fmt(item.posn[2])}")
-    out.write("T ${fid} \"${item.string}\"")
   }
 
   /** Entry SRT (+ optional dirn/vertical `m` before translation) before `T` / pose `d`. */
@@ -1937,25 +1867,17 @@ class Show {
     self.meshCache = Dictionary()
 
     for (entry in graphic.displaylist) {
-      self.visitEntry(entry, entry.item, out)
+      self.visit(entry, entry.item, out)
     }
   }
 
   /** Define + draw a single entry (mid-session `defined`); updates object maps. */
   writeEntry(entry, out) {
-    self.visitEntry(entry, entry.item, out)
-  }
-
-  /** Default: world-baked item, identity draw (Tube/…). */
-  visitEntry(entry, item, out) {
-    self._currentEntry = entry
-    self.visit(item, out)
-    self._currentEntry = nil
+    self.visit(entry, entry.item, out)
   }
 
   /** Text draw-slot: entry pose + `T <entryId> <fontId> "…"`. */
-  visitEntry(entry, Text item, out) {
-    self._currentEntry = entry
+  visit(entry, Text item, out) {
     var font = item.font
     if (!font) font = self.defaultFontName()
     var fid = self.findFontId(font, item.size, out)
@@ -1963,102 +1885,63 @@ class Show {
     out.write("C ${cid}")
     self._emitTextTransforms(entry, item, out)
     out.write("T ${entry.id} ${fid} \"${item.string}\"")
-    self._recordText(colorid=cid)
-    self._currentEntry = nil
+    self._recordText(entry, colorid=cid)
   }
 
   /** Unit mesh from cache + entry SRT + `C` (Sphere / Cylinder / Arrow). */
   _visitUnitMesh(entry, item, out) {
-    self._currentEntry = entry
     var key = _meshKey(item, entry)
     var vid
     if (self.meshCache.contains(key)) {
       vid = self.meshCache[key]
     } else {
       var tri = _unitTri(item, entry)
-      if (isnil(tri)) { self._currentEntry = nil; return }
-      if (!isnil(item.filter)) tri.filter = item.filter
-      if (!isnil(item.transmit)) tri.transmit = item.transmit
+      if (isnil(tri)) return
       vid = self.defineXnTriangleComplex(tri, out)
       self.meshCache[key] = vid
     }
     var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
     out.write("C ${cid}")
-    self._recordObject(vid, colorid=cid)
+    self._recordObject(entry, vid, colorid=cid)
     self.emitEntryDraw(entry, out, viewerid=vid)
-    self._currentEntry = nil
   }
 
-  visitEntry(entry, Sphere item, out) { self._visitUnitMesh(entry, item, out) }
-  visitEntry(entry, Cylinder item, out) { self._visitUnitMesh(entry, item, out) }
-  visitEntry(entry, Arrow item, out) { self._visitUnitMesh(entry, item, out) }
+  visit(entry, Sphere item, out) { self._visitUnitMesh(entry, item, out) }
+  visit(entry, Cylinder item, out) { self._visitUnitMesh(entry, item, out) }
+  visit(entry, Arrow item, out) { self._visitUnitMesh(entry, item, out) }
 
-  /** PointCloud: define once, draw with entry SRT. */
-  visitEntry(entry, PointCloud item, out) {
-    self._currentEntry = entry
-    out.write("M flat")
-    var vid = self.definePointCloud(item, out)
+  /** PointCloud: define once, draw with entry SRT. Obeys entry.flat. */
+  visit(entry, PointCloud item, out) {
+    var flat = entry.flat
+    if (flat) out.write("M flat")
+    var vid = self.definePointCloud(entry, item, out)
     if (!isnil(vid)) {
-      self._recordObject(vid, colorid=self._lastColorId, flat=true)
+      self._recordObject(entry, vid, colorid=self._lastColorId, flat=flat)
       self.emitEntryDraw(entry, out, viewerid=vid)
     }
-    out.write("M shaded")
-    self._currentEntry = nil
+    if (flat) out.write("M shaded")
   }
 
-  /** LineSet: define once, draw with entry SRT. */
-  visitEntry(entry, LineSet item, out) {
-    self._currentEntry = entry
-    out.write("M flat")
-    var vid = self.defineLineSet(item, out)
+  /** LineSet: define once, draw with entry SRT. Obeys entry.flat. */
+  visit(entry, LineSet item, out) {
+    var flat = entry.flat
+    if (flat) out.write("M flat")
+    var vid = self.defineLineSet(entry, item, out)
     if (!isnil(vid)) {
-      self._recordObject(vid, colorid=self._lastColorId, flat=true)
+      self._recordObject(entry, vid, colorid=self._lastColorId, flat=flat)
       self.emitEntryDraw(entry, out, viewerid=vid)
     }
-    out.write("M shaded")
-    self._currentEntry = nil
+    if (flat) out.write("M shaded")
   }
 
   /** TriangleComplex: define once for this write, draw with entry SRT.
    *  Pass `flat=true` on `display` (or set `entry.flat`) for unlit solid facet colors. */
-  visitEntry(entry, TriangleComplex item, out) {
-    self._currentEntry = entry
+  visit(entry, TriangleComplex item, out) {
     var flat = entry.flat
     if (flat) out.write("M flat")
-    var vid = self.defineTriangleComplex(item, out)
-    self._recordObject(vid, colorid=self._lastColorId, flat=flat)
+    var vid = self.defineTriangleComplex(entry, item, out)
+    self._recordObject(entry, vid, colorid=self._lastColorId, flat=flat)
     self.emitEntryDraw(entry, out, viewerid=vid)
     if (flat) out.write("M shaded")
-    self._currentEntry = nil
-  }
-}
-
-/** Resolve common font roles across platforms (symbol / CJK / default).
- *  Returns a font *name* for `Text(..., font=...)`, or nil → Show default. */
-class FontFinder {
-  init() { }
-
-  /** First candidate Show can resolve on this machine, else nil. */
-  pick(candidates) {
-    var show = Show()
-    for (name in candidates) {
-      if (show.findFont(name)) return name
-    }
-    return nil
-  }
-
-  /** Platform default body face (Helvetica / arial / FreeSans). */
-  default() {
-    return Show().defaultFontName()
-  }
-
-  /** Math / emoji / symbol coverage when available. */
-  symbol() {
-    return self.pick(["Apple Symbols", "seguisym", "DejaVuSans", "FreeSans", "Symbola"])
-  }
-
-  /** CJK body face when available. */
-  cjk() {
-    return self.pick(["Hiragino Sans GB", "msyh", "NotoSansCJK-Regular", "NotoSansCJKjp-Regular", "TakaoPGothic"])
   }
 }

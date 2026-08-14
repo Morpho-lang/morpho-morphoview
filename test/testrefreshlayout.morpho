@@ -5,7 +5,7 @@
 //   cd test && morpho6 testrefreshlayout.morpho
 
 import xgraphics
-import color
+import xcolor
 
 class Buf {
   init() { self.lines = [] }
@@ -51,13 +51,21 @@ fn countUvFloats(lines) {
   return n
 }
 
-fn makeTri(transmit=nil) {
+fn makeTri() {
   return TriangleComplex(
     Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
     Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
     Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
-    Matrix([[1], [1], [1]]),
-    transmit=transmit
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn makeTri(alpha) {
+  return TriangleComplex(
+    Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Color(1, 0, 0, alpha),
+    Matrix([[1], [1], [1]])
   )
 }
 
@@ -82,7 +90,7 @@ expect(countUvFloats(morphO.lines) == 27, "opaque morph is 3×9 floats")
 
 /* ---- translucent: define xn, morph xn (3 verts × 6 floats) ---- */
 var gTx = Scene()
-var idTx = gTx.display(makeTri(transmit=0.5))
+var idTx = gTx.display(makeTri(0.5))
 var showT = Show()
 var defineT = Buf()
 showT.write(gTx, defineT)

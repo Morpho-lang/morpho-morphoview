@@ -46,8 +46,8 @@ expect(pConst.entries.contains("faces"), "uniform field plots")
 expect(approx(pConst.cmin, 7) && approx(pConst.cmax, 7), "uniform range")
 
 var face = pConst.findEntry(pConst.entries["faces"][0]).item
-var rgb0 = face.color.column(0)
-var rgb1 = face.color.column(1)
+var rgb0 = face.color.rgb(0)
+var rgb1 = face.color.rgb(1)
 expect(approx(rgb0[0], rgb1[0]) && approx(rgb0[1], rgb1[1]) && approx(rgb0[2], rgb1[2]),
        "uniform → constant color")
 
@@ -55,6 +55,22 @@ expect(approx(rgb0[0], rgb1[0]) && approx(rgb0[1], rgb1[1]) && approx(rgb0[2], r
 var mid = Matrix(ViridisMap().rgb(0.5))
 expect(approxEps(rgb0[0], mid[0], 1e-6) && approxEps(rgb0[1], mid[1], 1e-6) && approxEps(rgb0[2], mid[2], 1e-6),
        "uniform → mid colormap")
+
+/* ---- RGBA through Plot / ColorTable ---- */
+var pA = Plot(am, color=Color(1, 0, 0, 0.5))
+var faceA = pA.findEntry(pA.entries["faces"][0]).item
+expect(faceA.color.clss() == ColorTable, "shared Color.a → ColorTable")
+expect(approx(faceA.color.alpha(0), 0.5) && faceA.color.channels() == 4, "face alpha kept")
+
+var pTup = Plot(am, color=(1, 0, 0, 0.5))
+expect(approx(pTup.findEntry(pTup.entries["faces"][0]).item.color.alpha(0), 0.5), "RGBA tuple is shared")
+var pList = Plot(am, color=[1, 0, 0, 0.5])
+expect(approx(pList.findEntry(pList.entries["faces"][0]).item.color.alpha(0), 0.5), "RGBA list is shared")
+
+var pMap = Plot(fConst, style="interpolate", colormap=ViridisMap().opacity(0.5))
+var faceM = pMap.findEntry(pMap.entries["faces"][0]).item
+expect(faceM.color.clss() == ColorTable && faceM.color.channels() == 4, "map opacity → ColorTable RGBA")
+expect(approx(faceM.color.alpha(0), 0.5), "colormap opacity kept")
 
 /* ---- center= with diverging map ---- */
 var fSigned = Field(am, fn (x, y, z) x) // on [0,1]

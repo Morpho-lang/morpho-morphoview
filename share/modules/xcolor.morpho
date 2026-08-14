@@ -13,6 +13,7 @@
 import constants
 
 var _ClrBadInitErr = Error("ClrBadInit", "Color expects RGB, RGBA, or a length-3/4 List, Tuple, or vector Matrix.")
+var _ClrTblInitErr = Error("ClrTblInit", "ColorTable expects a Matrix with 3 or 4 rows (RGB or RGBA columns).")
 var _ClrAbstractErr = Error("ClrAbstract", "Coloring must implement rgb().")
 var _ClrGradInitErr = Error("ClrGradInit", "GradientMap expects two Colors, or a List/Tuple of Colors or (t, Color) stops.")
 var _ClrChbyshvOrdrErr = Error("ClrChbyshvOrdr", "Order of Chebyshev approximation inconsistent.")
@@ -79,7 +80,7 @@ class Color is Coloring {
   lighten(t) { return Color(self.r+t*(1-self.r), self.g+t*(1-self.g), self.b+t*(1-self.b), self.a) }
   darken() { return self.darken(1/3) }
   darken(t) { return Color(self.r*(1-t), self.g*(1-t), self.b*(1-t), self.a) }
-  opacity(a) { return Color(self.r, self.g, self.b, a) }
+  opacity(a) { return Color(self.r, self.g, self.b, self.a * a) }
 }
 
 White = Color(1,1,1)
@@ -139,7 +140,54 @@ class Darken is ColorDelegate {
 
 class Opacity is ColorDelegate {
   init(Coloring inner, a) { super.init(inner); self.a = a }
-  transform(Color c) { return Color(c.r, c.g, c.b, self.a) }
+  transform(Color c) { return Color(c.r, c.g, c.b, c.a * self.a) }
+}
+
+/** Indexed per-vertex / per-face colors. Backing matrix is RGB (3×n) or RGBA (4×n). */
+class ColorTable is Coloring {
+  init(Matrix colors) {
+    var d = colors.dimensions(), rows = d[0], cols = d[1]
+    if (!((rows == 3 || rows == 4) && cols >= 1)) _ClrTblInitErr.throw()
+    self.colors = colors
+    self._rows = rows
+  }
+
+  count() { return self.colors.dimensions()[1] }
+  channels() { return self._rows }
+
+  rgb(Int i) {
+    var m = self.colors
+    return (m[0, i], m[1, i], m[2, i])
+  }
+  alpha(Int i) {
+    if (self._rows < 4) return 1
+    return self.colors[3, i]
+  }
+  rgba(Int i) {
+    var t = self.rgb(i)
+    return (t[0], t[1], t[2], self.alpha(i))
+  }
+  color(Int i) { return Color(self.rgba(i)) }
+
+  rgb(x) { return self.rgb(Int(x)) }
+  alpha(x) { return self.alpha(Int(x)) }
+  rgba(x) { return self.rgba(Int(x)) }
+  color(x) { return self.color(Int(x)) }
+
+  opacity(a) { return Opacity(self, a) }
+}
+
+/** Constructor boundary: stored graphics colors are nil or Coloring.
+ *  3×n / 4×n Matrix → ColorTable; 1×3 / 1×4 and List/Tuple → Color. */
+fn asColoring(Coloring c) { return c }
+fn asColoring(Matrix c) {
+  var d = c.dimensions(), rows = d[0], cols = d[1]
+  if ((rows == 3 || rows == 4) && cols >= 1) return ColorTable(c)
+  return Color(c)
+}
+fn asColoring(c) {
+  if (isnil(c)) return nil
+  return Color(c)
 }
 
 class ColorMap is Coloring {

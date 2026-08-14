@@ -5,7 +5,7 @@
 
 import morphoview
 import xgraphics
-import color
+import xcolor
 
 class Buf {
   init() { self.lines = [] }
@@ -63,7 +63,7 @@ expect(!anyExact(lines, "v \"xnc\""), "should not emit triangle xnc for point/li
 
 // Translucent points → alpha on color table
 var g2 = Graphics()
-g2.display(PointCloud(pos, color=Red, transmit=0.5))
+g2.display(PointCloud(pos, color=Color(1, 0, 0, 0.5)))
 var buf2 = Buf()
 Show().write(g2, buf2)
 expect(anyStarts(buf2.lines, "c "), "expected color command for translucent points")

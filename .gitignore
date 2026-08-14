@@ -5,3 +5,5 @@ build/*
 build-xcode/*
 CMakeUserPresets.json
 /.vs
+*.pov
+examples/xpovray.png

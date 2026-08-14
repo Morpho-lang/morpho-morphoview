@@ -19,7 +19,7 @@ fn approxEps(a, b, eps) { return abs(a - b) < eps }
 
 fn faceRgb0(plot) {
   var face = plot.findEntry(plot.entries["faces"][0]).item
-  return face.color.column(0)
+  return face.color.rgb(0)
 }
 
 /* ---- axes(false/true) ---- */

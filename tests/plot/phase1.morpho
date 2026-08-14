@@ -21,7 +21,7 @@ expect(p.entries.contains("lines"), "missing lines entries")
 expect(p.source.count(0) == m.count(0), "source mismatch")
 
 var p2 = plotmesh(m)
-expect(p2.displaylist.count() == 1, "plotmesh veneer failed")
+expect(p2.displaylist.count() > 1, "plotmesh thick veneer")
 
 var f = Field(m, fn (x, y, z) x)
 var pf = Plot(f)

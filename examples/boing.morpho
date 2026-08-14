@@ -157,8 +157,7 @@ fn unitshadow() {
     if (j == n) j = 0
     triplets.append([0,i,1]); triplets.append([i+1,i,1]); triplets.append([j+1,i,1])
   }
-  var sh = TriangleComplex(pos, nrm, col, Sparse(triplets))
-  sh.transmit = 0.35
+  var sh = TriangleComplex(pos, nrm, ballShadow.opacity(0.65), Sparse(triplets))
   return sh
 }
 

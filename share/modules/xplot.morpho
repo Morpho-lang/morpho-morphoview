@@ -50,7 +50,7 @@ fn _scientificBounds(mesh) {
   return _boundingBox(mesh.vertexmatrix())
 }
 
-/** Pad scientific bounds to 3D lo/hi Matrices. Returns [lo, hi, dim]. */
+/** Pad scientific bounds to 3D lo/hi Matrices. Returns (lo, hi, dim). */
 fn _boundsLoHi(bnds) {
   var dim = bnds.count()
   var lo = Matrix(3)
@@ -59,7 +59,7 @@ fn _boundsLoHi(bnds) {
     lo[i] = bnds[i][0]
     hi[i] = bnds[i][1]
   }
-  return [lo, hi, dim]
+  return (lo, hi, dim)
 }
 
 /** Midpoint of scientific bounds as Matrix(3). */
@@ -123,11 +123,20 @@ fn _centroid(m, g, id) {
  * Grade / style predicates
  * -------------------------- */
 
-/** Resolve grade= to a list of grades to draw. */
+/** Must precede _gradeList: a module-level fn cannot call a fn defined later
+ *  (Morpho "Closure unavailable" and it poisons later fns in the file). */
+fn _copySeq(seq) {
+  var out = []
+  for (x in seq) out.append(x)
+  return out
+}
+
+/** Resolve grade= to a fresh list of grades to draw. */
 fn _gradeList(mesh, grade) {
   if (isnil(grade)) return [mesh.maxgrade()]
-  if (islist(grade)) return grade
+  if (islist(grade)) return _copySeq(grade)
   if (isnumber(grade)) return [grade]
+  if (istuple(grade)) return _copySeq(grade)
   return [mesh.maxgrade()]
 }
 
@@ -136,13 +145,25 @@ fn _wantsGrade(grade, g) {
   if (isnil(grade)) return true
   if (islist(grade)) return grade.ismember(g)
   if (isnumber(grade)) return grade == g
+  if (istuple(grade)) {
+    for (x in grade) {
+      if (x == g) return true
+    }
+    return false
+  }
   return true
 }
 
-/** style= may be a string or list: "interpolate", "shaded", "spheres", "tubes", "thick", … */
+/** style= may be a string or list/tuple: "interpolate", "shaded", "spheres", "tubes", "thick", … */
 fn _styleHas(style, name) {
   if (isnil(style)) return false
   if (islist(style) || isarray(style)) return style.ismember(name)
+  if (istuple(style)) {
+    for (x in style) {
+      if (x == name) return true
+    }
+    return false
+  }
   return style == name
 }
 
@@ -167,22 +188,43 @@ fn _selectedIds(mesh, selection, grade) {
  * -------------------------- */
 
 fn _asPlotColor(Coloring c) { return c }
-fn _asPlotColor(Matrix c) { return c }
+fn _asPlotColor(Matrix c) { return asColoring(c) }
 fn _asPlotColor(c) { _PltMshClErr.throw(); return nil }
 
-fn _asColoring(Coloring c) { return c }
-fn _asColoring(c) { return Color(c) }
+fn _isNumericRgb(seq) {
+  var n = seq.count()
+  if (n != 3 && n != 4) return false
+  return isnumber(seq[0]) && isnumber(seq[1]) && isnumber(seq[2])
+}
 
-/** True if color= is one shared color (not a per-grade list / per-element matrix). */
+/** True if color= is one shared color (not a per-grade list / ColorTable). */
+fn _isSharedPlotColor(ColorTable color) { return false }
 fn _isSharedPlotColor(color) {
   if (isnil(color)) return true
   if (ismatrix(color)) return false
-  if (islist(color) || isarray(color)) {
-    return color.count() == 3 && isnumber(color[0]) && isnumber(color[1]) && isnumber(color[2])
-  }
-  if (istuple(color) && color.count() == 3 && isnumber(color[0])) return true
+  if (islist(color) || isarray(color) || istuple(color)) return _isNumericRgb(color)
   return true
 }
+
+fn _plotChannels(ColorTable color) { return color.channels() }
+fn _plotChannels(Coloring color) { return (color.alpha(0) < 0.999) ? 4 : 3 }
+fn _plotChannels(color) {
+  if ((islist(color) || istuple(color)) && _isNumericRgb(color) && color.count() == 4) {
+    return 4
+  }
+  return 3
+}
+
+fn _plotColorColumn(Coloring color, nch, x) {
+  if (nch == 4) {
+    var t = color.rgba(x)
+    return Matrix([t[0], t[1], t[2], t[3]])
+  }
+  var t = color.rgb(x)
+  return Matrix([t[0], t[1], t[2]])
+}
+fn _plotColorColumn(Coloring color, nch) { return _plotColorColumn(color, nch, 0) }
+fn _plotColorColumn(color, nch) { return _plotColorColumn(asColoring(color), nch, 0) }
 
 fn _gradeMax(glist) {
   var m = glist[0]
@@ -207,16 +249,14 @@ fn _plotColorForGrade(grade, color, drawn=nil) {
   var col
   if (isnil(color)) {
     col = Gray(0.5)
-  } else if (islist(color) || isarray(color)) {
-    if (color.count() == 3 && isnumber(color[0]) && isnumber(color[1]) && isnumber(color[2])) {
-      col = color
+  } else if (islist(color) || isarray(color) || istuple(color)) {
+    if (_isNumericRgb(color)) {
+      col = Color(color)
     } else if (isnil(color[grade])) {
       col = Gray(0.5)
     } else {
       col = color[grade]
     }
-  } else if (istuple(color) && color.count() == 3 && isnumber(color[0])) {
-    col = color
   } else {
     col = _asPlotColor(color)
   }
@@ -224,22 +264,14 @@ fn _plotColorForGrade(grade, color, drawn=nil) {
   if (isnil(drawn) || drawn.count() == 0 || !_isSharedPlotColor(color)) return col
   var gap = _gradeMax(drawn) - grade
   if (gap <= 0) return col
-  return Darken(_asColoring(col), 1 - (2/3)^gap)
+  return Darken(asColoring(col), 1 - (2/3)^gap)
 }
 
-fn _plotColorForElement(Matrix color, element) { return color.column(element) }
+fn _plotColorForElement(ColorTable color, element) { return color.color(element) }
 fn _plotColorForElement(color, element) { return color }
 
-fn _plotColorToMatrix(Matrix color) { return color }
-fn _plotColorToMatrix(List color) { return Matrix(color) }
-fn _plotColorToMatrix(Tuple color) { return Matrix(color) }
-fn _plotColorToMatrix(Coloring color) { return Matrix(color.rgb(0)) }
-fn _plotColorToMatrix(color) { _PltInvldClErr.throw(); return nil }
-
-/** True if color is a per-element RGB matrix (one column per element). */
-fn _isPerElementColor(color, nel) {
-  return ismatrix(color) && color.dimensions()[1] == nel
-}
+fn _isPerElementColor(ColorTable color, nel) { return color.count() == nel }
+fn _isPerElementColor(color, nel) { return false }
 
 /* --------------------------
  * Selection / field → colors
@@ -266,7 +298,7 @@ fn _selectionColors(mesh, selection, grade) {
     var cmat = Matrix(3, nel)
     for (i in 0...nel) cmat.setColumn(i, Matrix([0.5, 0.5, 0.5]))
     for (i in selected) cmat.setColumn(i, Matrix([1, 0, 0]))
-    col[g] = cmat
+    col[g] = ColorTable(cmat)
   }
   return col
 }
@@ -330,10 +362,11 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
   var vmin = bnd[0], vmax = bnd[1]
 
   if (_styleHas(style, "interpolate")) {
-    if (!_wantsGrade(grade, 2)) return [mesh, sel, showgrades, col, cm, bnd]
+    if (!_wantsGrade(grade, 2)) return (mesh, sel, showgrades, col, cm, bnd)
 
     var nv = mesh.count(0)
-    var cmat = Matrix(3, nv)
+    var nch = _plotChannels(cm)
+    var cmat = Matrix(nch, nv)
 
     if (field.shape()[0] == 0) _PltFldIntErr.throw()
 
@@ -351,10 +384,10 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
     for (i in 0...nv) {
       if (!isnil(sel) && !sel[0, i]) continue
       var t = fieldSampleNorm(field[0, i], vmin, vmax, scale=scale, center=center)
-      cmat.setColumn(i, Matrix(cm.rgb(t)))
+      cmat.setColumn(i, _plotColorColumn(cm, nch, t))
     }
 
-    col[2] = cmat
+    col[2] = ColorTable(cmat)
     showgrades.append(2)
   } else {
     for (g in 0...ngrades) {
@@ -362,18 +395,19 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
       if (!_wantsGrade(grade, g)) continue
 
       var nel = mesh.count(g)
-      var cmat = Matrix(3, nel)
+      var nch = _plotChannels(cm)
+      var cmat = Matrix(nch, nel)
       for (i in 0...nel) {
         if (!isnil(sel) && !sel[g, i]) continue
         var t = fieldSampleNorm(field[g, i], vmin, vmax, scale=scale, center=center)
-        cmat.setColumn(i, Matrix(cm.rgb(t)))
+        cmat.setColumn(i, _plotColorColumn(cm, nch, t))
       }
-      col[g] = cmat
+      col[g] = ColorTable(cmat)
       showgrades.append(g)
     }
   }
 
-  return [mesh, sel, showgrades, col, cm, bnd]
+  return (mesh, sel, showgrades, col, cm, bnd)
 }
 
 /* *******************************************************************************************
@@ -645,8 +679,6 @@ class Plot is Scene {
     self.grade = nil
     self.style = nil
     self.scale = true
-    self.filter = nil
-    self.transmit = nil
   }
 
   _finish() {
@@ -742,12 +774,10 @@ class Plot is Scene {
       var bb = _scientificBounds(mesh)
       self.bounds = bb
       var planar = _planarAxis(bb)
-      var got = self._facesItem(mesh, sel, col, self.filter, self.transmit,
+      var got = self._facesItem(mesh, sel, col,
                                 vertMat, bb, planar, _boundsCentroid(bb), style=self.style)
       if (isnil(got)) return false
       var id = self.entries["faces"][0]
-      var entry = self.findEntry(id)
-      if (!isnil(entry)) entry.flat = got[1]
       return view.morph(id, got[0])
     }
 
@@ -755,7 +785,7 @@ class Plot is Scene {
     self._clearRole("lines")
     self._clearRole("faces")
     self._meshInto(mesh, selection=sel, grade=showgrades, color=col,
-                   filter=self.filter, transmit=self.transmit, style=self.style)
+                   style=self.style)
 
     if (hadColorbar) {
       self._clearRole("colorbar")
@@ -812,7 +842,7 @@ class Plot is Scene {
   }
 
   /** Grade 0: PointCloud by default; style spheres/thick → Sphere loop. */
-  _pointsInto(mesh, selection, color, filter, transmit, style, vertMat, drawn=nil) {
+  _pointsInto(mesh, selection, color, style, vertMat, drawn=nil) {
     var vcol = _plotColorForGrade(0, color, drawn=drawn)
     var np = mesh.count(0)
 
@@ -820,7 +850,7 @@ class Plot is Scene {
       for (i in _selectedIds(mesh, selection, 0)) {
         self._recordEntry("points",
           self.display(Sphere(vertMat.column(i), 0.025,
-                              color=_plotColorForElement(vcol, i), filter=filter, transmit=transmit)))
+                              color=_plotColorForElement(vcol, i))))
       }
       return
     }
@@ -832,19 +862,20 @@ class Plot is Scene {
     var pos = Matrix(3, nshow)
     var perVert = _isPerElementColor(vcol, np)
     var pcol = vcol
-    if (perVert) pcol = Matrix(3, nshow)
+    var nch = _plotChannels(vcol)
+    if (perVert) pcol = Matrix(nch, nshow)
     for (k in 0...nshow) {
       var i = ids[k]
       pos.setColumn(k, vertMat.column(i))
-      if (perVert) pcol.setColumn(k, _plotColorToMatrix(_plotColorForElement(vcol, i)))
+      if (perVert) pcol.setColumn(k, _plotColorColumn(_plotColorForElement(vcol, i), nch))
     }
     self._recordEntry("points",
-      self.display(PointCloud(pos, color=pcol, filter=filter, transmit=transmit)))
+      self.display(PointCloud(pos, color=perVert ? ColorTable(pcol) : pcol)))
   }
 
   /** Grade 1: LineSet by default; style tubes/thick → Cylinder loop.
    *  Per-edge colors duplicate endpoints; uniform color shares mesh verts. */
-  _linesInto(mesh, selection, color, filter, transmit, style, vertMat, drawn=nil) {
+  _linesInto(mesh, selection, color, style, vertMat, drawn=nil) {
     var lines = mesh.connectivitymatrix(0, 1)
     if (!issparse(lines)) return
 
@@ -856,8 +887,7 @@ class Plot is Scene {
         var el = lines.rowindices(i)
         self._recordEntry("lines",
           self.display(Cylinder(vertMat.column(el[0]), vertMat.column(el[1]),
-                                aspectratio=0.05, color=_plotColorForElement(lcol, i),
-                                filter=filter, transmit=transmit)))
+                                aspectratio=0.05, color=_plotColorForElement(lcol, i))))
       }
       return
     }
@@ -867,22 +897,22 @@ class Plot is Scene {
     if (ns == 0) return
 
     if (_isPerElementColor(lcol, nl)) {
-      // Independent edge colors: duplicate endpoints (plan Phase 2 rule).
+      var nch = _plotChannels(lcol)
       var pos = Matrix(3, 2*ns)
-      var ecol = Matrix(3, 2*ns)
+      var ecol = Matrix(nch, 2*ns)
       var edges = []
       for (k in 0...ns) {
         var i = segs[k]
         var el = lines.rowindices(i)
         pos.setColumn(2*k, vertMat.column(el[0]))
         pos.setColumn(2*k + 1, vertMat.column(el[1]))
-        var rgb = _plotColorToMatrix(_plotColorForElement(lcol, i))
+        var rgb = _plotColorColumn(_plotColorForElement(lcol, i), nch)
         ecol.setColumn(2*k, rgb)
         ecol.setColumn(2*k + 1, rgb)
         edges.append([2*k, 2*k + 1])
       }
       self._recordEntry("lines",
-        self.display(LineSet(pos, edges, color=ecol, filter=filter, transmit=transmit)))
+        self.display(LineSet(pos, edges, color=ColorTable(ecol))))
     } else {
       // Uniform color: share mesh vertices; connectivity is selected edges.
       var edges = []
@@ -891,15 +921,15 @@ class Plot is Scene {
         edges.append([el[0], el[1]])
       }
       self._recordEntry("lines",
-        self.display(LineSet(vertMat, edges, color=lcol, filter=filter, transmit=transmit)))
+        self.display(LineSet(vertMat, edges, color=lcol)))
     }
   }
 
   /** Grade 2: TriangleComplex.
    *  Default / per-element / selection → unlit (GraphicsEntry.flat).
    *  style="shaded" or "interpolate" → Phong; smooth vertex normals if non-planar.
-   *  Returns [TriangleComplex, unlit] or nil. */
-  _facesItem(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid, drawn=nil, style=nil) {
+   *  Returns (TriangleComplex, unlit) or nil. */
+  _facesItem(mesh, selection, color, vertMat, bb, planar, centroid, drawn=nil, style=nil) {
     var faces = mesh.connectivitymatrix(0, 2)
     if (!issparse(faces)) return nil
 
@@ -907,10 +937,7 @@ class Plot is Scene {
     var nf = mesh.count(2)
     var nnt = isselection(selection) ? selection.idlistforgrade(2).count() : nf
 
-    var interpolate = false
-    if (ismatrix(fcol) &&
-        fcol.dimensions()[1] != nf &&
-        fcol.dimensions()[1] == mesh.count(0)) interpolate = true
+    var interpolate = _isPerElementColor(fcol, mesh.count(0)) && !_isPerElementColor(fcol, nf)
 
     // Lit only when asked (shaded) or interpolating a field. Per-element hues stay unlit.
     var wantShade = interpolate || _styleHas(style, "shaded")
@@ -920,9 +947,10 @@ class Plot is Scene {
       vnorm = _smoothVertexNormals(mesh, vertMat, centroid, selection=selection)
     }
 
+    var nch = _plotChannels(fcol)
     var nvert = Matrix(3, 3*nnt)
     var norm = Matrix(3, 3*nnt)
-    var ncol = Matrix(3, 3*nnt)
+    var ncol = Matrix(nch, 3*nnt)
     var tri = Sparse(3*nnt, nnt)
 
     var nnv = 0
@@ -943,25 +971,24 @@ class Plot is Scene {
       }
 
       var tcol
-      if (!interpolate) tcol = _plotColorToMatrix(_plotColorForElement(fcol, i))
+      if (!interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, i), nch)
       for (j in 0...3) {
         tri[nnv, nnt] = 1
         nvert.setColumn(nnv, v[j])
         if (!isnil(vnorm)) norm.setColumn(nnv, vnorm.column(el[j]))
         else norm.setColumn(nnv, faceNormal)
-        if (interpolate) tcol = _plotColorToMatrix(_plotColorForElement(fcol, el[j]))
+        if (interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, el[j]), nch)
         ncol.setColumn(nnv, tcol)
         nnv += 1
       }
       nnt += 1
     }
 
-    return [TriangleComplex(nvert, norm, ncol, tri, filter=filter, transmit=transmit),
-            unlit]
+    return (TriangleComplex(nvert, norm, ColorTable(ncol), tri), unlit)
   }
 
-  _facesInto(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid, drawn=nil, style=nil) {
-    var got = self._facesItem(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid,
+  _facesInto(mesh, selection, color, vertMat, bb, planar, centroid, drawn=nil, style=nil) {
+    var got = self._facesItem(mesh, selection, color, vertMat, bb, planar, centroid,
                              drawn=drawn, style=style)
     if (isnil(got)) return
     // Unlit facets unless style="shaded" or interpolate (Phong; smooth normals if curved).
@@ -969,7 +996,7 @@ class Plot is Scene {
   }
 
   /** Display mesh grades. Default: PointCloud / LineSet / TriangleComplex. */
-  _meshInto(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
+  _meshInto(mesh, selection=nil, grade=nil, color=nil, style=nil) {
     var glist = _gradeList(mesh, grade)
     var drawn = _presentGrades(mesh, glist)
     var vertMat = _vertexMatrix3(mesh)
@@ -978,37 +1005,34 @@ class Plot is Scene {
     var planar = _planarAxis(bb)
     var centroid = _boundsCentroid(bb)
 
-    if (glist.ismember(0)) {
-      self._pointsInto(mesh, selection, color, filter, transmit, style, vertMat, drawn=drawn)
+    if (_wantsGrade(glist, 0)) {
+      self._pointsInto(mesh, selection, color, style, vertMat, drawn=drawn)
     }
-    if (glist.ismember(1)) {
-      self._linesInto(mesh, selection, color, filter, transmit, style, vertMat, drawn=drawn)
+    if (_wantsGrade(glist, 1)) {
+      self._linesInto(mesh, selection, color, style, vertMat, drawn=drawn)
     }
-    if (glist.ismember(2)) {
-      self._facesInto(mesh, selection, color, filter, transmit, vertMat, bb, planar, centroid,
+    if (_wantsGrade(glist, 2)) {
+      self._facesInto(mesh, selection, color, vertMat, bb, planar, centroid,
                      drawn=drawn, style=style)
     }
   }
 
-  _drawMesh(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
-    self._meshInto(mesh, selection=selection, grade=grade, color=color,
-                   filter=filter, transmit=transmit, style=style)
+  _drawMesh(mesh, selection=nil, grade=nil, color=nil, style=nil) {
+    self._meshInto(mesh, selection=selection, grade=grade, color=color, style=style)
   }
 
-  _drawSelection(sel, mesh=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
+  _drawSelection(sel, mesh=nil, grade=nil, color=nil, style=nil) {
     var m = _selectionMesh(sel, mesh)
     var col = isnil(color) ? _selectionColors(m, sel, grade) : color
-    self._meshInto(m, grade=grade, color=col, filter=filter, transmit=transmit, style=style)
+    self._meshInto(m, grade=grade, color=col, style=style)
   }
 
   _drawField(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
-             filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil, center=nil) {
+             scalebar=nil, cmin=nil, cmax=nil, center=nil) {
     self.selection = selection
     self.grade = grade
     self.style = style
     self.scale = scale
-    self.filter = filter
-    self.transmit = transmit
 
     var info = _fieldColors(field, selection=selection, grade=grade, colormap=colormap,
                             style=style, scale=scale, cmin=cmin, cmax=cmax, center=center)
@@ -1017,8 +1041,7 @@ class Plot is Scene {
     self.cmin = bnd[0]
     self.cmax = bnd[1]
     self.center = center
-    self._meshInto(mesh, selection=sel, grade=showgrades, color=col,
-                   filter=filter, transmit=transmit, style=style)
+    self._meshInto(mesh, selection=sel, grade=showgrades, color=col, style=style)
 
     if (!isnil(scalebar)) {
       scalebar.colormap = cm
@@ -1026,29 +1049,26 @@ class Plot is Scene {
     }
   }
 
-  init(Mesh mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil,
+  init(Mesh mesh, selection=nil, grade=nil, color=nil,
        title=nil, background=nil, axes=false, colorbar=false, style=nil) {
     self._setup(mesh, title=title, background=background, axes=axes, colorbar=colorbar)
-    self._drawMesh(mesh, selection=selection, grade=grade, color=color,
-                   filter=filter, transmit=transmit, style=style)
+    self._drawMesh(mesh, selection=selection, grade=grade, color=color, style=style)
     self._finish()
   }
 
-  init(Selection sel, mesh=nil, grade=nil, color=nil, filter=nil, transmit=nil,
+  init(Selection sel, mesh=nil, grade=nil, color=nil,
        title=nil, background=nil, axes=false, colorbar=false, style=nil) {
     self._setup(sel, title=title, background=background, axes=axes, colorbar=colorbar)
-    self._drawSelection(sel, mesh=mesh, grade=grade, color=color,
-                        filter=filter, transmit=transmit, style=style)
+    self._drawSelection(sel, mesh=mesh, grade=grade, color=color, style=style)
     self._finish()
   }
 
   init(Field field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
-       filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil, center=nil,
+       scalebar=nil, cmin=nil, cmax=nil, center=nil,
        title=nil, background=nil, axes=false, colorbar=false) {
     self._setup(field, title=title, background=background, axes=axes, colorbar=colorbar)
     self._drawField(field, selection=selection, grade=grade, colormap=colormap, style=style,
-                    scale=scale, filter=filter, transmit=transmit, scalebar=scalebar,
-                    cmin=cmin, cmax=cmax, center=center)
+                    scale=scale, scalebar=scalebar, cmin=cmin, cmax=cmax, center=center)
     self._finish()
   }
 }
@@ -1057,22 +1077,19 @@ class Plot is Scene {
  * Legacy veneers — one implementation path through Plot
  ******************************************************************************************* */
 
-fn plotmesh(mesh, selection=nil, grade=nil, color=nil, filter=nil, transmit=nil, style=nil) {
-  return Plot(mesh, selection=selection, grade=grade, color=color,
-              filter=filter, transmit=transmit, style=_legacyStyle(style))
+fn plotmesh(mesh, selection=nil, grade=nil, color=nil, style=nil) {
+  return Plot(mesh, selection=selection, grade=grade, color=color, style=_legacyStyle(style))
 }
 
-fn plotselection(mesh, selection, grade=nil, filter=nil, transmit=nil, style=nil) {
-  return Plot(selection, mesh=mesh, grade=grade, filter=filter, transmit=transmit,
-              style=_legacyStyle(style))
+fn plotselection(mesh, selection, grade=nil, style=nil) {
+  return Plot(selection, mesh=mesh, grade=grade, style=_legacyStyle(style))
 }
 
 fn plotfield(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
-             filter=nil, transmit=nil, scalebar=nil, cmin=nil, cmax=nil, center=nil) {
+             scalebar=nil, cmin=nil, cmax=nil, center=nil) {
   return Plot(field, selection=selection, grade=grade, colormap=colormap,
               style=_legacyStyle(style), scale=scale,
-              filter=filter, transmit=transmit, scalebar=scalebar,
-              cmin=cmin, cmax=cmax, center=center)
+              scalebar=scalebar, cmin=cmin, cmax=cmax, center=center)
 }
 
 /** Arrow RGB triad (distinct from axes=true domain frame). */
@@ -1086,7 +1103,7 @@ fn plotaxes(xx0, size=1) {
 }
 
 fn plotmeshlabels(mesh, grade=0, selection=nil, fontsize=10, offset=nil, dirn=nil, vertical=nil, color=nil) {
-  var gradelist = islist(grade) ? grade : [grade]
+  var gradelist = (islist(grade) || istuple(grade)) ? grade : [grade]
   var gout = Graphics()
   var dir = isnil(dirn) ? [1, 0, 0] : dirn
   var vert = isnil(vertical) ? [0, 1, 0] : vertical

@@ -1,4 +1,4 @@
-// xpovray: write() SDL for GraphicsEntry and raw items. No povray binary required.
+// xpovray: write() SDL for GraphicsEntry. No povray binary required.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testxpovray.morpho
@@ -23,26 +23,25 @@ fn contains(s, needle) {
   return false
 }
 
-fn scene(g) {
-  var pov = POVRaytracer(g)
-  var path = pov.write("/tmp/testxpovray.pov")
+fn scene(g, camera=nil, transparent=false) {
+  var pov = isnil(camera) ? POVRaytracer(g) : POVRaytracer(g, camera)
+  var path = pov.write("/tmp/testxpovray.pov", transparent=transparent)
   return File(path).readall()
 }
 
 /* ---- import / public veneer ---- */
 expect(POVRaytracer(Graphics()).clss() == POVRaytracer, "POVRaytracer")
-expect(contains(POVRaytracer(Graphics()).color(Red), "1"), "color veneer")
 
 /* ---- Camera keyword + positional ---- */
 var g0 = Graphics()
 g0.display(Sphere([0,0,0], 1, color=Red))
 var cam = Camera(look_at=Matrix([0.1, 0.2, 0.3]), width=800, height=600, antialias=false)
 var povKw = POVRaytracer(g0, camera=cam)
-expect(povKw.width == 800 && povKw.antialias == false, "Camera kwargs")
+expect(povKw.camera.width == 800 && povKw.camera.antialias == false, "Camera kwargs")
 var kwSdl = File(povKw.write("/tmp/testxpovray.pov")).readall()
 expect(contains(kwSdl, "right <-1.33333"), "aspect from width/height")
 var povPos = POVRaytracer(g0, cam)
-expect(povPos.look_at[0] == 0.1, "positional Camera")
+expect(povPos.camera.look_at[0] == 0.1, "positional Camera")
 
 /* ---- GraphicsEntry: unit sphere + scale ---- */
 var g = Graphics()
@@ -52,15 +51,16 @@ expect(contains(sdl, "sphere { <0, 0, 0>, 1"), "unit sphere")
 expect(contains(sdl, "scale 0.5"), "entry scale")
 expect(contains(sdl, "pigment { rgb <1, 0, 0> }"), "Red pigment")
 
-/* ---- Color.a → rgbt; transmit/filter override ---- */
+/* ---- Color.a → rgbt ---- */
 var ga = Graphics()
 ga.display(Sphere([0,0,0], 0.3, color=Color(1, 0, 0, 0.4)))
 expect(contains(scene(ga), "rgbt <1, 0, 0, 0.6>"), "Color.a → transmit 1-a")
 var gt = Graphics()
-gt.display(Sphere([1,0,0], 0.4, color=Blue, transmit=0.5))
+gt.display(Sphere([1,0,0], 0.4, color=Blue.opacity(0.5)))
 var st = scene(gt)
-expect(contains(st, "transmit 0.5"), "transmit keyword")
+expect(contains(st, "rgbt <0, 0, 1, 0.5>"), "opacity → rgbt")
 expect(contains(st, "translate <1, 0, 0>"), "entry translate")
+expect(!contains(st, "transmit 0.5"), "no legacy transmit keyword")
 
 /* ---- Cylinder / Arrow / Tube / Text / points / lines ---- */
 var g2 = Graphics()
@@ -79,26 +79,73 @@ expect(contains(s2, "text { ttf"), "text")
 expect(contains(s2, "cyrvetic.ttf"), "default POV font")
 expect(contains(s2, "sphere { <0, 0, 0>, 0.02"), "pointcloud")
 expect(contains(s2, "cylinder { <0, 0, 0>, <1, 0, 0>, 0.01"), "lineset")
+expect(contains(s2, "finish { ambient 1 diffuse 0 }"), "PointCloud/LineSet default flat")
 
-/* ---- raw world-space displaylist (classic graphics) ---- */
-var g3 = Graphics()
-g3.displaylist.append(Sphere([1, 2, 3], 0.4, color=Red))
-g3.displaylist.append(Cylinder([0,0,0], [0,0,1], color=Blue))
-var s3 = scene(g3)
-expect(contains(s3, "sphere { <1, 2, 3>, 0.4"), "raw sphere")
-expect(contains(s3, "cylinder { <0, 0, 0>, <0, 0, 1>, 0.05"), "raw cylinder radius")
+/* ---- quoted text is escaped ---- */
+var gq = Graphics()
+gq.display(Text("say \"hi\"", [0,0,0], color=White))
+expect(contains(scene(gq), "\\\"hi\\\""), "escaped quotes in text")
+var gbsl = Graphics()
+gbsl.display(Text("a\\b", [0,0,0], color=White))
+expect(contains(scene(gbsl), "a\\\\b"), "escaped backslash in text")
 
-/* ---- background / lights / post-init fields ---- */
+/* ---- flat + per-vertex colors on TriangleComplex ---- */
+var pos = Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]])
+var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
+var cols = Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+var conn = Matrix([[1], [1], [1]])
+var gf = Graphics()
+gf.display(TriangleComplex(pos, nrm, cols, conn), flat=true)
+var sf = scene(gf)
+expect(contains(sf, "texture_list"), "per-vertex texture_list")
+expect(contains(sf, "finish { ambient 1 diffuse 0 }"), "flat finish on vertex colors")
+
+/* ---- transparent background ---- */
+var gb = Graphics(background=White)
+gb.display(Sphere([0,0,0], 1, color=Black))
+var sb = scene(gb, transparent=true)
+expect(contains(sb, "background { rgbt <1, 1, 1, 1> }"), "transparent background rgbt")
+
+/* ---- camera / lights via Camera object ---- */
 var g4 = Graphics(background=White)
 g4.display(Sphere([0,0,0], 1, color=Black))
 var pov4 = POVRaytracer(g4)
-pov4.viewpoint = Matrix([0,0,8])
-pov4.viewangle = 35
-pov4.light = [Matrix([10,10,10])]
+pov4.camera.viewpoint = Matrix([0,0,8])
+pov4.camera.viewangle = 35
+pov4.camera.light = [Matrix([10,10,10])]
 var s4 = File(pov4.write("/tmp/testxpovray.pov")).readall()
 expect(contains(s4, "background { rgb <1, 1, 1> }"), "white background")
 expect(contains(s4, "location <0, 0, 8>"), "viewpoint field")
 expect(contains(s4, "angle 35"), "viewangle field")
 expect(contains(s4, "light_source { <10, 10, 10>"), "custom light")
+
+/* ---- partial background alpha and +UA ---- */
+var gp = Graphics(background=Color(1, 0, 0, 0.5))
+gp.display(Sphere([0,0,0], 1, color=Black))
+var povP = POVRaytracer(gp)
+expect(contains(File(povP.write("/tmp/testxpovray.pov")).readall(),
+                "background { rgbt <1, 0, 0, 0.5> }"), "partial background transmit 1-a")
+expect(contains(povP._renderFlags(false, true), "+UA"), "+UA from background alpha")
+expect(!contains(pov4._renderFlags(false, true), "+UA"), "no +UA when opaque")
+expect(contains(povP._renderFlags(true, true), "+UA"), "+UA when transparent=true")
+
+/* ---- one-shot legacy filter/transmit warning ---- */
+class LegacyPrim is GraphicsPrimitive {
+  init() {
+    super.init(color=Red)
+    self.filter = 0.2
+  }
+}
+var gl = Graphics()
+gl.display(LegacyPrim())
+gl.display(LegacyPrim())
+var povL = POVRaytracer(gl)
+var warned = false
+try {
+  povL.write("/tmp/testxpovray.pov")
+} catch {
+  "PovLegacyTransp": warned = true
+}
+expect(povL._warnedLegacyTransparency, "legacy transparency detector fired")
 
 print "ok"

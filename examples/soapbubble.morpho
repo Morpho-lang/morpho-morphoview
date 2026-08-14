@@ -22,17 +22,15 @@ var frameSleep = 0.04      // seconds between frames
 var mu0 = 10               // initial penalty
 var muMul = 1.4            // gentle penalty growth
 var muEvery = 40           // bump penalty every this many steps
-var film = Color(0.72, 0.74, 0.76)
-var transmit = 0.82        // soap film: mostly see-through
+var film = Color(0.72, 0.74, 0.76, 0.18)  // soap film: mostly see-through
 
 /** Face mesh → TriangleComplex (plotmesh-style: 3 verts per face, face normals). */
-fn meshFaces(mesh, color, transmit=nil) {
+fn meshFaces(mesh, color) {
   var vert = mesh.vertexmatrix()
   var faces = mesh.connectivitymatrix(0, 2)
   var nf = mesh.count(2)
   var nvert = Matrix(3, 3*nf)
   var norm = Matrix(3, 3*nf)
-  var ncol = Matrix(3, 3*nf)
   var tri = Sparse(3*nf, nf)
 
   var bb = []
@@ -43,7 +41,6 @@ fn meshFaces(mesh, color, transmit=nil) {
     centroid[i] = bb[i][0] + (bb[i][1] - bb[i][0])/2
   }
 
-  var rgb = Matrix(color.rgb(0))
   var nnv = 0
   for (i in 0...nf) {
     var el = faces.rowindices(i)
@@ -63,16 +60,15 @@ fn meshFaces(mesh, color, transmit=nil) {
       tri[nnv, i] = 1
       nvert.setcolumn(nnv, vert.column(el[j]))
       norm.setcolumn(nnv, normal)
-      ncol.setcolumn(nnv, rgb)
       nnv += 1
     }
   }
 
-  return TriangleComplex(nvert, norm, ncol, tri, transmit=transmit)
+  return TriangleComplex(nvert, norm, color, tri)
 }
 
 fn syncMesh(v, meshId, mesh) {
-  return v.morph(meshId, meshFaces(mesh, film, transmit=transmit))
+  return v.morph(meshId, meshFaces(mesh, film))
 }
 
 /** Project every vertex onto the axis-aligned ellipsoid with semi-axes rx,ry,rz. */
@@ -116,7 +112,7 @@ var la = Area()
 var lv = VolumeEnclosed()
 
 var g = Scene(title="Soap bubble", background=Color(0.06, 0.07, 0.1))
-var meshId = g.display(meshFaces(mesh, film, transmit=transmit))
+var meshId = g.display(meshFaces(mesh, film))
 var v = View(g, connecttimeout=20000)
 
 print "Ellipsoid: ${mesh.count(0)} verts, ${mesh.count(2)} faces, A=${la.total(mesh)}  V=${lv.total(mesh)}"

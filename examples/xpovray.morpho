@@ -29,9 +29,9 @@ g.display(Tube(ring, 0.05, color=Gray(0.5), closed=true))
 g.display(Text("xpovray", [0, 1.2, 0], size=24, color=Black))
 
 var pov = POVRaytracer(g)
-pov.viewpoint = Matrix([0, 0, 5])
-pov.viewangle = 35
-pov.light = [Matrix([10, 10, 10]), Matrix([-10, -10, 10])]
+pov.camera.viewpoint = Matrix([0, 0, 5])
+pov.camera.viewangle = 35
+pov.camera.light = [Matrix([10, 10, 10]), Matrix([-10, -10, 10])]
 print pov.write("xpovray.pov")
 try {
   pov.render("xpovray.pov", display=false)

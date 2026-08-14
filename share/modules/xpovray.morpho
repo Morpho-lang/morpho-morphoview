@@ -2,9 +2,9 @@
  * POV-Ray
  * *******************************************************************************************
  * Ray-trace an xgraphics Graphics/Scene with POV-Ray.
- * Displaylists may be GraphicsEntry (xgraphics) or world-space primitives (classic graphics).
+ * Displaylists contain GraphicsEntry objects with GraphicsPrimitives.
  *
- * Public: Camera, POVRaytracer, write, render, visit, visitEntry, vector, color.
+ * Public: Camera, POVRaytracer, write, render, visit.
  ******************************************************************************************* */
 
 import constants
@@ -12,7 +12,52 @@ import xgraphics
 import xcolor
 
 var _PovExecErr = Error("PovExec", "Could not run POV-Ray.")
+var _PovLegacyTransp = Error("PovLegacyTransp",
+  "POVRay warning: legacy 'filter'/'transmit' property detected. Use Color(..., alpha) or Coloring.opacity(...) instead.")
 var _gray = (0.5, 0.5, 0.5)
+
+fn _num(x) { return (abs(x) < 1e-12) ? 0 : x }
+
+fn _povVector(v) {
+  if (v.count() < 3) return "<${_num(v[0])}, ${_num(v[1])}, 0>"
+  return "<${_num(v[0])}, ${_num(v[1])}, ${_num(v[2])}>"
+}
+
+fn _povMatrix(R) {
+  return "matrix <${_num(R[0,0])}, ${_num(R[1,0])}, ${_num(R[2,0])}, ${_num(R[0,1])}, ${_num(R[1,1])}, ${_num(R[2,1])}, ${_num(R[0,2])}, ${_num(R[1,2])}, ${_num(R[2,2])}, 0, 0, 0>"
+}
+
+fn _povEscape(s) {
+  var out = ""
+  var n = s.count()
+  for (i in 0...n) {
+    var ch = s.substring(i, i+1)
+    if (ch == "\\" || ch == "\"") out += "\\"
+    out += ch
+  }
+  return out
+}
+
+/** Quote a path for a shell command string (not POV source). */
+fn _shellQuote(s) {
+  var out = ""
+  var n = s.count()
+  for (i in 0...n) {
+    var ch = s.substring(i, i+1)
+    if (ch == "\\" || ch == "\"" || ch == "$" || ch == "`") out += "\\"
+    out += ch
+  }
+  return out
+}
+
+fn _pngPath(path) {
+  var n = path.count()
+  if (n >= 4) {
+    var ext = path.substring(n-4, n)
+    if (ext == ".pov" || ext == ".POV") return path.substring(0, n-4) + ".png"
+  }
+  return path + ".png"
+}
 
 class Camera {
   init(antialias=true, width=2048, height=1536, viewangle=24,
@@ -32,141 +77,87 @@ class Camera {
 }
 
 class POVRaytracer {
-  init(graphic, camera=nil) { self._setup(graphic, isnil(camera) ? Camera() : camera) }
-  init(graphic, camera) { self._setup(graphic, camera) }
-
-  _setup(graphic, camera) {
+  init(graphic, camera=nil) {
     self.graphic = graphic
-    self.camera = camera
-    self.antialias = camera.antialias
-    self.width = camera.width
-    self.height = camera.height
-    self.viewangle = camera.viewangle
-    self.viewpoint = camera.viewpoint
-    self.look_at = camera.look_at
-    self.sky = camera.sky
-    self.light = camera.light
-    self.shadowless = false
-    self.transparent = false
+    self.camera = isnil(camera) ? Camera() : camera
     self.pointradius = 0.02
     self.lineradius = 0.01
     self._fonts = Dictionary()
+    self._warnedLegacyTransparency = false
+  }
+  init(graphic, camera) {
+    self.graphic = graphic
+    self.camera = camera
+    self.pointradius = 0.02
+    self.lineradius = 0.01
+    self._fonts = Dictionary()
+    self._warnedLegacyTransparency = false
   }
 
-  /* ---------- vectors, color, pigment ---------- */
-
-  vector(v) {
-    if (v.count() < 3) return "<${self._num(v[0])}, ${self._num(v[1])}, 0>"
-    return "<${self._num(v[0])}, ${self._num(v[1])}, ${self._num(v[2])}>"
+  _warnLegacyTransparency(item) {
+    if (self._warnedLegacyTransparency) return
+    if (!(isobject(item) && (item.has("filter") || item.has("transmit")))) return
+    self._warnedLegacyTransparency = true
+    var name = String(item.clss())
+    _PovLegacyTransp.warning("POVRay warning: legacy 'filter'/'transmit' property detected on ${name}. Use Color(..., alpha) or Coloring.opacity(...) instead.")
   }
 
-  color(c) { return self._rgb(c) }
-
-  _num(x) { return (abs(x) < 1e-12) ? 0 : x }
-
-  _triplet(Coloring c) { return c.rgb(0) }
-  _triplet(Matrix c) { return (c[0], c[1], c[2]) }
-  _triplet(List c) { return (c[0], c[1], c[2]) }
-  _triplet(Tuple c) { return (c[0], c[1], c[2]) }
-  _triplet(c) {
-    if (isnil(c)) return _gray
-    if (isobject(c) && c.respondsto("rgb")) return c.rgb(0)
-    return _gray
-  }
+  _rgb(Coloring c) { return c.rgb(0) }
+  _rgb(c) { return _gray }
 
   _alpha(Coloring c) { return c.alpha(0) }
-  _alpha(Matrix c) { return (c.count() >= 4) ? c[3] : 1 }
-  _alpha(List c) { return (c.count() >= 4) ? c[3] : 1 }
-  _alpha(Tuple c) { return (c.count() >= 4) ? c[3] : 1 }
-  _alpha(c) {
-    if (isnil(c)) return 1
-    if (isobject(c) && c.respondsto("alpha")) return c.alpha(0)
-    return 1
-  }
-
-  _rgb(c) { return self.vector(self._triplet(c)) }
-
-  _itemColor(item) {
-    if (item.has("color") && !isnil(item.color)) return item.color
-    if (item.has("colors")) return item.colors
-    return nil
-  }
+  _alpha(c) { return 1 }
 
   _entryColor(entry) {
     if (!isnil(entry.color)) return entry.color
-    return self._itemColor(entry.item)
+    var c = entry.item.color
+    if (isnil(c)) return Gray(0.5)
+    return c
   }
 
-  _pigment(item, col) {
-    var extra = ""
-    if (item.has("filter") && !isnil(item.filter)) extra += " filter ${item.filter}"
-    if (item.has("transmit") && !isnil(item.transmit)) extra += " transmit ${item.transmit}"
-    if (extra.count() > 0) return "pigment { rgb ${self._rgb(col)}${extra} }"
-    var a = self._alpha(col)
+  _pigment(Coloring col, i) {
+    var t = col.rgba(i)
+    var a = t[3]
     if (a < 0.999) {
-      var t = self._triplet(col)
       return "pigment { rgbt <${t[0]}, ${t[1]}, ${t[2]}, ${1-a}> }"
     }
-    return "pigment { rgb ${self._rgb(col)} }"
+    return "pigment { rgb <${t[0]}, ${t[1]}, ${t[2]}> }"
+  }
+  _pigment(Coloring col) { return self._pigment(col, 0) }
+
+  _finish(flat) { return flat ? " finish { ambient 1 diffuse 0 }" : "" }
+
+  _texture(col, flat) {
+    return "texture { ${self._pigment(col)}${self._finish(flat)} }"
   }
 
-  _texture(item, col, flat) {
-    var finish = flat ? " finish { ambient 1 diffuse 0 }" : ""
-    return "texture { ${self._pigment(item, col)}${finish} }"
+  _skin(entry) {
+    return self._texture(self._entryColor(entry), entry.flat)
   }
 
-  _skin(GraphicsEntry entry) {
-    return self._texture(entry.item, self._entryColor(entry), entry.flat)
-  }
-  _skin(item) { return self._texture(item, self._itemColor(item), false) }
-
-  /* Axis-angle [phi, ax, ay, az] in radians → POV-Ray matrix (column vectors). */
-  _rotation(phi, axis) {
-    var x = axis[0], y = axis[1], z = axis[2]
-    var c = cos(phi), s = sin(phi), cc = 1 - c
-    return Matrix([
-      [x*x*cc + c,    x*y*cc - z*s,  x*z*cc + y*s],
-      [x*y*cc + z*s,  y*y*cc + c,    y*z*cc - x*s],
-      [x*z*cc - y*s,  y*z*cc + x*s,  z*z*cc + c]
-    ])
-  }
-
-  /* Entry pose: scale, then axis-angle, then translate. Identity pieces omitted. */
   _wrap(entry) {
     var s = ""
     var scl = entry.scale
-    if (ismatrix(scl) || islist(scl)) s += " scale ${self.vector(scl)}"
+    if (ismatrix(scl) || islist(scl)) s += " scale ${_povVector(scl)}"
     else if (!isnil(scl) && scl != 1) s += " scale ${scl}"
-    var r = entry.rotate
-    if (!isnil(r) && abs(r[0]) > 1e-8) {
-      var R = self._rotation(r[0], [r[1], r[2], r[3]])
-      s += " matrix <${self._num(R[0,0])}, ${self._num(R[1,0])}, ${self._num(R[2,0])}, ${self._num(R[0,1])}, ${self._num(R[1,1])}, ${self._num(R[2,1])}, ${self._num(R[0,2])}, ${self._num(R[1,2])}, ${self._num(R[2,2])}, 0, 0, 0>"
-    }
+    var R = entry.rotationMatrix()
+    if (!isnil(R)) s += " ${_povMatrix(R)}"
     var p = entry.position
     if (!isnil(p) && !(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
-      s += " translate ${self.vector(p)}"
+      s += " translate ${_povVector(p)}"
     }
     return s
   }
 
-  /* ---------- emit: GraphicsEntry vs world-space item ---------- */
-
-  _emit(GraphicsEntry entry, out) { self.visitEntry(entry, entry.item, out) }
-  _emit(item, out) { self.visit(item, out) }
-
-  visitEntry(entry, Sphere item, out) {
+  visit(entry, Sphere item, out) {
     out.write("sphere { <0, 0, 0>, 1 ${self._skin(entry)}${self._wrap(entry)} }")
   }
-  visit(Sphere item, out) {
-    out.write("sphere { ${self.vector(item.center)}, ${item.r} ${self._skin(item)} }")
-  }
 
-  visitEntry(entry, Cylinder item, out) {
+  visit(entry, Cylinder item, out) {
     out.write("cylinder { <0, 0, 0>, <0, 0, 1>, 1 ${self._skin(entry)}${self._wrap(entry)} }")
   }
-  visit(Cylinder item, out) { self._worldCylinder(item.start, item.end, item.aspectratio, self._skin(item), out) }
 
-  visitEntry(entry, Arrow item, out) {
+  visit(entry, Arrow item, out) {
     var h = 1 - item.aspectratio, sk = self._skin(entry)
     out.write("union {")
     out.write("  cylinder { <0, 0, 0>, <0, 0, ${h}>, 1 ${sk} }")
@@ -174,107 +165,35 @@ class POVRaytracer {
     out.write("${self._wrap(entry)}")
     out.write("}")
   }
-  visit(Arrow item, out) { self._worldArrow(item.start, item.end, item.aspectratio, self._skin(item), out) }
 
-  visitEntry(entry, TriangleComplex item, out) {
-    self._mesh(item, self._entryColor(entry), self._skin(entry), self._wrap(entry), out)
-  }
-  visit(TriangleComplex item, out) {
-    self._mesh(item, self._itemColor(item), self._skin(item), "", out)
+  visit(entry, TriangleComplex item, out) {
+    self._mesh(entry, item, out)
   }
 
-  visitEntry(entry, Tube item, out) {
+  visit(entry, Tube item, out) {
     self._sweep(item, self._skin(entry), self._wrap(entry), out)
   }
-  visit(Tube item, out) { self._sweep(item, self._skin(item), "", out) }
 
-  visitEntry(entry, PointCloud item, out) {
+  visit(entry, PointCloud item, out) {
     self._points(item, self._entryColor(entry), entry.flat, self._wrap(entry), out)
   }
-  visit(PointCloud item, out) {
-    self._points(item, self._itemColor(item), false, "", out)
-  }
 
-  visitEntry(entry, LineSet item, out) {
+  visit(entry, LineSet item, out) {
     self._lines(item, self._entryColor(entry), entry.flat, self._wrap(entry), out)
   }
-  visit(LineSet item, out) {
-    self._lines(item, self._itemColor(item), false, "", out)
-  }
 
-  visitEntry(entry, Text item, out) {
+  visit(entry, Text item, out) {
     self._text(item, self._skin(entry), self._orient(item) + self._wrap(entry), out)
   }
-  visit(Text item, out) { self._visitTextLike(item, out) }
 
-  /* Unknown item: world-space duck typing, then tessellation. */
-  visitEntry(entry, item, out) {
-    var tri = self._asMesh(item)
-    if (!isnil(tri)) { self._mesh(tri, self._entryColor(entry), self._skin(entry), self._wrap(entry), out); return }
-    self.visit(item, out)
+  visit(entry, GraphicsPrimitive item, out) {
+    var tri = item.toTriangleComplex()
+    if (!isnil(tri)) self._mesh(entry, tri, out)
   }
 
-  visit(item, out) {
-    if (item.has("center") && item.has("r")) {
-      out.write("sphere { ${self.vector(item.center)}, ${item.r} ${self._skin(item)} }")
-    } else if (item.has("string") && item.has("posn")) {
-      self._visitTextLike(item, out)
-    } else if (item.has("pts") && item.has("radius")) {
-      self._sweep(item, self._skin(item), "", out)
-    } else if (item.has("start") && item.has("end") && item.has("aspectratio")) {
-      self._visitShaftLike(item, out)
-    } else if (item.has("position") && item.has("normals") && item.has("connectivity")) {
-      self._mesh(item, self._itemColor(item), self._skin(item), "", out)
-    } else if (item.has("position") && item.has("closed")) {
-      self._lines(item, self._itemColor(item), false, "", out)
-    } else if (item.has("position")) {
-      self._points(item, self._itemColor(item), false, "", out)
-    } else {
-      var tri = self._asMesh(item)
-      if (!isnil(tri)) self._mesh(tri, self._itemColor(item), self._skin(item), "", out)
-    }
-  }
-
-  _worldCylinder(start, end, ar, skin, out) {
-    var length = (end - start).norm()
-    if (length < 1e-8) return
-    out.write("cylinder { ${self.vector(start)}, ${self.vector(end)}, ${0.5*length*ar} ${skin} }")
-  }
-
-  _worldArrow(start, end, ar, skin, out) {
-    var dx = end - start, length = dx.norm()
-    if (length < 1e-8) return
-    var radius = 0.5*length*ar
-    var cylend = start + dx*(1 - ar)
-    out.write("cylinder { ${self.vector(start)}, ${self.vector(cylend)}, ${radius} ${skin} }")
-    out.write("cone { ${self.vector(cylend)}, ${2*radius}, ${self.vector(end)}, 0 ${skin} }")
-  }
-
-  /* Foreign Cylinder/Arrow share start/end/aspectratio; the class name is the distinction. */
-  _visitShaftLike(item, out) {
-    var skin = self._skin(item)
-    if (String(item.clss()) == "@Arrow") {
-      self._worldArrow(item.start, item.end, item.aspectratio, skin, out)
-    } else {
-      self._worldCylinder(item.start, item.end, item.aspectratio, skin, out)
-    }
-  }
-
-  _visitTextLike(item, out) {
-    var tail = self._orient(item)
-    if (!isnil(item.posn)) tail += " translate ${self.vector(item.posn)}"
-    self._text(item, self._skin(item), tail, out)
-  }
-
-  _asMesh(item) {
-    if (item.respondsto("toTriangleComplex")) return item.toTriangleComplex()
-    if (item.respondsto("totrianglecomplex")) return item.totrianglecomplex()
-    return nil
-  }
-
-  /* ---------- mesh2 / sphere_sweep / points / lines / text ---------- */
-
-  _perVertex(col) { return ismatrix(col) && col.dimensions()[1] > 1 }
+  _perVertex(ColorTable col) { return col.count() > 1 }
+  _perVertex(Coloring col) { return false }
+  _perVertex(col) { return false }
 
   _face(conn, i) {
     if (issparse(conn)) return conn.rowindices(i)
@@ -283,32 +202,37 @@ class POVRaytracer {
     return idx
   }
 
-  _mesh(item, col, skin, tail, out) {
+  _mesh(entry, item, out) {
+    var col = self._entryColor(entry)
+    var skin = self._skin(entry)
+    var tail = self._wrap(entry)
+    var flat = entry.flat
     var nv = item.position.dimensions()[1]
     var nf = item.connectivity.dimensions()[1]
     var per = self._perVertex(col)
     out.write("mesh2 {")
     out.write("  vertex_vectors { ${nv},")
     for (i in 0...nv) {
-      out.write("${(i > 0) ? ", " : ""}${self.vector(item.position.column(i))}")
+      out.write("${(i > 0) ? ", " : ""}${_povVector(item.position.column(i))}")
     }
     out.write("}")
     out.write("  normal_vectors { ${nv},")
     for (i in 0...nv) {
-      out.write("${(i > 0) ? ", " : ""}${self.vector(item.normals.column(i))}")
+      out.write("${(i > 0) ? ", " : ""}${_povVector(item.normals.column(i))}")
     }
     out.write("}")
     if (per) {
+      var fin = self._finish(flat)
       out.write("  texture_list { ${nv},")
       for (i in 0...nv) {
-        out.write("${(i > 0) ? ", " : ""}texture { ${self._pigment(item, col.column(i))} }")
+        out.write("${(i > 0) ? ", " : ""}texture { ${self._pigment(col, i)}${fin} }")
       }
       out.write("}")
     }
     out.write("  face_indices { ${nf},")
     for (i in 0...nf) {
       var idx = self._face(item.connectivity, i)
-      var s = self.vector(idx)
+      var s = _povVector(idx)
       if (per) s += ", ${idx[0]}, ${idx[1]}, ${idx[2]}"
       out.write("${(i > 0) ? ", " : ""}${s}")
     }
@@ -326,7 +250,7 @@ class POVRaytracer {
     var n = item.closed ? np + 1 : np
     out.write("sphere_sweep { linear_spline ${n},")
     for (i in 0...n) {
-      out.write("${(i > 0) ? "," : ""} ${self.vector(mat.column(i < np ? i : 0))}, ${item.radius}")
+      out.write("${(i > 0) ? "," : ""} ${_povVector(mat.column(i < np ? i : 0))}, ${item.radius}")
     }
     out.write(" ${skin}${tail} }")
   }
@@ -343,170 +267,133 @@ class POVRaytracer {
     var per = self._perVertex(col)
     self._grouped(tail, out, fn () {
       for (i in 0...nv) {
-        var c = per ? col.column(i) : col
-        out.write("sphere { ${self.vector(item.position.column(i))}, ${self.pointradius} ${self._texture(item, c, flat)} }")
+        var c = per ? col.color(i) : col
+        out.write("sphere { ${_povVector(item.position.column(i))}, ${self.pointradius} ${self._texture(c, flat)} }")
       }
     })
   }
 
   _lines(item, col, flat, tail, out) {
-    var segs = item.respondsto("_segmentIndices") ? item._segmentIndices() : self._polyline(item)
+    var segs = item._segmentIndices()
     if (segs.count() < 2) return
     var per = self._perVertex(col)
     self._grouped(tail, out, fn () {
       for (k in 0...segs.count():2) {
         var i = segs[k], j = segs[k+1]
-        var c = per ? col.column(i) : col
-        out.write("cylinder { ${self.vector(item.position.column(i))}, ${self.vector(item.position.column(j))}, ${self.lineradius} ${self._texture(item, c, flat)} }")
+        var c = per ? col.color(i) : col
+        out.write("cylinder { ${_povVector(item.position.column(i))}, ${_povVector(item.position.column(j))}, ${self.lineradius} ${self._texture(c, flat)} }")
       }
     })
   }
 
-  _polyline(item) {
-    var nv = item.position.dimensions()[1], out = []
-    var nseg = (item.has("closed") && item.closed) ? nv : nv - 1
-    if (nseg < 1) return out
-    for (i in 0...nseg) {
-      out.append(i)
-      out.append(mod(i + 1, nv))
-    }
-    return out
-  }
-
   _orient(item) {
-    var m = nil
-    if (item.respondsto("transformationMatrix")) m = item.transformationMatrix()
-    else if (item.respondsto("transformationmatrix")) m = item.transformationmatrix()
+    var m = item.transformationMatrix()
     if (isnil(m)) return ""
     var s = " matrix <"
     for (i in 0..3) {
       for (j in 0..2) {
         if (!(i == 0 && j == 0)) s += ", "
-        s += "${m[i,j]}"
+        s += "${_num(m[i,j])}"
       }
     }
     return s + ">"
   }
 
   _text(item, skin, tail, out) {
-    out.write("text { ttf \"${self._fontPath(item)}\" \"${item.string}\" 0.1, 0")
+    out.write("text { ttf \"${_povEscape(self._fontPath(item))}\" \"${_povEscape(item.string)}\" 0.1, 0")
     out.write("  ${skin}")
     out.write("  scale ${item.size/75}${tail} }")
   }
 
   _fontPath(item) {
-    var font = item.has("font") ? item.font : nil
+    var font = item.font
     if (isnil(font) || !font) return "cyrvetic.ttf"
     if (self._fonts.contains(font)) return self._fonts[font]
-    var found = self._findFont(font)
+    var found = FontFinder().find(font)
     self._fonts[font] = isnil(found) ? font : found
     return self._fonts[font]
   }
 
-  _fontFolders() {
-    var p = System.platform()
-    if (p == "macos") return ["/System/Library/Fonts"]
-    if (p == "windows") return [Folder.normalizePath("C:/Windows/Fonts")]
-    return ["/usr/share/fonts", "/usr/local/share/fonts"]
+  _backgroundAlpha(transparent) {
+    if (transparent) return 0
+    var col = self.graphic.background
+    if (isnil(col)) return 1
+    return col.alpha(0)
   }
 
-  _findFont(font) {
-    for (folder in self._fontFolders()) {
-      var found = self._searchFont(folder, font)
-      if (found) return found
-    }
-    return nil
-  }
-
-  _searchFont(folder, font) {
-    if (!Folder.isFolder(folder)) return nil
-    var names = Folder.contents(folder)
-    for (f in names) {
-      var path = Folder.normalizePath("${folder}/${f}")
-      var parts = f.split(".")
-      if (parts[0] == font && parts.count() > 1 &&
-          (parts[parts.count()-1] == "ttf" || parts[parts.count()-1] == "ttc")) return path
-      if (Folder.isFolder(path)) {
-        var nested = self._searchFont(path, font)
-        if (nested) return nested
-      }
-    }
-    return nil
-  }
-
-  /* ---------- scene file ---------- */
-
-  _writeBackground(out) {
+  _writeBackground(out, transparent) {
     var col = self.graphic.background
     if (isnil(col)) col = Black
-    var t = self._triplet(col)
-    if (self.transparent || self._alpha(col) < 0.999) {
-      out.write("background { rgb <${t[0]}, ${t[1]}, ${t[2]}, 1> }")
+    var t = col.rgb(0)
+    var a = self._backgroundAlpha(transparent)
+    if (a < 0.999) {
+      out.write("background { rgbt <${t[0]}, ${t[1]}, ${t[2]}, ${1-a}> }")
     } else {
-      out.write("background { rgb ${self.vector(t)} }")
+      out.write("background { rgb ${_povVector(t)} }")
     }
   }
 
   _writeCamera(out) {
-    var aspect = self.width / self.height
+    var cam = self.camera
+    var aspect = cam.width / cam.height
     out.write("camera {")
-    out.write("  location ${self.vector(self.viewpoint)}")
-    out.write("  up <0, 1, 0> right <-${aspect}, 0, 0> angle ${self.viewangle}")
-    out.write("  look_at ${self.vector(self.look_at)} sky ${self.vector(self.sky)}")
+    out.write("  location ${_povVector(cam.viewpoint)}")
+    out.write("  up <0, 1, 0> right <-${aspect}, 0, 0> angle ${cam.viewangle}")
+    out.write("  look_at ${_povVector(cam.look_at)} sky ${_povVector(cam.sky)}")
     out.write("}")
   }
 
-  _writeLights(out) {
-    var sl = self.shadowless ? " shadowless" : ""
-    var lights = self.light
+  _writeLights(out, shadowless) {
+    var sl = shadowless ? " shadowless" : ""
+    var lights = self.camera.light
     if (isnil(lights)) lights = [Matrix([-5, -5, 8])]
     else if (!islist(lights)) lights = [lights]
-    for (L in lights) out.write("light_source { ${self.vector(L)} color White${sl} }")
+    for (L in lights) out.write("light_source { ${_povVector(L)} color White${sl} }")
   }
 
-  write(file) {
+  write(file, transparent=false, shadowless=false) {
+    self._warnedLegacyTransparency = false
     var out = File(file, "write")
     out.write("#include \"colors.inc\"")
-    self._writeBackground(out)
+    self._writeBackground(out, transparent)
     self._writeCamera(out)
-    for (el in self.graphic.displaylist) self._emit(el, out)
-    self._writeLights(out)
+    for (el in self.graphic.displaylist) {
+      self._warnLegacyTransparency(el.item)
+      self.visit(el, el.item, out)
+    }
+    self._writeLights(out, shadowless)
     out.close()
     return out.relativepath()
   }
 
-  _pngPath(path) {
-    var n = path.count()
-    if (n >= 4) {
-      var ext = path.substring(n-4, n)
-      if (ext == ".pov" || ext == ".POV") return path.substring(0, n-4) + ".png"
-    }
-    return path + ".png"
-  }
-
   _openImage(png) {
     var p = System.platform()
-    if (p == "macos") system("open \"${png}\"")
-    else if (p == "windows") system("powershell -Command \"Start-Process '${png}'\"")
-    else system("xdg-open \"${png}\"")
+    var escaped = _shellQuote(png)
+    if (p == "macos") system("open \"${escaped}\"")
+    else if (p == "windows") system("powershell -Command \"Start-Process '${escaped}'\"")
+    else system("xdg-open \"${escaped}\"")
+  }
+
+  _renderFlags(transparent, display) {
+    var cam = self.camera
+    var flags = "+W${cam.width} +H${cam.height}"
+    if (!display) flags += " -D"
+    if (cam.antialias) flags += " +A"
+    if (self._backgroundAlpha(transparent) < 0.999) flags += " +UA"
+    return flags
   }
 
   render(file, quiet=false, display=true, shadowless=false, transparent=false) {
-    self.shadowless = shadowless
-    self.transparent = transparent
-    var path = self.write(file)
-    var flags = "+W${self.width} +H${self.height}"
-    if (!display) flags += " -D"
-    if (self.antialias) flags += " +A"
-    if (self.transparent) flags += " +UA"
+    var path = self.write(file, transparent=transparent, shadowless=shadowless)
+    var flags = self._renderFlags(transparent, display)
     var result
     try {
-      result = System.subprocess("povray \"${path}\" ${flags}")
+      result = System.subprocess("povray \"${_shellQuote(path)}\" ${flags}")
     } catch {
       "SystmPOpnFld": _PovExecErr.throw()
     }
     if (!quiet && !isnil(result["stdout"])) print result["stdout"]
     if (result["exitstatus"] != 0) _PovExecErr.warning()
-    if (!quiet && display) self._openImage(self._pngPath(path))
+    if (!quiet && display) self._openImage(_pngPath(path))
   }
 }

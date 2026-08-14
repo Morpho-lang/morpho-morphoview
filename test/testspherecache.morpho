@@ -5,7 +5,7 @@
 
 import morphoview
 import xgraphics
-import color
+import xcolor
 
 class Buf {
   init() { self.lines = [] }

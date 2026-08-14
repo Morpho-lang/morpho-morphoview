@@ -68,6 +68,7 @@ expect(approx(Color(1.2, -0.1, 0.5, 1.5).clamp().g, 0, 1e-9), "clamp low")
 expect(approx(Color(1.2, -0.1, 0.5, 1.5).clamp().a, 1, 1e-9), "clamp alpha")
 expect(Clear.a == 0 && Clear.r == 0, "Clear")
 expect(approx(Red.opacity(0.3).a, 0.3, 1e-9) && Red.opacity(0.3).r == 1, "Color.opacity")
+expect(approx(Color(1, 0, 0, 0.5).opacity(0.5).a, 0.25, 1e-9), "Color.opacity multiplies")
 
 /* ---- ColorDelegate: Lighten / Darken / Opacity on maps ---- */
 var lit = Lighten(GrayMap(), 0.5)
@@ -80,11 +81,13 @@ expect(approx(faded.alpha(0.5), 0.4, 1e-9), "Opacity map alpha")
 expect(approx(ViridisMap().opacity(0.25).color(0.5).a, 0.25, 1e-9), "ColorMap.opacity sugar")
 expect(approx(Opacity(Lighten(Red, 0.5), 0.2).color(0).g, 0.5, 1e-9), "delegate compose")
 expect(approx(Opacity(Lighten(Red, 0.5), 0.2).color(0).a, 0.2, 1e-9), "delegate compose alpha")
+expect(approx(Opacity(Color(1, 0, 0, 0.5), 0.5).alpha(0), 0.25, 1e-9), "Opacity multiplies inner alpha")
 expect(Red.color(0.3).r == 1, "Color.color ignores x")
 
 /* ---- Coloring hierarchy ---- */
 expect(Color.superclass() == Coloring, "Color → Coloring")
 expect(ColorMap.superclass() == Coloring, "ColorMap → Coloring")
+expect(ColorTable.superclass() == Coloring, "ColorTable → Coloring")
 expect(HueMap().superclass() == ColorMap, "HueMap → ColorMap")
 expect(ViridisMap().superclass() == ChebyshevMap, "ViridisMap → ChebyshevMap")
 expect(ChebyshevMap.superclass() == ColorMap, "ChebyshevMap → ColorMap")
@@ -206,6 +209,35 @@ try {
 }
 expect(absFail, "Coloring.rgb abstract")
 
+/* ---- ColorTable / asColoring ---- */
+var rgbTab = ColorTable(Matrix([[1, 0], [0, 1], [0, 0]]))
+expect(rgbTab.count() == 2 && rgbTab.channels() == 3, "ColorTable RGB shape")
+expect(approx(rgbTab.rgb(0)[0], 1, 1e-9) && rgbTab.alpha(0) == 1, "ColorTable implicit alpha")
+expect(rgbTab.color(1).g == 1 && rgbTab.color(1).a == 1, "ColorTable.color(Int)")
+var rgbaTab = ColorTable(Matrix([[1, 0], [0, 1], [0, 0], [0.4, 0.8]]))
+expect(rgbaTab.channels() == 4 && approx(rgbaTab.alpha(0), 0.4, 1e-9), "ColorTable RGBA alpha")
+expect(approx(rgbaTab.rgba(1)[3], 0.8, 1e-9), "ColorTable.rgba")
+expect(approx(rgbaTab.opacity(0.5).alpha(0), 0.2, 1e-9), "ColorTable.opacity multiplies")
+
+var asTab = asColoring(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
+expect(asTab.clss() == ColorTable && asTab.count() == 3, "asColoring 3xn → ColorTable")
+var asRow = asColoring(Matrix([[0.2, 0.4, 0.6]]))
+expect(asRow.clss() == Color && approx(asRow.g, 0.4, 1e-9), "asColoring 1x3 → Color")
+var asList = asColoring([1, 0, 0, 0.5])
+expect(asList.clss() == Color && approx(asList.a, 0.5, 1e-9), "asColoring List RGBA → Color")
+expect(isnil(asColoring(nil)), "asColoring nil")
+
+var srt = segmentSRT([0, 0, 0], [0, 0, 1], 0.1)
+expect(istuple(srt) && srt.count() == 3, "segmentSRT Tuple")
+
+var badTbl = false
+try {
+  ColorTable(Matrix([[1, 0], [0, 1]]))
+} catch {
+  "ClrTblInit" : badTbl = true
+}
+expect(badTbl, "ColorTable rejects 2-row")
+
 /* ---- Show MD: Color vs Coloring ---- */
 var pos = Matrix([[0, 1, 0.5], [0, 0, 0.8], [0, 0, 0]])
 var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
@@ -227,5 +259,24 @@ g2.display(TriangleComplex(pos, nrm, ViridisMap(), conn))
 var buf2 = Buf()
 Show().write(g2, buf2)
 expect(buf2.lines.count() > 0, "Show Coloring map as color")
+
+var g3 = Graphics()
+g3.display(TriangleComplex(pos, nrm, ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.4, 0.5, 0.6]])), conn))
+var buf3 = Buf()
+Show().write(g3, buf3)
+var sawXnc = false
+var sawXn = false
+var droppedAlpha = true
+for (line in buf3.lines) {
+  if (line == "v \"xnc\"") sawXnc = true
+  if (line == "v \"xn\"") sawXn = true
+  var parts = line.split(" ")
+  if (parts.count() >= 10 && parts[0] != "c" && parts[0] != "C") {
+    // vertex row: x y z nx ny nz r g b  — not 10th alpha
+    if (parts.count() > 10) droppedAlpha = false
+  }
+}
+expect(sawXnc && !sawXn, "ColorTable RGBA still xnc")
+expect(droppedAlpha, "Show drops ColorTable per-vertex alpha")
 
 print "ok"

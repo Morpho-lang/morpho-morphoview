@@ -1,4 +1,4 @@
-// Color always has .a (default 1). Show prefers transmit/filter when set, else Color.a.
+// Color always has .a (default 1). Show uses Color.a / Coloring.opacity.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testshowcolora.morpho
@@ -45,21 +45,6 @@ var buf1 = Buf()
 Show().write(g1, buf1)
 expect(anyHasAlpha(buf1.lines, "0.4"), "item Color.a → alpha 0.4")
 expect(anyExact(buf1.lines, "v \"xn\""), "Color.a translucent → xn")
-
-/* ---- transmit wins over Color.a when set ---- */
-var g2 = Graphics()
-g2.display(TriangleComplex(pos, nrm, Color(0, 1, 0, 0.5), conn, transmit=0.9))
-var buf2 = Buf()
-Show().write(g2, buf2)
-expect(anyHasAlpha(buf2.lines, "0.1"), "transmit preferred over Color.a")
-expect(!anyHasAlpha(buf2.lines, "0.5"), "Color.a not used when transmit set")
-
-/* ---- opaque Color(r,g,b) + transmit ---- */
-var g3 = Graphics()
-g3.display(TriangleComplex(pos, nrm, Red, conn, transmit=0.4))
-var buf3 = Buf()
-Show().write(g3, buf3)
-expect(anyHasAlpha(buf3.lines, "0.6"), "opaque Color + transmit 0.4 → alpha 0.6")
 
 /* ---- presentation color=Color(...,a) on display ---- */
 var g4 = Graphics()
