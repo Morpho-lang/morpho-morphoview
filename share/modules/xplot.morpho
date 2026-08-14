@@ -958,20 +958,24 @@ class Plot is Scene {
     var nf = mesh.count(2)
     var nnt = isselection(selection) ? selection.idlistforgrade(2).count() : nf
 
-    var interpolate = _isPerElementColor(fcol, mesh.count(0)) && !_isPerElementColor(fcol, nf)
+    var perFace = _isPerElementColor(fcol, nf)
+    var interpolate = _isPerElementColor(fcol, mesh.count(0)) && !perFace
 
     // Lit only when asked (shaded) or interpolating a field. Per-element hues stay unlit.
     var wantShade = interpolate || _styleHas(style, "shaded")
-    var unlit = !wantShade || (_isPerElementColor(fcol, nf) && !interpolate)
+    var unlit = !wantShade || (perFace && !interpolate)
     var vnorm = nil
     if (!unlit && isnil(planar)) {
       vnorm = _smoothVertexNormals(mesh, vertMat, centroid, selection=selection)
     }
 
-    var nch = _plotChannels(fcol)
+    // ColorTable only for per-face / interpolated colors (canonical per-vertex).
+    // Uniform Coloring is preserved so Color.a is not baked into an RGBA table.
+    var perVertex = interpolate || perFace
+    var nch = perVertex ? _plotChannels(fcol) : 3
     var nvert = Matrix(3, 3*nnt)
     var norm = Matrix(3, 3*nnt)
-    var ncol = Matrix(nch, 3*nnt)
+    var ncol = perVertex ? Matrix(nch, 3*nnt) : nil
     var tri = Sparse(3*nnt, nnt)
 
     var nnv = 0
@@ -992,20 +996,22 @@ class Plot is Scene {
       }
 
       var tcol
-      if (!interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, i), nch)
+      if (perVertex && !interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, i), nch)
       for (j in 0...3) {
         tri[nnv, nnt] = 1
         nvert.setColumn(nnv, v[j])
         if (!isnil(vnorm)) norm.setColumn(nnv, vnorm.column(el[j]))
         else norm.setColumn(nnv, faceNormal)
-        if (interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, el[j]), nch)
-        ncol.setColumn(nnv, tcol)
+        if (perVertex) {
+          if (interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, el[j]), nch)
+          ncol.setColumn(nnv, tcol)
+        }
         nnv += 1
       }
       nnt += 1
     }
 
-    return (TriangleComplex(nvert, norm, ColorTable(ncol), tri), unlit)
+    return (TriangleComplex(nvert, norm, perVertex ? ColorTable(ncol) : fcol, tri), unlit)
   }
 
   _facesInto(mesh, selection, color, vertMat, bb, planar, centroid, drawn=nil, style=nil) {

@@ -86,6 +86,8 @@ class POVRaytracer {
     self.lineradius = 0.01
     self._fonts = Dictionary()
   }
+
+  // Morpho optionals are keyword-only; this required-arg overload is `POVRaytracer(g, cam)`.
   init(graphic, camera) {
     self.graphic = graphic
     self.camera = camera
@@ -203,7 +205,7 @@ class POVRaytracer {
     if (!isnil(tri)) self._mesh(entry, tri, out)
   }
 
-  _perVertex(ColorTable col) { return col.count() > 1 }
+  _perVertex(ColorTable col) { return true }
   _perVertex(Coloring col) { return false }
   _perVertex(col) { return false }
 

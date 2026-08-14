@@ -100,6 +100,12 @@ var sf = scene(gf)
 expect(contains(sf, "texture_list"), "per-vertex texture_list")
 expect(contains(sf, "finish { ambient 1 diffuse 0 }"), "flat finish on vertex colors")
 
+var gu = Graphics()
+gu.display(TriangleComplex(pos, nrm, Red, conn), flat=true)
+var su = scene(gu)
+expect(!contains(su, "texture_list"), "uniform color is not texture_list")
+expect(contains(su, "finish { ambient 1 diffuse 0 }"), "flat finish on uniform color")
+
 /* ---- transparent background ---- */
 var gb = Graphics(background=White)
 gb.display(Sphere([0,0,0], 1, color=Black))

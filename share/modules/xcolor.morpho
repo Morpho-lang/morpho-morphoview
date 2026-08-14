@@ -160,7 +160,9 @@ class Opacity is ColorDelegate {
   transform(Color c) { return Color(c.r, c.g, c.b, c.a * self.a) }
 }
 
-/** Indexed per-vertex / per-face colors. Backing matrix is RGB (3×n) or RGBA (4×n). */
+/** Canonical per-vertex coloring: one color per vertex of the attached primitive.
+ *  Backing matrix is RGB (3×n) or RGBA (4×n). Plot converts face/edge/field colors
+ *  into this form; renderers should not interpret other indexings. */
 class ColorTable is Coloring {
   init(Matrix colors) {
     var d = colors.dimensions(), rows = d[0], cols = d[1]
@@ -196,6 +198,7 @@ class ColorTable is Coloring {
   column(i) { return self.column(Int(i)) }
 
   opacity(a) {
+    if (a == 1) return self
     var n = self.count()
     var m = Matrix(4, n)
     for (i in 0...n) {
@@ -204,19 +207,6 @@ class ColorTable is Coloring {
     }
     return ColorTable(m)
   }
-}
-
-/** Constructor boundary: stored graphics colors are nil or Coloring.
- *  3×1 / 4×1 / 1×3 / 1×4 → Color; 3×n / 4×n with n>1 → ColorTable. */
-fn asColoring(Coloring c) { return c }
-fn asColoring(Matrix c) {
-  var d = c.dimensions(), rows = d[0], cols = d[1]
-  if ((rows == 3 || rows == 4) && cols > 1) return ColorTable(c)
-  return Color(c)
-}
-fn asColoring(c) {
-  if (isnil(c)) return nil
-  return Color(c)
 }
 
 class ColorMap is Coloring {
@@ -381,4 +371,18 @@ class PlasmaMap is ChebyshevMap {
       (0.410228609925941,-0.26056803832126973,-0.07193502017900728,0.0713778851634931,
        0.0007021465182023984,0.00034857192848406334,0.0088834869199995,-0.00152187260983132))
   }
+}
+
+/** Constructor boundary: stored graphics colors are nil or Coloring.
+ *  Defined after ColorMap subclasses so `asColoring(Coloring)` matches them.
+ *  3×1 / 4×1 / 1×3 / 1×4 → Color; 3×n / 4×n with n>1 → ColorTable. */
+fn asColoring(Coloring c) { return c }
+fn asColoring(Matrix c) {
+  var d = c.dimensions(), rows = d[0], cols = d[1]
+  if ((rows == 3 || rows == 4) && cols > 1) return ColorTable(c)
+  return Color(c)
+}
+fn asColoring(c) {
+  if (isnil(c)) return nil
+  return Color(c)
 }

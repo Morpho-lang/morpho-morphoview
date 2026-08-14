@@ -220,6 +220,9 @@ expect(approx(rgbaTab.rgba(1)[3], 0.8, 1e-9), "ColorTable.rgba")
 expect(approx(rgbaTab.opacity(0.5).alpha(0), 0.2, 1e-9), "ColorTable.opacity multiplies")
 expect(rgbaTab.opacity(0.5).clss() == ColorTable, "ColorTable.opacity stays a table")
 expect(rgbaTab.opacity(0.5).channels() == 4, "ColorTable.opacity bakes RGBA")
+expect(rgbTab.opacity(1) == rgbTab, "ColorTable.opacity(1) is no-op")
+expect(rgbTab.opacity(1).channels() == 3, "opacity(1) does not promote RGB")
+expect(rgbaTab.opacity(1) == rgbaTab, "RGBA opacity(1) is no-op")
 var rgbFaded = rgbTab.opacity(0.5)
 expect(rgbFaded.clss() == ColorTable && rgbFaded.channels() == 4, "RGB table opacity becomes RGBA")
 expect(approx(rgbFaded.rgb(0)[0], 1, 1e-9) && approx(rgbFaded.alpha(0), 0.5, 1e-9), "RGB table red+alpha")
@@ -246,6 +249,12 @@ try {
   "ClrTblInit" : badTbl = true
 }
 expect(badTbl, "ColorTable rejects 2-row")
+
+var wrapped = withLegacyTransp(ViridisMap(), 0.5, nil)
+expect(wrapped.clss() == Opacity, "legacy filter wraps Coloring without opacity()")
+var tblFade = withLegacyTransp(rgbTab, 0.5, nil)
+expect(tblFade.clss() == ColorTable && tblFade.channels() == 4, "legacy filter keeps ColorTable")
+expect(approx(tblFade.alpha(0), 0.5, 1e-9), "legacy filter multiplies table alpha")
 
 /* ---- Show MD: Color vs Coloring ---- */
 var pos = Matrix([[0, 1, 0.5], [0, 0, 0.8], [0, 0, 0]])
@@ -287,5 +296,57 @@ for (line in buf3.lines) {
 }
 expect(sawXnc && !sawXn, "ColorTable RGBA still xnc")
 expect(droppedAlpha, "Show drops ColorTable per-vertex alpha")
+
+var badLen = false
+try {
+  TriangleComplex(pos, nrm, ColorTable(Matrix([[1, 0], [0, 1], [0, 0]])), conn)
+} catch {
+  "GfxClrTblLen" : badLen = true
+}
+expect(badLen, "ColorTable count must match vertices")
+
+var badEnt = false
+try {
+  Graphics().display(Sphere([0, 0, 0], 1, maxrefine=1), color=rgbTab)
+} catch {
+  "GfxEntryClr" : badEnt = true
+}
+expect(badEnt, "entry.color rejects ColorTable")
+
+var scBad = Scene()
+var sid = scBad.display(Sphere([0, 0, 0], 1, maxrefine=1))
+var badRecolor = false
+try {
+  scBad.recolor(sid, rgbTab)
+} catch {
+  "GfxEntryClr" : badRecolor = true
+}
+expect(badRecolor, "recolor rejects ColorTable")
+
+var gOpaque = Graphics()
+gOpaque.display(TriangleComplex(pos, nrm, ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1]])), conn))
+var bufOpaque = Buf()
+Show().write(gOpaque, bufOpaque)
+var sawOpaqueXnc = false
+for (line in bufOpaque.lines) {
+  if (line == "v \"xnc\"") sawOpaqueXnc = true
+}
+expect(sawOpaqueXnc, "opaque RGBA ColorTable still xnc")
+
+var gEsc = Graphics(title="say \"hi\"")
+gEsc.display(Text("a\\b\"c", [0, 0, 0], color=White))
+var bufEsc = Buf()
+Show().write(gEsc, bufEsc)
+var sawTitle = false
+var sawText = false
+for (line in bufEsc.lines) {
+  if (line == "W \"say \\\"hi\\\"\"") sawTitle = true
+  if (line.count() >= 3) {
+    var parts = line.split(" ")
+    if (parts.count() >= 4 && parts[0] == "T" && parts[3] == "\"a\\\\b\\\"c\"") sawText = true
+  }
+}
+expect(sawTitle, "Show escapes quotes in window title")
+expect(sawText, "Show escapes quotes/backslashes in Text")
 
 print "ok"

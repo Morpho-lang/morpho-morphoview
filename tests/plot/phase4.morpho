@@ -5,7 +5,13 @@
 
 import meshtools
 import xplot
+import xgraphics
 import xcolor
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
 
 fn expect(cond, msg) {
   if (!cond) {
@@ -56,21 +62,38 @@ var mid = Matrix(ViridisMap().rgb(0.5))
 expect(approxEps(rgb0[0], mid[0], 1e-6) && approxEps(rgb0[1], mid[1], 1e-6) && approxEps(rgb0[2], mid[2], 1e-6),
        "uniform → mid colormap")
 
-/* ---- RGBA through Plot / ColorTable ---- */
+/* ---- RGBA through Plot: uniform Coloring stays Color; interpolate bakes ColorTable ---- */
 var pA = Plot(am, color=Color(1, 0, 0, 0.5))
 var faceA = pA.findEntry(pA.entries["faces"][0]).item
-expect(faceA.color.clss() == ColorTable, "shared Color.a → ColorTable")
-expect(approx(faceA.color.alpha(0), 0.5) && faceA.color.channels() == 4, "face alpha kept")
+expect(faceA.color.clss() == Color, "uniform Color.a stays Color")
+expect(approx(faceA.color.a, 0.5), "face alpha kept")
+expect(pA.findEntry(pA.entries["faces"][0]).flat == true, "uniform faces stay flat")
+
+var bufA = Buf()
+Show().write(pA, bufA)
+var sawXnA = false
+var sawXncA = false
+var sawAlphaA = false
+for (line in bufA.lines) {
+  if (line == "v \"xn\"") sawXnA = true
+  if (line == "v \"xnc\"") sawXncA = true
+  var parts = line.split(" ")
+  if (parts.count() == 6 && parts[0] == "c" && parts[5] == "0.5") sawAlphaA = true
+}
+expect(sawXnA && !sawXncA, "uniform translucent mesh uses xn not xnc")
+expect(sawAlphaA, "uniform Color.a reaches viewer C")
 
 var pTup = Plot(am, color=(1, 0, 0, 0.5))
-expect(approx(pTup.findEntry(pTup.entries["faces"][0]).item.color.alpha(0), 0.5), "RGBA tuple is shared")
+expect(pTup.findEntry(pTup.entries["faces"][0]).item.color.clss() == Color, "RGBA tuple stays Color")
+expect(approx(pTup.findEntry(pTup.entries["faces"][0]).item.color.a, 0.5), "RGBA tuple is shared")
 var pList = Plot(am, color=[1, 0, 0, 0.5])
-expect(approx(pList.findEntry(pList.entries["faces"][0]).item.color.alpha(0), 0.5), "RGBA list is shared")
+expect(approx(pList.findEntry(pList.entries["faces"][0]).item.color.a, 0.5), "RGBA list is shared")
 
 var pMap = Plot(fConst, style="interpolate", colormap=ViridisMap().opacity(0.5))
 var faceM = pMap.findEntry(pMap.entries["faces"][0]).item
 expect(faceM.color.clss() == ColorTable && faceM.color.channels() == 4, "map opacity → ColorTable RGBA")
 expect(approx(faceM.color.alpha(0), 0.5), "colormap opacity kept")
+expect(pMap.findEntry(pMap.entries["faces"][0]).flat == false, "interpolated faces not flat")
 
 /* ---- center= with diverging map ---- */
 var fSigned = Field(am, fn (x, y, z) x) // on [0,1]

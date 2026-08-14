@@ -25,8 +25,12 @@ var _GfxLegacyTransp = Error("GfxLegacyTransp",
   "filter=/transmit= map to Color.a. Prefer Color(..., a) or Coloring.opacity(a).")
 var _warnedLegacyTransp = false
 var _GfxXnca = Error("GfxXnca",
-  "ColorTable per-element alpha is dropped until the viewer supports xnca.")
+  "ColorTable per-vertex alpha is dropped until the viewer supports xnca.")
 var _warnedXnca = false
+var _GfxEntryClr = Error("GfxEntryClr",
+  "GraphicsEntry.color is a uniform presentation override; ColorTable belongs on the primitive.")
+var _GfxClrTblLen = Error("GfxClrTblLen",
+  "ColorTable must have one color per vertex.")
 
 /* **************************************
  * Utility functions
@@ -140,6 +144,35 @@ fn segmentSRT(start, end, aspectratio) {
 fn _asColoring(Coloring c) { return c }
 fn _asColoring(c) { return asColoring(c) }
 
+/** Entry color is a uniform presentation override, never a ColorTable. */
+fn _asEntryColor(ColorTable c) {
+  _GfxEntryClr.throw()
+  return nil
+}
+fn _asEntryColor(Coloring c) { return c }
+fn _asEntryColor(c) {
+  if (isnil(c)) return nil
+  return _asEntryColor(asColoring(c))
+}
+
+/** ColorTable on a vertex-bearing primitive is one color per vertex. */
+fn _requireVertexColors(ColorTable col, nv) {
+  if (col.count() != nv) _GfxClrTblLen.throw()
+}
+fn _requireVertexColors(col, nv) { }
+
+/** Escape `\` and `"` for morphoview quoted protocol strings. */
+fn _mvEscape(s) {
+  var out = ""
+  var n = s.count()
+  for (i in 0...n) {
+    var ch = s.substring(i, i+1)
+    if (ch == "\\" || ch == "\"") out += "\\"
+    out += ch
+  }
+  return out
+}
+
 // [Compatibility shim] Old Show formula: alpha = 1 − clamp(filter + transmit, 0, 1).
 fn _legacyAlpha(filter, transmit) {
   var s = (isnil(filter) ? 0 : filter) + (isnil(transmit) ? 0 : transmit)
@@ -154,12 +187,17 @@ fn _warnLegacyTransp() {
   _GfxLegacyTransp.warning("Deprecated filter=/transmit=. Use Color(..., a) or Coloring.opacity(a).")
 }
 
+fn _legacyOpacity(ColorTable color, a) { return color.opacity(a) }
+fn _legacyOpacity(Color color, a) { return color.opacity(a) }
+fn _legacyOpacity(Coloring color, a) { return Opacity(color, a) }
+fn _legacyOpacity(color, a) { return _legacyOpacity(asColoring(color), a) }
+
 fn _withLegacyTransp(color, filter, transmit) {
   if (isnil(filter) && isnil(transmit)) return color
   _warnLegacyTransp()
   var a = _legacyAlpha(filter, transmit)
   if (isnil(color)) return Gray(0.5).opacity(a)
-  return asColoring(color).opacity(a)
+  return _legacyOpacity(color, a)
 }
 
 // [Compatibility shim] Public name so xplot veneers can call this across modules.
@@ -188,6 +226,7 @@ class TriangleComplex is GraphicsPrimitive {
     self.position = position /* Vertex position matrix */
     self.normals = normals /* Matrix of normal vectors */
     self.connectivity = connectivity /* Connectivity matrix; columns are triangles */
+    _requireVertexColors(self.color, self.position.dimensions()[1])
   }
 }
 
@@ -729,6 +768,7 @@ class PointCloud is GraphicsPrimitive {
   init(position, color=nil) {
     super.init(color=color)
     self.position = _asVertexMatrix(position)
+    _requireVertexColors(self.color, self.position.dimensions()[1])
   }
 }
 
@@ -744,6 +784,7 @@ class LineSet is GraphicsPrimitive {
     self.position = _asVertexMatrix(position)
     self.connectivity = nil
     self.closed = closed
+    _requireVertexColors(self.color, self.position.dimensions()[1])
   }
 
   // Explicit segments
@@ -752,6 +793,7 @@ class LineSet is GraphicsPrimitive {
     self.position = _asVertexMatrix(position)
     self.connectivity = connectivity
     self.closed = closed
+    _requireVertexColors(self.color, self.position.dimensions()[1])
   }
 
   /** Flat index list for GL_LINES: i0 j0 i1 j1 ... */
@@ -808,7 +850,7 @@ class GraphicsEntry {
     self.position = _asPosition(position)
     self.scale = _asScale(scale)
     self.rotate = rotate
-    self.color = _asColoring(color) // presentation albedo (Sphere / recolor); nil → item
+    self.color = _asEntryColor(color) // uniform presentation override; nil → item
     self.flat = false              // unlit draw (set true for solid facet colors)
   }
 
@@ -1108,7 +1150,7 @@ class Scene is Graphics with Broadcaster {
   recolor(id, color) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    e.color = _asColoring(color)
+    e.color = _asEntryColor(color)
     self.notify(GraphicsEventRecolored(id))
     return true
   }
@@ -1387,7 +1429,7 @@ class Show {
       out.write("U S ${self.sceneId}")
     } else {
       out.write("S ${self.sceneId} 3")
-      out.write("W \"${graphic.title}\"")
+      out.write("W \"${_mvEscape(graphic.title)}\"")
     }
     var bg = graphic.background.rgb(0)
     out.write("G ${self.fmt(bg[0])} ${self.fmt(bg[1])} ${self.fmt(bg[2])}")
@@ -1519,16 +1561,22 @@ class Show {
   _itemRgb(GraphicsPrimitive item) { return self._rgbValue(item.color) }
   _itemRgb(item) { return _defaultRgb }
 
-  _perElement(ColorTable col) { return col.count() > 1 }
+  _perElement(ColorTable col) { return true }
   _perElement(Coloring col) { return false }
   _perElement(col) { return false }
 
   // [Compatibility shim]
   _warnDroppedVertexAlpha(ColorTable col) {
-    if (col.channels() < 4) return
     if (_warnedXnca) return
-    _warnedXnca = true
-    _GfxXnca.warning("ColorTable per-element alpha is not sent to the viewer yet (no xnca). Use uniform Color.a.")
+    if (col.channels() < 4) return
+    var n = col.count()
+    for (i in 0...n) {
+      if (col.alpha(i) < 0.999) {
+        _warnedXnca = true
+        _GfxXnca.warning("ColorTable per-vertex alpha is not sent to the viewer yet (no xnca). Use uniform Color.a.")
+        return
+      }
+    }
   }
   _warnDroppedVertexAlpha(col) { }
 
@@ -1660,7 +1708,7 @@ class Show {
     return false
   }
 
-  /** Alpha from Coloring. ColorTable is per-element; do not collapse on first-vertex alpha. */
+  /** Alpha from Coloring. ColorTable is per-vertex; do not collapse on first-vertex alpha. */
   _clamp01(a) { return (a < 0) ? 0 : ((a > 1) ? 1 : a) }
 
   _colorAlpha(ColorTable col) { return 1 }
@@ -1728,7 +1776,7 @@ class Show {
   }
 
   /** Position + normal [+ RGB] float rows only (shared by define `v` and `U V`).
-   *  ColorTable per-element alpha is dropped until viewer xnca. */
+   *  ColorTable per-vertex alpha is dropped until viewer xnca. */
   _triangleComplexVertexFloats(item, out, includecolor=true) {
     var x = item.position
     var n = item.normals
@@ -1768,7 +1816,7 @@ class Show {
   defineTriangleComplex(entry, item, out) {
     var id = self.uid()
     var indexed = isnil(entry.color) && self._perElement(item.color)
-    self._warnDroppedVertexAlpha(item.color)
+    if (indexed) self._warnDroppedVertexAlpha(item.color)
     var alpha = indexed ? 1 : self.opacity(entry)
     self._lastColorId = nil
     if (alpha < 0.999) {
@@ -1822,7 +1870,7 @@ class Show {
   definePointCloud(entry, item, out) {
     var id = self.uid()
     var indexed = isnil(entry.color) && self._perElement(item.color)
-    self._warnDroppedVertexAlpha(item.color)
+    if (indexed) self._warnDroppedVertexAlpha(item.color)
     var alpha = indexed ? 1 : self.opacity(entry)
     var nv = item.position.dimensions()[1]
     if (nv < 1) return nil
@@ -1848,7 +1896,7 @@ class Show {
   defineLineSet(entry, item, out) {
     var id = self.uid()
     var indexed = isnil(entry.color) && self._perElement(item.color)
-    self._warnDroppedVertexAlpha(item.color)
+    if (indexed) self._warnDroppedVertexAlpha(item.color)
     var alpha = indexed ? 1 : self.opacity(entry)
     var nv = item.position.dimensions()[1]
     var segs = item._segmentIndices()
@@ -1881,7 +1929,7 @@ class Show {
     var fnt = Font(font, size, id=id)
     self.fonts.append(fnt)
 
-    out.write("F ${id} \"${path}\" ${size}")
+    out.write("F ${id} \"${_mvEscape(path)}\" ${size}")
     return id
   }
 
@@ -1931,7 +1979,7 @@ class Show {
     var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
     out.write("C ${cid}")
     self._emitTextTransforms(entry, item, out)
-    out.write("T ${entry.id} ${fid} \"${item.string}\"")
+    out.write("T ${entry.id} ${fid} \"${_mvEscape(item.string)}\"")
     self._recordText(entry, colorid=cid)
   }
 
