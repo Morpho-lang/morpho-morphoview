@@ -20,6 +20,13 @@ var _eps = 1e-15
 var _defaultRgb = (0.5, 0.5, 0.5)
 var _fntntfnd = Error("FntNtFnd", "Font not found.")
 var _txtdrnvrtprll = Error("TxtDrnVrtPrll", "Direction and vertical must not be parallel or zero.")
+// [Compatibility shim]
+var _GfxLegacyTransp = Error("GfxLegacyTransp",
+  "filter=/transmit= map to Color.a. Prefer Color(..., a) or Coloring.opacity(a).")
+var _warnedLegacyTransp = false
+var _GfxXnca = Error("GfxXnca",
+  "ColorTable per-element alpha is dropped until the viewer supports xnca.")
+var _warnedXnca = false
 
 /* **************************************
  * Utility functions
@@ -133,14 +140,41 @@ fn segmentSRT(start, end, aspectratio) {
 fn _asColoring(Coloring c) { return c }
 fn _asColoring(c) { return asColoring(c) }
 
+// [Compatibility shim] Old Show formula: alpha = 1 − clamp(filter + transmit, 0, 1).
+fn _legacyAlpha(filter, transmit) {
+  var s = (isnil(filter) ? 0 : filter) + (isnil(transmit) ? 0 : transmit)
+  if (s <= 0) return 1
+  if (s >= 1) return 0
+  return 1 - s
+}
+
+fn _warnLegacyTransp() {
+  if (_warnedLegacyTransp) return
+  _warnedLegacyTransp = true
+  _GfxLegacyTransp.warning("Deprecated filter=/transmit=. Use Color(..., a) or Coloring.opacity(a).")
+}
+
+fn _withLegacyTransp(color, filter, transmit) {
+  if (isnil(filter) && isnil(transmit)) return color
+  _warnLegacyTransp()
+  var a = _legacyAlpha(filter, transmit)
+  if (isnil(color)) return Gray(0.5).opacity(a)
+  return asColoring(color).opacity(a)
+}
+
+// [Compatibility shim] Public name so xplot veneers can call this across modules.
+fn withLegacyTransp(color, filter, transmit) {
+  return _withLegacyTransp(color, filter, transmit)
+}
+
 /* **************************************
  * Graphics primitives
  **************************************** */
 
 /** Shared albedo for every displayable item. Transparency is Color.a / Coloring. */
 class GraphicsPrimitive {
-  init(color=nil) {
-    self.color = _asColoring(color)
+  init(color=nil, filter=nil, transmit=nil) {
+    self.color = _asColoring(_withLegacyTransp(color, filter, transmit))
   }
 
   toTriangleComplex() { return nil }
@@ -149,8 +183,8 @@ class GraphicsPrimitive {
 /** TriangleComplexes are a basic graphical unit that draw a set of triangles
    from a given set of vertices. */
 class TriangleComplex is GraphicsPrimitive {
-  init(position, normals, color, connectivity) {
-    super.init(color=color)
+  init(position, normals, color, connectivity, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.position = position /* Vertex position matrix */
     self.normals = normals /* Matrix of normal vectors */
     self.connectivity = connectivity /* Connectivity matrix; columns are triangles */
@@ -165,8 +199,8 @@ class TriangleComplex is GraphicsPrimitive {
   @param[in] n - number of faces to use
   @param[in] color - Color of the cylinder */
 class Cylinder is GraphicsPrimitive {
-  init(start, end, aspectratio=0.1, n=10, color=nil) {
-    super.init(color=color)
+  init(start, end, aspectratio=0.1, n=10, color=nil, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.start = Matrix(start)
     self.end = Matrix(end)
     self.aspectratio = aspectratio
@@ -319,8 +353,8 @@ fn _uvSphere(level) {
 
 /** Draws a sphere */
 class Sphere is GraphicsPrimitive {
-  init(center, r, color=nil, maxrefine=3) {
-    super.init(color=color)
+  init(center, r, color=nil, maxrefine=3, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.center = center
     self.r = r
     self.maxrefine = maxrefine
@@ -355,8 +389,8 @@ class Sphere is GraphicsPrimitive {
   @param[in] n - number of faces to use
   @param[in] color - Color of the arrow */
 class Arrow is GraphicsPrimitive {
-  init(start, end, aspectratio=0.1, n=10, color=nil) {
-    super.init(color=color)
+  init(start, end, aspectratio=0.1, n=10, color=nil, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.start = Matrix(start)
     self.end = Matrix(end)
     self.aspectratio = aspectratio
@@ -495,8 +529,8 @@ class Tube is GraphicsPrimitive {
     return out
   }
 
-  init(pts, rad, n=10, color=nil, closed=false) {
-    super.init(color=color)
+  init(pts, rad, n=10, color=nil, closed=false, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.pts = pts
     self.radius = rad
     self.n = n
@@ -629,8 +663,8 @@ class Tube is GraphicsPrimitive {
  **************************************** */
 
 class Text is GraphicsPrimitive {
-  init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil) {
-    super.init(color=color)
+  init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.posn = posn
     if (islist(self.posn)) self.posn = Matrix(self.posn)
 
@@ -1189,6 +1223,7 @@ fn findMorphoViewBin() {
     }
   }
 
+  // [Compatibility shim] Old Show launched a bare `morphoview` on PATH.
   _mvbin = "morphoview"
   return _mvbin
 }
@@ -1488,6 +1523,15 @@ class Show {
   _perElement(Coloring col) { return false }
   _perElement(col) { return false }
 
+  // [Compatibility shim]
+  _warnDroppedVertexAlpha(ColorTable col) {
+    if (col.channels() < 4) return
+    if (_warnedXnca) return
+    _warnedXnca = true
+    _GfxXnca.warning("ColorTable per-element alpha is not sent to the viewer yet (no xnca). Use uniform Color.a.")
+  }
+  _warnDroppedVertexAlpha(col) { }
+
   _rgbValue(Coloring col) { return col.rgb(0) }
   _rgbValue(col) { return _defaultRgb }
 
@@ -1724,6 +1768,7 @@ class Show {
   defineTriangleComplex(entry, item, out) {
     var id = self.uid()
     var indexed = isnil(entry.color) && self._perElement(item.color)
+    self._warnDroppedVertexAlpha(item.color)
     var alpha = indexed ? 1 : self.opacity(entry)
     self._lastColorId = nil
     if (alpha < 0.999) {
@@ -1777,6 +1822,7 @@ class Show {
   definePointCloud(entry, item, out) {
     var id = self.uid()
     var indexed = isnil(entry.color) && self._perElement(item.color)
+    self._warnDroppedVertexAlpha(item.color)
     var alpha = indexed ? 1 : self.opacity(entry)
     var nv = item.position.dimensions()[1]
     if (nv < 1) return nil
@@ -1802,6 +1848,7 @@ class Show {
   defineLineSet(entry, item, out) {
     var id = self.uid()
     var indexed = isnil(entry.color) && self._perElement(item.color)
+    self._warnDroppedVertexAlpha(item.color)
     var alpha = indexed ? 1 : self.opacity(entry)
     var nv = item.position.dimensions()[1]
     var segs = item._segmentIndices()

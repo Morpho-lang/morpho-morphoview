@@ -22,6 +22,8 @@ expect(p.source.count(0) == m.count(0), "source mismatch")
 
 var p2 = plotmesh(m)
 expect(p2.displaylist.count() > 1, "plotmesh thick veneer")
+var pT = plotmesh(m, color=Red, transmit=0.5) // [Compatibility shim]
+expect(pT.displaylist.count() > 1, "plotmesh transmit shim")
 
 var f = Field(m, fn (x, y, z) x)
 var pf = Plot(f)
@@ -32,6 +34,8 @@ var ps = Plot(s)
 expect(ps.displaylist.count() >= 1, "Plot(selection) empty")
 var ps2 = plotselection(m, s)
 expect(ps2.displaylist.count() >= 1, "plotselection veneer empty")
+var psT = plotselection(m, s, transmit=0.5) // [Compatibility shim]
+expect(psT.displaylist.count() >= 1, "plotselection transmit keeps selection colors")
 
 var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
 var pf2 = Plot(am, color=Color(0.2, 0.6, 0.9))

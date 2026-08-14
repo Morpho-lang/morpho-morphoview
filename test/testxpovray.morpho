@@ -119,6 +119,18 @@ expect(contains(s4, "location <0, 0, 8>"), "viewpoint field")
 expect(contains(s4, "angle 35"), "viewangle field")
 expect(contains(s4, "light_source { <10, 10, 10>"), "custom light")
 
+/* [Compatibility shim] tracer-level camera fields (old POVRaytracer API) */
+var gLegacyCam = Graphics(background=White)
+gLegacyCam.display(Sphere([0,0,0], 1, color=Black))
+var povLegacy = POVRaytracer(gLegacyCam)
+povLegacy.viewpoint = Matrix([0, 0, 9])
+povLegacy.viewangle = 40
+povLegacy.light = [Matrix([1, 2, 3])]
+var sLegacy = File(povLegacy.write("/tmp/testxpovray.pov")).readall()
+expect(contains(sLegacy, "location <0, 0, 9>"), "legacy pov.viewpoint")
+expect(contains(sLegacy, "angle 40"), "legacy pov.viewangle")
+expect(contains(sLegacy, "light_source { <1, 2, 3>"), "legacy pov.light")
+
 /* ---- partial background alpha and +UA ---- */
 var gp = Graphics(background=Color(1, 0, 0, 0.5))
 gp.display(Sphere([0,0,0], 1, color=Black))
@@ -129,7 +141,7 @@ expect(contains(povP._renderFlags(false, true), "+UA"), "+UA from background alp
 expect(!contains(pov4._renderFlags(false, true), "+UA"), "no +UA when opaque")
 expect(contains(povP._renderFlags(true, true), "+UA"), "+UA when transparent=true")
 
-/* ---- one-shot legacy filter/transmit warning ---- */
+/* Custom leftover .filter is ignored (legacy keywords die at construction). */
 class LegacyPrim is GraphicsPrimitive {
   init() {
     super.init(color=Red)
@@ -138,14 +150,8 @@ class LegacyPrim is GraphicsPrimitive {
 }
 var gl = Graphics()
 gl.display(LegacyPrim())
-gl.display(LegacyPrim())
-var povL = POVRaytracer(gl)
-var warned = false
-try {
-  povL.write("/tmp/testxpovray.pov")
-} catch {
-  "PovLegacyTransp": warned = true
-}
-expect(povL._warnedLegacyTransparency, "legacy transparency detector fired")
+var sdlL = File(POVRaytracer(gl).write("/tmp/testxpovray.pov")).readall()
+expect(contains(sdlL, "camera {"), "write succeeds with leftover .filter")
+expect(!contains(sdlL, "filter 0.2"), "no POV filter keyword")
 
 print "ok"

@@ -15,12 +15,23 @@ import constants
 var _ClrBadInitErr = Error("ClrBadInit", "Color expects RGB, RGBA, or a length-3/4 List, Tuple, or vector Matrix.")
 var _ClrTblInitErr = Error("ClrTblInit", "ColorTable expects a Matrix with 3 or 4 rows (RGB or RGBA columns).")
 var _ClrAbstractErr = Error("ClrAbstract", "Coloring must implement rgb().")
-var _ClrGradInitErr = Error("ClrGradInit", "GradientMap expects two Colors, or a List/Tuple of Colors or (t, Color) stops.")
+var _ClrGradInitErr = Error("ClrGradInit", "GradientMap expects two Colors, or a List/Tuple of Colors or (t, Color) stops. For the old default polynomial, use TundraMap().")
 var _ClrChbyshvOrdrErr = Error("ClrChbyshvOrdr", "Order of Chebyshev approximation inconsistent.")
+// [Compatibility shim]
+var _ClrRgbRange = Error("ClrRgbRange",
+  "Color components are conventionally in [0, 1]; values > 1 look blown out. Use Color(r/255, g/255, b/255) for 0–255 lists.")
+var _warnedRgbRange = false
 
 var White, Black
 
 fn _clamp01(x) { return (x < 0) ? 0 : ((x > 1) ? 1 : x) }
+
+fn _warnRgbRange(r, g, b) {
+  if (_warnedRgbRange) return
+  if (!(r > 2 || g > 2 || b > 2)) return
+  _warnedRgbRange = true
+  _ClrRgbRange.warning("Color channel > 1; RGB is conventionally [0, 1], not 0–255.")
+}
 
 class Coloring {
   rgb(x) { _ClrAbstractErr.throw() }
@@ -35,8 +46,14 @@ class Coloring {
 }
 
 class Color is Coloring {
-  init(r, g, b) { self.r = r; self.g = g; self.b = b; self.a = 1 }
-  init(r, g, b, a) { self.r = r; self.g = g; self.b = b; self.a = a }
+  init(r, g, b) {
+    _warnRgbRange(r, g, b) // [Compatibility shim]
+    self.r = r; self.g = g; self.b = b; self.a = 1
+  }
+  init(r, g, b, a) {
+    _warnRgbRange(r, g, b) // [Compatibility shim]
+    self.r = r; self.g = g; self.b = b; self.a = a
+  }
 
   _initSeq(seq) {
     var n = seq.count()
@@ -174,15 +191,27 @@ class ColorTable is Coloring {
   rgba(x) { return self.rgba(Int(x)) }
   color(x) { return self.color(Int(x)) }
 
-  opacity(a) { return Opacity(self, a) }
+  // [Compatibility shim] Old mesh colors were a Matrix; face.color.column(i) was RGB.
+  column(Int i) { return Matrix(self.rgb(i)) }
+  column(i) { return self.column(Int(i)) }
+
+  opacity(a) {
+    var n = self.count()
+    var m = Matrix(4, n)
+    for (i in 0...n) {
+      var t = self.rgba(i)
+      m.setcolumn(i, Matrix([t[0], t[1], t[2], t[3]*a]))
+    }
+    return ColorTable(m)
+  }
 }
 
 /** Constructor boundary: stored graphics colors are nil or Coloring.
- *  3×n / 4×n Matrix → ColorTable; 1×3 / 1×4 and List/Tuple → Color. */
+ *  3×1 / 4×1 / 1×3 / 1×4 → Color; 3×n / 4×n with n>1 → ColorTable. */
 fn asColoring(Coloring c) { return c }
 fn asColoring(Matrix c) {
   var d = c.dimensions(), rows = d[0], cols = d[1]
-  if ((rows == 3 || rows == 4) && cols >= 1) return ColorTable(c)
+  if ((rows == 3 || rows == 4) && cols > 1) return ColorTable(c)
   return Color(c)
 }
 fn asColoring(c) {

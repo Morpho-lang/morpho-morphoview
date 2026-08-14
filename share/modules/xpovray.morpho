@@ -12,8 +12,10 @@ import xgraphics
 import xcolor
 
 var _PovExecErr = Error("PovExec", "Could not run POV-Ray.")
-var _PovLegacyTransp = Error("PovLegacyTransp",
-  "POVRay warning: legacy 'filter'/'transmit' property detected. Use Color(..., alpha) or Coloring.opacity(...) instead.")
+// [Compatibility shim]
+var _PovLegacyCam = Error("PovLegacyCam",
+  "POVRaytracer.viewpoint/viewangle/light/look_at/sky/width/height/antialias are mirrored onto camera. Prefer pov.camera.*.")
+var _warnedLegacyCam = false
 var _gray = (0.5, 0.5, 0.5)
 
 fn _num(x) { return (abs(x) < 1e-12) ? 0 : x }
@@ -83,7 +85,6 @@ class POVRaytracer {
     self.pointradius = 0.02
     self.lineradius = 0.01
     self._fonts = Dictionary()
-    self._warnedLegacyTransparency = false
   }
   init(graphic, camera) {
     self.graphic = graphic
@@ -91,15 +92,26 @@ class POVRaytracer {
     self.pointradius = 0.02
     self.lineradius = 0.01
     self._fonts = Dictionary()
-    self._warnedLegacyTransparency = false
   }
 
-  _warnLegacyTransparency(item) {
-    if (self._warnedLegacyTransparency) return
-    if (!(isobject(item) && (item.has("filter") || item.has("transmit")))) return
-    self._warnedLegacyTransparency = true
-    var name = String(item.clss())
-    _PovLegacyTransp.warning("POVRay warning: legacy 'filter'/'transmit' property detected on ${name}. Use Color(..., alpha) or Coloring.opacity(...) instead.")
+  // [Compatibility shim] Old POVRaytracer copied Camera fields onto the tracer;
+  // callers set pov.viewpoint = … before write/render. Sync onto camera once per write.
+  _legacyCamera() {
+    var cam = self.camera
+    var used = false
+    if (self.has("viewpoint")) { cam.viewpoint = self.viewpoint; used = true }
+    if (self.has("viewangle")) { cam.viewangle = self.viewangle; used = true }
+    if (self.has("look_at")) { cam.look_at = self.look_at; used = true }
+    if (self.has("sky")) { cam.sky = self.sky; used = true }
+    if (self.has("light")) { cam.light = self.light; used = true }
+    if (self.has("width")) { cam.width = self.width; used = true }
+    if (self.has("height")) { cam.height = self.height; used = true }
+    if (self.has("antialias")) { cam.antialias = self.antialias; used = true }
+    if (used && !_warnedLegacyCam) {
+      _warnedLegacyCam = true
+      _PovLegacyCam.warning("Deprecated POVRaytracer.viewpoint (and related fields). Use pov.camera.viewpoint instead.")
+    }
+    return cam
   }
 
   _rgb(Coloring c) { return c.rgb(0) }
@@ -352,13 +364,12 @@ class POVRaytracer {
   }
 
   write(file, transparent=false, shadowless=false) {
-    self._warnedLegacyTransparency = false
+    self._legacyCamera()
     var out = File(file, "write")
     out.write("#include \"colors.inc\"")
     self._writeBackground(out, transparent)
     self._writeCamera(out)
     for (el in self.graphic.displaylist) {
-      self._warnLegacyTransparency(el.item)
       self.visit(el, el.item, out)
     }
     self._writeLights(out, shadowless)

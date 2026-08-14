@@ -173,6 +173,27 @@ fn _legacyStyle(style) {
   return style
 }
 
+// [Compatibility shim] Fold filter=/transmit= into color or colormap before Plot.
+fn _plotLegacyTransp(color, filter, transmit) {
+  if (isnil(filter) && isnil(transmit)) return color
+  if (islist(color) || isarray(color) || istuple(color)) {
+    if (color.count() >= 1 && (isnil(color[0]) || !isnumber(color[0]))) {
+      if (isarray(color)) {
+        var n = color.count()
+        var out[n]
+        for (i in 0...n) {
+          out[i] = isnil(color[i]) ? nil : withLegacyTransp(color[i], filter, transmit)
+        }
+        return out
+      }
+      var out = []
+      for (c in color) out.append(isnil(c) ? nil : withLegacyTransp(c, filter, transmit))
+      return out
+    }
+  }
+  return withLegacyTransp(color, filter, transmit)
+}
+
 /** Element ids of `grade` that pass an optional selection. */
 fn _selectedIds(mesh, selection, grade) {
   var ids = []
@@ -1077,17 +1098,28 @@ class Plot is Scene {
  * Legacy veneers — one implementation path through Plot
  ******************************************************************************************* */
 
-fn plotmesh(mesh, selection=nil, grade=nil, color=nil, style=nil) {
-  return Plot(mesh, selection=selection, grade=grade, color=color, style=_legacyStyle(style))
+fn plotmesh(mesh, selection=nil, grade=nil, color=nil, style=nil, filter=nil, transmit=nil) {
+  return Plot(mesh, selection=selection, grade=grade,
+              color=_plotLegacyTransp(color, filter, transmit), // [Compatibility shim]
+              style=_legacyStyle(style))
 }
 
-fn plotselection(mesh, selection, grade=nil, style=nil) {
-  return Plot(selection, mesh=mesh, grade=grade, style=_legacyStyle(style))
+fn plotselection(mesh, selection, grade=nil, style=nil, filter=nil, transmit=nil) {
+  var col = nil
+  if (!isnil(filter) || !isnil(transmit)) {
+    var m = _selectionMesh(selection, mesh)
+    col = _plotLegacyTransp(_selectionColors(m, selection, grade), filter, transmit) // [Compatibility shim]
+  }
+  return Plot(selection, mesh=mesh, grade=grade, style=_legacyStyle(style), color=col)
 }
 
 fn plotfield(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
-             scalebar=nil, cmin=nil, cmax=nil, center=nil) {
-  return Plot(field, selection=selection, grade=grade, colormap=colormap,
+             scalebar=nil, cmin=nil, cmax=nil, center=nil, filter=nil, transmit=nil) {
+  var cm = colormap
+  if (!isnil(filter) || !isnil(transmit)) {
+    cm = _plotLegacyTransp(isnil(cm) ? ViridisMap() : cm, filter, transmit) // [Compatibility shim]
+  }
+  return Plot(field, selection=selection, grade=grade, colormap=cm,
               style=_legacyStyle(style), scale=scale,
               scalebar=scalebar, cmin=cmin, cmax=cmax, center=center)
 }

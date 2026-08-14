@@ -34,6 +34,8 @@ fn expect(cond, msg) {
   }
 }
 
+fn approx(a, b, eps) { return abs(a-b) < eps }
+
 var pos = Matrix([[0, 1, 0.5], [0, 0, 0.8], [0, 0, 0]])
 var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
 var conn = Matrix([[1], [1], [1]])
@@ -53,5 +55,14 @@ expect(anyExact(lines, "v \"xn\""), "transparent meshes should use xn (uniform a
 expect(anyHasAlpha(lines, "0.6"), "Color.a 0.6")
 expect(anyHasAlpha(lines, "0.75"), "opacity 0.75")
 expect(!anyExact(lines, "v \"xnc\""), "should not bake vertex colors when translucent")
+
+/* [Compatibility shim] transmit=/filter= → Color.a */
+var st = Sphere([0, 0, 0], 1, color=Red, transmit=0.4)
+expect(approx(st.color.a, 0.6, 1e-9), "transmit=0.4 → alpha 0.6")
+expect(!st.has("transmit"), "transmit not stored on the primitive")
+var sf = Sphere([0, 0, 0], 1, color=Blue, filter=0.25)
+expect(approx(sf.color.a, 0.75, 1e-9), "filter=0.25 → alpha 0.75")
+var sboth = Cylinder([0, 0, 0], [0, 0, 1], color=Green, filter=0.2, transmit=0.3)
+expect(approx(sboth.color.a, 0.5, 1e-9), "filter+transmit clamped sum")
 
 print "ok"
