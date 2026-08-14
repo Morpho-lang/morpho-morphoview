@@ -1,0 +1,40 @@
+// Ray-trace an xgraphics scene with POV-Ray.
+//
+//   morpho6 examples/xpovray.morpho
+//
+// Needs the `povray` binary on PATH for render(); the .pov file is
+// written either way.
+
+import xgraphics
+import xcolor
+import xpovray
+import constants
+
+var g = Graphics()
+g.background = White
+
+for (i in 0...20) {
+  var xx = Matrix([2*(random()-1/2), 2*(random()-1/2), 2*(random()-1/2)])
+  g.display(Sphere(xx, 0.08*(1+random()), color=Color(random(), random(), random(), 0.85)))
+}
+
+g.display(Cylinder([-1,-1,-1], [1,1,1], aspectratio=0.01, color=Gray(0.3)))
+g.display(Arrow([-1,-1,-1], [-0.5,-1,-1], aspectratio=0.05, color=Red))
+g.display(Arrow([-1,-1,-1], [-1,-0.5,-1], aspectratio=0.05, color=Green))
+g.display(Arrow([-1,-1,-1], [-1,-1,-0.5], aspectratio=0.05, color=Blue))
+
+var ring = []
+for (t in 0...2*Pi:2*Pi/40) ring.append([cos(t), sin(t), 0])
+g.display(Tube(ring, 0.05, color=Gray(0.5), closed=true))
+g.display(Text("xpovray", [0, 1.2, 0], size=24, color=Black))
+
+var pov = POVRaytracer(g)
+pov.viewpoint = Matrix([0, 0, 5])
+pov.viewangle = 35
+pov.light = [Matrix([10, 10, 10]), Matrix([-10, -10, 10])]
+print pov.write("xpovray.pov")
+try {
+  pov.render("xpovray.pov", display=false)
+} catch {
+  "PovExec": print "(install POV-Ray to render the .pov file)"
+}

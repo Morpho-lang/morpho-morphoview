@@ -1,242 +1,512 @@
+/* *******************************************************************************************
+ * POV-Ray
+ * *******************************************************************************************
+ * Ray-trace an xgraphics Graphics/Scene with POV-Ray.
+ * Displaylists may be GraphicsEntry (xgraphics) or world-space primitives (classic graphics).
+ *
+ * Public: Camera, POVRaytracer, write, render, visit, visitEntry, vector, color.
+ ******************************************************************************************* */
 
-import graphics 
+import constants
+import xgraphics
+import xcolor
+
+var _PovExecErr = Error("PovExec", "Could not run POV-Ray.")
+var _gray = (0.5, 0.5, 0.5)
 
 class Camera {
-    init(antialias = true, width = 2048, height = 1536, viewangle = 24, viewpoint = nil, look_at = nil, sky = nil) {
-        self.antialias = antialias
-        self.width = width
-        self.height = height
-        self.viewangle = viewangle
-        self.viewpoint = viewpoint
-        self.look_at = look_at
-        self.sky = sky
-        self.light = nil
-        if (!self.viewpoint) self.viewpoint = Matrix([0,0,5])
-        if (!self.look_at) self.look_at = Matrix([0,0,0])
-        if (!self.sky) self.sky = Matrix([0,1,0])
-    }
+  init(antialias=true, width=2048, height=1536, viewangle=24,
+       viewpoint=nil, look_at=nil, sky=nil) {
+    self.antialias = antialias
+    self.width = width
+    self.height = height
+    self.viewangle = viewangle
+    self.viewpoint = viewpoint
+    self.look_at = look_at
+    self.sky = sky
+    self.light = nil
+    if (!self.viewpoint) self.viewpoint = Matrix([0, 0, 5])
+    if (!self.look_at) self.look_at = Matrix([0, 0, 0])
+    if (!self.sky) self.sky = Matrix([0, 1, 0])
+  }
 }
 
 class POVRaytracer {
-  init(graphic, camera = nil) {
+  init(graphic, camera=nil) { self._setup(graphic, isnil(camera) ? Camera() : camera) }
+  init(graphic, camera) { self._setup(graphic, camera) }
 
-    self.camera = camera
-    if (!self.camera) self.camera = Camera() // Default Camera
+  _setup(graphic, camera) {
     self.graphic = graphic
-
-    self.antialias = self.camera.antialias
-    self.width = self.camera.width
-    self.height = self.camera.height
-    self.viewangle = self.camera.viewangle
-    self.viewpoint = self.camera.viewpoint
-    self.look_at = self.camera.look_at
-    self.sky = self.camera.sky
-    self.light = nil
+    self.camera = camera
+    self.antialias = camera.antialias
+    self.width = camera.width
+    self.height = camera.height
+    self.viewangle = camera.viewangle
+    self.viewpoint = camera.viewpoint
+    self.look_at = camera.look_at
+    self.sky = camera.sky
+    self.light = camera.light
+    self.shadowless = false
+    self.transparent = false
+    self.pointradius = 0.02
+    self.lineradius = 0.01
+    self._fonts = Dictionary()
   }
+
+  /* ---------- vectors, color, pigment ---------- */
 
   vector(v) {
-    return "<${v[0]}, ${v[1]}, ${v[2]}>"
+    if (v.count() < 3) return "<${self._num(v[0])}, ${self._num(v[1])}, 0>"
+    return "<${self._num(v[0])}, ${self._num(v[1])}, ${self._num(v[2])}>"
   }
 
-  color(c) {
-    if (isnil(c)) return "<0.5, 0.5, 0.5>"
-    if (ismatrix(c)) return self.vector(c)
-    else return self.vector(c.rgb(0))
+  color(c) { return self._rgb(c) }
+
+  _num(x) { return (abs(x) < 1e-12) ? 0 : x }
+
+  _triplet(Coloring c) { return c.rgb(0) }
+  _triplet(Matrix c) { return (c[0], c[1], c[2]) }
+  _triplet(List c) { return (c[0], c[1], c[2]) }
+  _triplet(Tuple c) { return (c[0], c[1], c[2]) }
+  _triplet(c) {
+    if (isnil(c)) return _gray
+    if (isobject(c) && c.respondsto("rgb")) return c.rgb(0)
+    return _gray
   }
 
-  optionalarg(item){
-    
-    var arg = ""
-  
-    if(isnil(item.filter) && !isnil(item.transmit)){
-      arg = "transmit ${item.transmit}"
-    }
-    else if(!isnil(item.filter) && isnil(item.transmit)){
-      arg = "filter ${item.filter}"
-    }
-    else if(!isnil(item.filter) && !isnil(item.transmit)){
-      arg = "filter ${item.filter} transmit ${item.transmit}"
-    }
-    return arg
+  _alpha(Coloring c) { return c.alpha(0) }
+  _alpha(Matrix c) { return (c.count() >= 4) ? c[3] : 1 }
+  _alpha(List c) { return (c.count() >= 4) ? c[3] : 1 }
+  _alpha(Tuple c) { return (c.count() >= 4) ? c[3] : 1 }
+  _alpha(c) {
+    if (isnil(c)) return 1
+    if (isobject(c) && c.respondsto("alpha")) return c.alpha(0)
+    return 1
   }
 
-  visit(Text item, out) {
-    var arg = self.optionalarg(item)
-    out.write("text {" +
-              "  ttf \"cyrvetic.ttf\" \"${item.string}\" 0.1, 0 \n" + 
-              "  pigment { rgb ${self.color(item.color)} ${arg} }")
-    out.write("  scale ${item.size / 75} ")
-    out.write("  translate ${item.posn[0]}*x + ${item.posn[1]}*y + ${item.posn[2]}*z ")
-    var m = item.transformationmatrix() 
-    var str
-    if (m) {
-      str = "  matrix <"
-      for (i in 0..3) {
-        for (j in 0..2) {
-          str+=" "+String(m[i,j])
-          if (i==3 && j==2) str += "> \n }"
-          else str += ", "
-          if (j==2) str +="\n"
-        }
-      }
-    }
-    else {
-        str = " } "
-    }
-    out.write(str)
+  _rgb(c) { return self.vector(self._triplet(c)) }
+
+  _itemColor(item) {
+    if (item.has("color") && !isnil(item.color)) return item.color
+    if (item.has("colors")) return item.colors
+    return nil
   }
 
+  _entryColor(entry) {
+    if (!isnil(entry.color)) return entry.color
+    return self._itemColor(entry.item)
+  }
+
+  _pigment(item, col) {
+    var extra = ""
+    if (item.has("filter") && !isnil(item.filter)) extra += " filter ${item.filter}"
+    if (item.has("transmit") && !isnil(item.transmit)) extra += " transmit ${item.transmit}"
+    if (extra.count() > 0) return "pigment { rgb ${self._rgb(col)}${extra} }"
+    var a = self._alpha(col)
+    if (a < 0.999) {
+      var t = self._triplet(col)
+      return "pigment { rgbt <${t[0]}, ${t[1]}, ${t[2]}, ${1-a}> }"
+    }
+    return "pigment { rgb ${self._rgb(col)} }"
+  }
+
+  _texture(item, col, flat) {
+    var finish = flat ? " finish { ambient 1 diffuse 0 }" : ""
+    return "texture { ${self._pigment(item, col)}${finish} }"
+  }
+
+  _skin(GraphicsEntry entry) {
+    return self._texture(entry.item, self._entryColor(entry), entry.flat)
+  }
+  _skin(item) { return self._texture(item, self._itemColor(item), false) }
+
+  /* Axis-angle [phi, ax, ay, az] in radians → POV-Ray matrix (column vectors). */
+  _rotation(phi, axis) {
+    var x = axis[0], y = axis[1], z = axis[2]
+    var c = cos(phi), s = sin(phi), cc = 1 - c
+    return Matrix([
+      [x*x*cc + c,    x*y*cc - z*s,  x*z*cc + y*s],
+      [x*y*cc + z*s,  y*y*cc + c,    y*z*cc - x*s],
+      [x*z*cc - y*s,  y*z*cc + x*s,  z*z*cc + c]
+    ])
+  }
+
+  /* Entry pose: scale, then axis-angle, then translate. Identity pieces omitted. */
+  _wrap(entry) {
+    var s = ""
+    var scl = entry.scale
+    if (ismatrix(scl) || islist(scl)) s += " scale ${self.vector(scl)}"
+    else if (!isnil(scl) && scl != 1) s += " scale ${scl}"
+    var r = entry.rotate
+    if (!isnil(r) && abs(r[0]) > 1e-8) {
+      var R = self._rotation(r[0], [r[1], r[2], r[3]])
+      s += " matrix <${self._num(R[0,0])}, ${self._num(R[1,0])}, ${self._num(R[2,0])}, ${self._num(R[0,1])}, ${self._num(R[1,1])}, ${self._num(R[2,1])}, ${self._num(R[0,2])}, ${self._num(R[1,2])}, ${self._num(R[2,2])}, 0, 0, 0>"
+    }
+    var p = entry.position
+    if (!isnil(p) && !(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
+      s += " translate ${self.vector(p)}"
+    }
+    return s
+  }
+
+  /* ---------- emit: GraphicsEntry vs world-space item ---------- */
+
+  _emit(GraphicsEntry entry, out) { self.visitEntry(entry, entry.item, out) }
+  _emit(item, out) { self.visit(item, out) }
+
+  visitEntry(entry, Sphere item, out) {
+    out.write("sphere { <0, 0, 0>, 1 ${self._skin(entry)}${self._wrap(entry)} }")
+  }
   visit(Sphere item, out) {
-    var arg = self.optionalarg(item)
-    out.write("sphere {"+
-              " ${self.vector(item.center)}, ${item.r}"+
-              " texture { "+
-              " pigment { rgb ${self.color(item.color)} ${arg}"+
-              "} } }")
+    out.write("sphere { ${self.vector(item.center)}, ${item.r} ${self._skin(item)} }")
   }
 
-  visit(Cylinder item, out) {
-    var radius = 0.5*(item.end - item.start).norm()*item.aspectratio
-    var arg = self.optionalarg(item)
-    out.write("cylinder {"+
-              " ${self.vector(item.start)}, ${self.vector(item.end)}, ${radius}"+
-              " texture { "+
-              " pigment { rgb ${self.color(item.color)} ${arg}"+
-              "} } }")
+  visitEntry(entry, Cylinder item, out) {
+    out.write("cylinder { <0, 0, 0>, <0, 0, 1>, 1 ${self._skin(entry)}${self._wrap(entry)} }")
   }
+  visit(Cylinder item, out) { self._worldCylinder(item.start, item.end, item.aspectratio, self._skin(item), out) }
 
-  visit(Arrow item, out) {
-    var dx = (item.end - item.start).norm()
-    var radius = 0.5*dx*item.aspectratio
-    var cylend = item.start + (item.end - item.start)*(1-item.aspectratio)
-    var arg = self.optionalarg(item)
-    out.write("cylinder {"+
-              " ${self.vector(item.start)}, ${self.vector(cylend)}, ${radius}"+
-              " texture { "+
-              " pigment { rgb ${self.color(item.color)} ${arg} "+
-              "} } }")
-    out.write("cone {"+
-              " ${self.vector(cylend)}, ${2*radius}, ${self.vector(item.end)}, 0"+
-              " texture { "+
-              " pigment { rgb ${self.color(item.color)} ${arg} "+
-              "} } }")
+  visitEntry(entry, Arrow item, out) {
+    var h = 1 - item.aspectratio, sk = self._skin(entry)
+    out.write("union {")
+    out.write("  cylinder { <0, 0, 0>, <0, 0, ${h}>, 1 ${sk} }")
+    out.write("  cone { <0, 0, ${h}>, 2, <0, 0, 1>, 0 ${sk} }")
+    out.write("${self._wrap(entry)}")
+    out.write("}")
   }
+  visit(Arrow item, out) { self._worldArrow(item.start, item.end, item.aspectratio, self._skin(item), out) }
 
-  visit(Tube item, out) {
-    self.visit(item.totrianglecomplex(), out)
+  visitEntry(entry, TriangleComplex item, out) {
+    self._mesh(item, self._entryColor(entry), self._skin(entry), self._wrap(entry), out)
   }
-
   visit(TriangleComplex item, out) {
+    self._mesh(item, self._itemColor(item), self._skin(item), "", out)
+  }
 
-    var arg = self.optionalarg(item)
+  visitEntry(entry, Tube item, out) {
+    self._sweep(item, self._skin(entry), self._wrap(entry), out)
+  }
+  visit(Tube item, out) { self._sweep(item, self._skin(item), "", out) }
 
-    out.write("mesh2 {");
+  visitEntry(entry, PointCloud item, out) {
+    self._points(item, self._entryColor(entry), entry.flat, self._wrap(entry), out)
+  }
+  visit(PointCloud item, out) {
+    self._points(item, self._itemColor(item), false, "", out)
+  }
 
-    var nv=item.position.dimensions()[1]
+  visitEntry(entry, LineSet item, out) {
+    self._lines(item, self._entryColor(entry), entry.flat, self._wrap(entry), out)
+  }
+  visit(LineSet item, out) {
+    self._lines(item, self._itemColor(item), false, "", out)
+  }
 
-    out.write("vertex_vectors { ${nv}, ")
-    for (i in 0...nv) {
-      var s = self.vector(item.position.column(i))
-      if (i<nv-1) s+=", "
-      out.write(s)
+  visitEntry(entry, Text item, out) {
+    self._text(item, self._skin(entry), self._orient(item) + self._wrap(entry), out)
+  }
+  visit(Text item, out) { self._visitTextLike(item, out) }
+
+  /* Unknown item: world-space duck typing, then tessellation. */
+  visitEntry(entry, item, out) {
+    var tri = self._asMesh(item)
+    if (!isnil(tri)) { self._mesh(tri, self._entryColor(entry), self._skin(entry), self._wrap(entry), out); return }
+    self.visit(item, out)
+  }
+
+  visit(item, out) {
+    if (item.has("center") && item.has("r")) {
+      out.write("sphere { ${self.vector(item.center)}, ${item.r} ${self._skin(item)} }")
+    } else if (item.has("string") && item.has("posn")) {
+      self._visitTextLike(item, out)
+    } else if (item.has("pts") && item.has("radius")) {
+      self._sweep(item, self._skin(item), "", out)
+    } else if (item.has("start") && item.has("end") && item.has("aspectratio")) {
+      self._visitShaftLike(item, out)
+    } else if (item.has("position") && item.has("normals") && item.has("connectivity")) {
+      self._mesh(item, self._itemColor(item), self._skin(item), "", out)
+    } else if (item.has("position") && item.has("closed")) {
+      self._lines(item, self._itemColor(item), false, "", out)
+    } else if (item.has("position")) {
+      self._points(item, self._itemColor(item), false, "", out)
+    } else {
+      var tri = self._asMesh(item)
+      if (!isnil(tri)) self._mesh(tri, self._itemColor(item), self._skin(item), "", out)
     }
-    out.write("}");
+  }
 
-    out.write("normal_vectors { ${nv}, ")
-    for (i in 0...nv) {
-      var s = self.vector(item.normals.column(i))
-      if (i<nv-1) s+=", "
-      out.write(s)
+  _worldCylinder(start, end, ar, skin, out) {
+    var length = (end - start).norm()
+    if (length < 1e-8) return
+    out.write("cylinder { ${self.vector(start)}, ${self.vector(end)}, ${0.5*length*ar} ${skin} }")
+  }
+
+  _worldArrow(start, end, ar, skin, out) {
+    var dx = end - start, length = dx.norm()
+    if (length < 1e-8) return
+    var radius = 0.5*length*ar
+    var cylend = start + dx*(1 - ar)
+    out.write("cylinder { ${self.vector(start)}, ${self.vector(cylend)}, ${radius} ${skin} }")
+    out.write("cone { ${self.vector(cylend)}, ${2*radius}, ${self.vector(end)}, 0 ${skin} }")
+  }
+
+  /* Foreign Cylinder/Arrow share start/end/aspectratio; the class name is the distinction. */
+  _visitShaftLike(item, out) {
+    var skin = self._skin(item)
+    if (String(item.clss()) == "@Arrow") {
+      self._worldArrow(item.start, item.end, item.aspectratio, skin, out)
+    } else {
+      self._worldCylinder(item.start, item.end, item.aspectratio, skin, out)
     }
-    out.write("}");
+  }
 
-    var individualcolors = ismatrix(item.colors)
-    if (individualcolors) {
-      out.write("texture_list { ${nv}, ")
+  _visitTextLike(item, out) {
+    var tail = self._orient(item)
+    if (!isnil(item.posn)) tail += " translate ${self.vector(item.posn)}"
+    self._text(item, self._skin(item), tail, out)
+  }
+
+  _asMesh(item) {
+    if (item.respondsto("toTriangleComplex")) return item.toTriangleComplex()
+    if (item.respondsto("totrianglecomplex")) return item.totrianglecomplex()
+    return nil
+  }
+
+  /* ---------- mesh2 / sphere_sweep / points / lines / text ---------- */
+
+  _perVertex(col) { return ismatrix(col) && col.dimensions()[1] > 1 }
+
+  _face(conn, i) {
+    if (issparse(conn)) return conn.rowindices(i)
+    var idx = [], nv = conn.dimensions()[0]
+    for (j in 0...nv) if (conn[j, i] != 0) idx.append(j)
+    return idx
+  }
+
+  _mesh(item, col, skin, tail, out) {
+    var nv = item.position.dimensions()[1]
+    var nf = item.connectivity.dimensions()[1]
+    var per = self._perVertex(col)
+    out.write("mesh2 {")
+    out.write("  vertex_vectors { ${nv},")
+    for (i in 0...nv) {
+      out.write("${(i > 0) ? ", " : ""}${self.vector(item.position.column(i))}")
+    }
+    out.write("}")
+    out.write("  normal_vectors { ${nv},")
+    for (i in 0...nv) {
+      out.write("${(i > 0) ? ", " : ""}${self.vector(item.normals.column(i))}")
+    }
+    out.write("}")
+    if (per) {
+      out.write("  texture_list { ${nv},")
       for (i in 0...nv) {
-        var s = "texture{ pigment{ rgb ${self.vector(item.colors.column(i))} ${arg} } }"
-        if (i<nv-1) s+=", "
-        out.write(s)
+        out.write("${(i > 0) ? ", " : ""}texture { ${self._pigment(item, col.column(i))} }")
       }
-      out.write("}");
+      out.write("}")
     }
-
-    var nfaces=item.connectivity.dimensions()[1]
-    out.write("face_indices { ${nfaces}, ")
-    for (i in 0...nfaces) {
-      var indx = item.connectivity.rowindices(i)
-      var s = self.vector(indx)
-      if (individualcolors) s += ",${indx[0]},${indx[1]},${indx[2]}"
-      if (i<nv-1) s+=", "
-      out.write(s)
+    out.write("  face_indices { ${nf},")
+    for (i in 0...nf) {
+      var idx = self._face(item.connectivity, i)
+      var s = self.vector(idx)
+      if (per) s += ", ${idx[0]}, ${idx[1]}, ${idx[2]}"
+      out.write("${(i > 0) ? ", " : ""}${s}")
     }
-    out.write("}");
+    out.write("}")
+    if (!per) out.write("  ${skin}")
+    if (tail.count() > 0) out.write(" ${tail}")
+    out.write("}")
+  }
 
-    if (!individualcolors) {
-      out.write(" texture { "+
-                " pigment { rgb ${self.color(item.colors)} ${arg} "+
-                "} }")
+  _sweep(item, skin, tail, out) {
+    var mat = item.pts
+    if (islist(mat)) mat = Matrix(mat).transpose()
+    var np = mat.dimensions()[1]
+    if (np < 2) return
+    var n = item.closed ? np + 1 : np
+    out.write("sphere_sweep { linear_spline ${n},")
+    for (i in 0...n) {
+      out.write("${(i > 0) ? "," : ""} ${self.vector(mat.column(i < np ? i : 0))}, ${item.radius}")
     }
+    out.write(" ${skin}${tail} }")
+  }
 
-    out.write("}");
+  _grouped(tail, out, body) {
+    if (tail.count() > 0) out.write("union {")
+    body()
+    if (tail.count() > 0) out.write("${tail} }")
+  }
 
+  _points(item, col, flat, tail, out) {
+    var nv = item.position.dimensions()[1]
+    if (nv < 1) return
+    var per = self._perVertex(col)
+    self._grouped(tail, out, fn () {
+      for (i in 0...nv) {
+        var c = per ? col.column(i) : col
+        out.write("sphere { ${self.vector(item.position.column(i))}, ${self.pointradius} ${self._texture(item, c, flat)} }")
+      }
+    })
+  }
+
+  _lines(item, col, flat, tail, out) {
+    var segs = item.respondsto("_segmentIndices") ? item._segmentIndices() : self._polyline(item)
+    if (segs.count() < 2) return
+    var per = self._perVertex(col)
+    self._grouped(tail, out, fn () {
+      for (k in 0...segs.count():2) {
+        var i = segs[k], j = segs[k+1]
+        var c = per ? col.column(i) : col
+        out.write("cylinder { ${self.vector(item.position.column(i))}, ${self.vector(item.position.column(j))}, ${self.lineradius} ${self._texture(item, c, flat)} }")
+      }
+    })
+  }
+
+  _polyline(item) {
+    var nv = item.position.dimensions()[1], out = []
+    var nseg = (item.has("closed") && item.closed) ? nv : nv - 1
+    if (nseg < 1) return out
+    for (i in 0...nseg) {
+      out.append(i)
+      out.append(mod(i + 1, nv))
+    }
+    return out
+  }
+
+  _orient(item) {
+    var m = nil
+    if (item.respondsto("transformationMatrix")) m = item.transformationMatrix()
+    else if (item.respondsto("transformationmatrix")) m = item.transformationmatrix()
+    if (isnil(m)) return ""
+    var s = " matrix <"
+    for (i in 0..3) {
+      for (j in 0..2) {
+        if (!(i == 0 && j == 0)) s += ", "
+        s += "${m[i,j]}"
+      }
+    }
+    return s + ">"
+  }
+
+  _text(item, skin, tail, out) {
+    out.write("text { ttf \"${self._fontPath(item)}\" \"${item.string}\" 0.1, 0")
+    out.write("  ${skin}")
+    out.write("  scale ${item.size/75}${tail} }")
+  }
+
+  _fontPath(item) {
+    var font = item.has("font") ? item.font : nil
+    if (isnil(font) || !font) return "cyrvetic.ttf"
+    if (self._fonts.contains(font)) return self._fonts[font]
+    var found = self._findFont(font)
+    self._fonts[font] = isnil(found) ? font : found
+    return self._fonts[font]
+  }
+
+  _fontFolders() {
+    var p = System.platform()
+    if (p == "macos") return ["/System/Library/Fonts"]
+    if (p == "windows") return [Folder.normalizePath("C:/Windows/Fonts")]
+    return ["/usr/share/fonts", "/usr/local/share/fonts"]
+  }
+
+  _findFont(font) {
+    for (folder in self._fontFolders()) {
+      var found = self._searchFont(folder, font)
+      if (found) return found
+    }
+    return nil
+  }
+
+  _searchFont(folder, font) {
+    if (!Folder.isFolder(folder)) return nil
+    var names = Folder.contents(folder)
+    for (f in names) {
+      var path = Folder.normalizePath("${folder}/${f}")
+      var parts = f.split(".")
+      if (parts[0] == font && parts.count() > 1 &&
+          (parts[parts.count()-1] == "ttf" || parts[parts.count()-1] == "ttc")) return path
+      if (Folder.isFolder(path)) {
+        var nested = self._searchFont(path, font)
+        if (nested) return nested
+      }
+    }
+    return nil
+  }
+
+  /* ---------- scene file ---------- */
+
+  _writeBackground(out) {
+    var col = self.graphic.background
+    if (isnil(col)) col = Black
+    var t = self._triplet(col)
+    if (self.transparent || self._alpha(col) < 0.999) {
+      out.write("background { rgb <${t[0]}, ${t[1]}, ${t[2]}, 1> }")
+    } else {
+      out.write("background { rgb ${self.vector(t)} }")
+    }
+  }
+
+  _writeCamera(out) {
+    var aspect = self.width / self.height
+    out.write("camera {")
+    out.write("  location ${self.vector(self.viewpoint)}")
+    out.write("  up <0, 1, 0> right <-${aspect}, 0, 0> angle ${self.viewangle}")
+    out.write("  look_at ${self.vector(self.look_at)} sky ${self.vector(self.sky)}")
+    out.write("}")
+  }
+
+  _writeLights(out) {
+    var sl = self.shadowless ? " shadowless" : ""
+    var lights = self.light
+    if (isnil(lights)) lights = [Matrix([-5, -5, 8])]
+    else if (!islist(lights)) lights = [lights]
+    for (L in lights) out.write("light_source { ${self.vector(L)} color White${sl} }")
   }
 
   write(file) {
     var out = File(file, "write")
-
     out.write("#include \"colors.inc\"")
-    if (self.transparent) {
-      var col = self.graphic.background.rgb(0)
-      out.write("background { rgb <${col[0]}, ${col[1]}, ${col[2]}, 1> }") // Transparent background by setting alpha to 1
-    }
-    else {
-      out.write("background { rgb ${self.vector(self.graphic.background.rgb(0))} }")
-    }
-    out.write("camera {"+
-              "location ${self.vector(self.viewpoint)}"+
-              "up <0,1,0> right <-1.33,0,0> angle ${self.viewangle}"+
-              "look_at ${self.vector(self.look_at)} sky ${self.vector(self.sky)} }")
-
-    for (item in self.graphic.displaylist) self.visit(item, out)
-
-    var shadowless = ""
-    if (self.shadowless) shadowless = " shadowless"
-    if (self.light) {
-      for (light in self.light) {
-        out.write("light_source {${self.vector(light)} color White${shadowless}}")
-      }
-    } else out.write("light_source {<-5, -5, 8> color White${shadowless}}")
-
+    self._writeBackground(out)
+    self._writeCamera(out)
+    for (el in self.graphic.displaylist) self._emit(el, out)
+    self._writeLights(out)
     out.close()
     return out.relativepath()
   }
 
-  render(file, quiet=false, display=true, shadowless=false, transparent=false) {
-    self.shadowless = shadowless // Sets the attribute to be used in the write method
-    self.transparent = transparent // Sets the attribute to be used in the write method and in the command line argument for povray
-    var path = self.write(file)
-    var silent = ""
-    if (quiet) silent = "> /dev/null 2>&1"
-    var disp = ""
-    if (!display) disp = "-D"
-    var ua = "+A"
-    if (self.transparent) ua = "+UA" // Sets alpha output on 
-    system("povray \"${path}\" ${disp} ${ua} +W${self.width} +H${self.height} ${silent}")
-    var out = self._slice(path, 0, path.count()-4)
-    if (!quiet && display) system("open ${out}.png")
-  }
-  /*
-  private method: slice a string given a start and an end
-  @param string: string to be slice
-  @param start: starting index
-  @param end: ending index(exclusive)
-  */
-  _slice(string, start, end) {
-    var s = ""
-    for (i in start...end) {
-      s += string[i]
+  _pngPath(path) {
+    var n = path.count()
+    if (n >= 4) {
+      var ext = path.substring(n-4, n)
+      if (ext == ".pov" || ext == ".POV") return path.substring(0, n-4) + ".png"
     }
-    return s
+    return path + ".png"
+  }
+
+  _openImage(png) {
+    var p = System.platform()
+    if (p == "macos") system("open \"${png}\"")
+    else if (p == "windows") system("powershell -Command \"Start-Process '${png}'\"")
+    else system("xdg-open \"${png}\"")
+  }
+
+  render(file, quiet=false, display=true, shadowless=false, transparent=false) {
+    self.shadowless = shadowless
+    self.transparent = transparent
+    var path = self.write(file)
+    var flags = "+W${self.width} +H${self.height}"
+    if (!display) flags += " -D"
+    if (self.antialias) flags += " +A"
+    if (self.transparent) flags += " +UA"
+    var result
+    try {
+      result = System.subprocess("povray \"${path}\" ${flags}")
+    } catch {
+      "SystmPOpnFld": _PovExecErr.throw()
+    }
+    if (!quiet && !isnil(result["stdout"])) print result["stdout"]
+    if (result["exitstatus"] != 0) _PovExecErr.warning()
+    if (!quiet && display) self._openImage(self._pngPath(path))
   }
 }
