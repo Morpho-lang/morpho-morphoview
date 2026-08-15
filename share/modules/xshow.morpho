@@ -52,7 +52,8 @@ fn _unitTri(Sphere item, entry) {
 fn _unitTri(Cylinder item, entry) { return item.toTriangleComplex(unit=true) }
 fn _unitTri(Arrow item, entry) { return item.toTriangleComplex(unit=true) }
 
-class Font {
+/** Show's cache of an emitted morphoview `F` command (name + size + viewer id). */
+class ShowFont {
   init (name, size, id=nil) {
     self.name = name
     self.size = size
@@ -662,7 +663,7 @@ class Show {
     var path = self.findFont(font)
     if (!path) _fntntfnd.throw()
     var id = self.uid()
-    var fnt = Font(font, size, id=id)
+    var fnt = ShowFont(font, size, id=id)
     self.fonts.append(fnt)
 
     out.write("F ${id} \"${_mvEscape(path)}\" ${size}")
