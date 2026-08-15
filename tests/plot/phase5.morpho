@@ -39,11 +39,15 @@ expect(pAx.wantAxes, "wantAxes true")
 
 /* ---- field semantic methods store kwargs ---- */
 var f = Field(am, fn (x, y, z) x)
-var p = Plot(f, style="interpolate", colormap=ViridisMap(), colorbar=true,
+var p = Plot(f, style="interpolate", colormap=ViridisMap(), scalebar=true,
              cmin=0, cmax=1)
 expect(p.style == "interpolate", "stores style")
 expect(approx(p.cmin, 0) && approx(p.cmax, 1), "stores range")
-expect(p.entries.contains("faces") && p.entries.contains("colorbar"), "faces+colorbar")
+expect(p.entries.contains("faces") && p.entries.contains("scalebar"), "faces+scalebar")
+expect(p.scalebar(false), "scalebar(false) ok")
+expect(!p.entries.contains("scalebar"), "scalebar role cleared")
+expect(p.scalebar(true), "scalebar(true) ok")
+expect(p.entries.contains("scalebar"), "scalebar redrawn")
 
 var rgbViridis0 = Matrix(ViridisMap().rgb(0))
 var rgb0 = faceRgb0(p)
@@ -56,7 +60,7 @@ var nFaces = p.entries["faces"].count()
 expect(p.colormap(MagmaMap()), "colormap swap")
 expect(p.entries.contains("faces"), "faces after colormap")
 expect(p.entries["faces"].count() == nFaces, "same face entry count")
-expect(p.entries.contains("colorbar"), "colorbar rebuilt")
+expect(p.entries.contains("scalebar"), "scalebar rebuilt")
 
 var rgbMagma0 = Matrix(MagmaMap().rgb(0))
 rgb0 = faceRgb0(p)

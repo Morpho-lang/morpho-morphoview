@@ -22,7 +22,7 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
 - [ ] Extend morpho `color` module with alpha (`Color(r,g,b)` / `Color(r,g,b,a)` via MD, always store `a`; `rgba` / `alpha`); `Coloring` shared kind; ColorMap not a Color; wire `Show` via Coloring MD — **prototyped in package `xcolor` + `xgraphics`**
 - [ ] `xcolor` backlog: `Normalizer` / `LinearNorm` / `LogNorm` + `ColorScale` (under/over/bad); `ListedMap` + `reverse` / `truncate` / `discretize`; perceptual / named scientific cyclic (`PhaseMap`); optional `HueMap` → `HSVMap` alias; bulk `colors(values)` if mesh coloring needs it
-- [ ] Modernize morpho `plot` against xgraphics / xcolor — **prototyped in package `xplot`** (Phases 1–5 done: `Plot is Scene`, bulk primitives, axes/`ColorBar`, normalize/`center=`, live `axes`/`colormap`/`range`/`center`/`refresh(view)`; ScaleBar still uses upstream `meshtools`). **Dogfood next**; `xnca` per-vertex alpha, meshtools-free ColorBar, and optional `plotvectors` are future refinements.
+- [ ] Modernize morpho `plot` against xgraphics / xcolor — **prototyped in package `xplot`** (Phases 1–5 done: `Plot is Scene`, bulk primitives, axes/`ScaleBar`, normalize/`center=`, live `axes`/`colormap`/`range`/`center`/`refresh(view)`; ScaleBar is a meshtools-free tube, `ScaleBarStrip` for a flat bar). **Dogfood next**; `xnca` per-vertex alpha and optional `plotvectors` are future refinements.
 
 ### Transport
 
@@ -66,4 +66,5 @@ Tagged `// [Compatibility shim]` in source. Delete the whole group in one pass w
 - `POVRaytracer` mirrored camera fields (`viewpoint`, `viewangle`, …)
 - `ColorTable.column`
 - selected lowercase compatibility aliases on Plot
+- ScaleBar `getfontsize` / `drawbar` / `drawlabel`
 - PATH fallback in `findMorphoViewBin` (bare `morphoview`)

@@ -20,7 +20,7 @@ var f = Field(m, fn (x, y, z) x)
 var p = Plot(f, style="interpolate",
              colormap=BlueWhiteRedMap,
              cmin=-Pi, cmax=Pi, center=0,
-             axes=true, colorbar=true,
+             axes=true, scalebar=true,
              title="xplotdiverging (center=0)",
              background=Color(0.08, 0.09, 0.11))
 

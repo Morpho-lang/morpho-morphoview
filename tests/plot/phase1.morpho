@@ -43,6 +43,6 @@ expect(pf2.entries.contains("faces"), "missing faces entry")
 
 var sb = ScaleBar(length=0.5, posn=[1.2, 0.5, 0])
 var pf3 = Plot(Field(am, fn (x, y, z) x), style="interpolate", scalebar=sb)
-expect(pf3.entries.contains("colorbar"), "scalebar entries missing")
+expect(pf3.entries.contains("scalebar"), "scalebar entries missing")
 
 print "ok"

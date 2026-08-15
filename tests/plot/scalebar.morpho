@@ -1,0 +1,169 @@
+// ScaleBar / ScaleBarStrip without meshtools.
+// Expect: prints "ok" then exits.
+//
+//   morpho6 tests/plot/scalebar.morpho
+
+import xplot
+import xcolor
+import xshow
+import xpovray
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn approx(a, b) { return abs(a - b) < 1e-9 }
+fn approxEps(a, b, eps) { return abs(a - b) < eps }
+
+fn threw(blk) {
+  var ok = false
+  try {
+    blk()
+  } catch {
+    "PltSclBrVctr" : ok = true
+  }
+  return ok
+}
+
+fn contains(s, needle) {
+  var n = needle.count(), m = s.count()
+  if (n > m) return false
+  for (i in 0..(m-n)) {
+    if (s.substring(i, i+n) == needle) return true
+  }
+  return false
+}
+
+fn anyHas(lines, needle) {
+  for (line in lines) {
+    if (contains(line, needle)) return true
+  }
+  return false
+}
+
+fn tubeCounts(sb) {
+  var nsec = sb.npts
+  var nseg = 2*sb.nptsamples
+  var nv = nsec*(nseg + 1)
+  var nt = 2*nseg*nsec
+  return (nv, nt)
+}
+
+fn stripCounts(sb) {
+  var nseg = 2*sb.nptsamples
+  var nv = 2*(nseg + 1)
+  var nt = 2*nseg
+  return (nv, nt)
+}
+
+fn orthonormal(sb) {
+  return approx(sb.dirn.norm(), 1) &&
+         approx(sb.tickdirn.norm(), 1) &&
+         approxEps(sb.perp.norm(), 1, 1e-8) &&
+         approx(sb.tickdirn.inner(sb.dirn), 0) &&
+         approx(sb.perp.inner(sb.dirn), 0) &&
+         approx(sb.perp.inner(sb.tickdirn), 0)
+}
+
+/* ---- no meshtools: this file imports only xplot/xcolor/xshow/xpovray ---- */
+var ticks = ScaleBar().ticks(-1.2, 3.4, 5)
+expect(ticks.count() <= 5, "nice ticks respect nmax")
+expect(ScaleBar().ticks(3, 3, 5).count() == 1, "uniform field one tick")
+
+/* ---- vectors: clone, List, Tuple, errors, auto tickdirn ---- */
+var d = Matrix([0, 1, 0])
+var td = Matrix([1, 0, 0])
+var sbM = ScaleBar(dirn=d, tickdirn=td)
+expect(d[0] == 0 && d[1] == 1 && d[2] == 0, "dirn Matrix not mutated")
+expect(td[0] == 1 && td[1] == 0, "tickdirn Matrix not mutated")
+expect(orthonormal(sbM), "Matrix frame orthonormal")
+
+var sbL = ScaleBar(dirn=[0, 0, 1], tickdirn=[1, 0, 0], posn=[0, 0, 0])
+expect(orthonormal(sbL), "List vectors")
+var sbT = ScaleBar(dirn=(0, 0, 1), tickdirn=(1, 0, 0), posn=(2, 0, 0))
+expect(orthonormal(sbT), "Tuple vectors")
+expect(sbT.posn[0] == 2, "Tuple posn")
+
+var auto = ScaleBar(dirn=[1, 0, 0])
+expect(orthonormal(auto), "omitted tickdirn auto-perp when default is parallel")
+expect(approx(abs(auto.tickdirn.inner(auto.dirn)), 0), "auto tickdirn orthogonal")
+
+expect(threw(fn () ScaleBar(dirn=[0, 0, 0])), "zero dirn throws")
+expect(threw(fn () ScaleBar(dirn=[0, 1, 0], tickdirn=[0, 1, 0])),
+       "explicit parallel tickdirn throws")
+expect(threw(fn () ScaleBar(dirn=[0, 1, 0], tickdirn=[0, -1, 0])),
+       "explicit antiparallel tickdirn throws")
+expect(threw(fn () ScaleBar(dirn="up")), "invalid vector type throws")
+expect(threw(fn () ScaleBar(dirn=[0, 1])), "short vector throws")
+expect(threw(fn () ScaleBar(dirn=(0, 1, 0, 0))), "long vector throws")
+expect(threw(fn () ScaleBar(length=0)), "zero length throws")
+
+/* ---- tube geometry ---- */
+var sb = ScaleBar(length=0.5, posn=[1.2, 0.5, 0])
+var st = ScaleBarStrip(length=0.5, posn=[1.2, 0.5, 0])
+var gt = sb.draw(0, 1)
+expect(gt.displaylist.count() > 1, "tube bar + labels")
+var tube = gt.displaylist[0]
+expect(tube.item.clss() == TriangleComplex, "tube is TriangleComplex")
+expect(tube.flat, "tube displayed flat/unlit")
+expect(tube.item.color.clss() == ColorTable, "tube ColorTable")
+var tc = tubeCounts(sb)
+expect(tube.item.position.dimensions()[1] == tc[0], "tube vertex count")
+expect(tube.item.color.count() == tc[0], "ColorTable count matches vertices")
+expect(tube.item.color.channels() == 3, "Viridis RGB")
+expect(tube.item.connectivity.dimensions()[1] == tc[1], "tube wall triangles")
+var fi = tube.item.faceIndices(0)
+expect(fi.count() == 3 && fi[0] != fi[1] && fi[1] != fi[2], "faceIndices winding triple")
+
+var g = st.draw(0, 1)
+expect(g.displaylist.count() > 1, "strip bar + labels")
+var strip = g.displaylist[0]
+expect(strip.item.clss() == TriangleComplex, "strip is TriangleComplex")
+expect(strip.flat, "strip displayed flat/unlit")
+var sc = stripCounts(st)
+expect(strip.item.position.dimensions()[1] == sc[0], "strip two verts per slice")
+expect(strip.item.color.count() == sc[0], "strip ColorTable count")
+expect(strip.item.connectivity.dimensions()[1] == sc[1], "strip wall triangles only")
+expect(tc[0] > sc[0], "tube has more vertices than strip")
+
+/* ---- aliases ---- */
+expect(!isnil(sb.getfontsize(sb.ticks(0, 1, 5))), "getfontsize shim")
+expect(sb.drawbar().displaylist.count() == 1, "drawbar shim")
+expect(sb.drawlabel(0, 1).displaylist.count() > 0, "drawlabel shim")
+
+/* ---- ranges ---- */
+expect(sb.draw(-1, 1).displaylist.count() > 1, "increasing range")
+var gEq = sb.draw(3, 3)
+expect(gEq.displaylist.count() >= 3, "min==max: bar + one tick + label")
+expect(sb.getFontSize(sb.ticks(0, 1, 1)) > 0, "one-tick font size")
+
+/* ---- colors: RGB endpoints + RGBA ---- */
+var v0 = ViridisMap().rgb(0)
+var c0 = tube.item.color.rgb(0)
+expect(approxEps(c0[0], v0[0], 1e-5) && approxEps(c0[1], v0[1], 1e-5) &&
+       approxEps(c0[2], v0[2], 1e-5), "endpoint color t=0")
+var sbA = ScaleBar(colormap=ViridisMap().opacity(0.4))
+var triA = sbA.drawBar().displaylist[0].item
+expect(triA.color.channels() == 4, "opacity map → RGBA ColorTable")
+expect(approxEps(triA.color.alpha(0), 0.4, 1e-9), "per-vertex alpha survives")
+
+/* ---- Show (morphoview IR) + POV-Ray SDL ---- */
+var buf = Buf()
+Show().write(gt, buf)
+expect(anyHas(buf.lines, "v \"xnc\""), "Show ColorTable layout")
+expect(anyHas(buf.lines, "M flat"), "Show flat/unlit")
+
+var sdl = File(POVRaytracer(gt).write("/tmp/testscalebar.pov")).readall()
+expect(contains(sdl, "mesh2"), "POV-Ray mesh2 for TriangleComplex")
+expect(contains(sdl, "vertex_vectors"), "POV-Ray vertices")
+expect(contains(sdl, "texture_list") || contains(sdl, "pigment"), "POV-Ray color")
+
+print "ok"

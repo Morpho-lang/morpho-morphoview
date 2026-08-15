@@ -6,15 +6,16 @@
  * Extend by subclassing Plot (override _drawMesh / _drawSelection / _drawField / _finish).
  * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot
  * (default style="thick": spheres + tubes, matching classic plot).
- * Presentation: axes=true (domain frame) + colorbar=true / ColorBar (ScaleBar alias).
+ * Presentation: axes=true (domain frame) + scalebar=true / ScaleBar / ScaleBarStrip.
+ * ScaleBar is a vertex-colored TriangleComplex (tube; ScaleBarStrip is an open strip).
+ * Built locally: cross-section → positions / normals / ColorTable / connectivity. No meshtools.
  * Field coloring: linear normalize (safe on uniform fields) + optional center= for diverging maps.
  * Live: axes / colormap / range / center / refresh [view] mutate Scene (fields: morph via View, not recolor).
- * Mesh helpers still come from upstream meshtools (AreaMesh / MeshMerge for ColorBar).
  ******************************************************************************************* */
 
+import constants
 import xgraphics
 import xcolor
-import meshtools
 
 /* --------------------------
  * Errors
@@ -24,9 +25,7 @@ var _PltMshClErr = Error("PltMshCl", "Color specification for plotmesh should be
 var _PltInvldClErr = Error("PltInvldCl", "Could not convert color to matrix.")
 var _PltFldIntErr = Error("PltFldInt", "Can't use 'interpolate' style: Field lacks values on vertices.")
 var _PltSlctnEmptyErr = Error("PltSlctnEmpty", "Selection is empty.")
-
-/** Filled after ScaleBar is defined (breaks Plot↔plotfield cycle). */
-var _colorBarNew = nil
+var _PltSclBrVctrErr = Error("PltSclBrVctr", "ScaleBar vector must be a non-zero Matrix, List, or Tuple; tickdirn must not be parallel to dirn.")
 
 /* --------------------------
  * Geometry / bounds
@@ -680,17 +679,173 @@ fn _smoothVertexNormals(mesh, vertMat, centroid, selection=nil) {
 }
 
 /* *******************************************************************************************
+ * ScaleBar — tube TriangleComplex; ScaleBarStrip is an open strip
+ ******************************************************************************************* */
+
+class ScaleBar {
+  _asVec(val, default, unit=false) {
+    if (isnil(val)) val = default
+    var out = ismatrix(val) ? val.clone() :
+              ((islist(val) || istuple(val)) ? Matrix(val) : nil)
+    if (isnil(out) || out.count() != 3) _PltSclBrVctrErr.throw()
+    if (unit) {
+      var n = out.norm()
+      if (n < 1e-12) _PltSclBrVctrErr.throw()
+      out /= n
+    }
+    return out
+  }
+
+  _tri(conn, i, a, b, c) {
+    conn[a, i] = 1; conn[b, i] = 1; conn[c, i] = 1
+    conn.setrowindices(i, (a, b, c))
+  }
+
+  init(nticks=5, colormap=nil, length=1, posn=nil, dirn=nil, tickdirn=nil,
+       textdirn=nil, textvertical=nil, textcolor=nil, fontsize=16) {
+    if (!(length > 1e-12)) _PltSclBrVctrErr.throw()
+    self.nticks = nticks
+    self.length = length
+    self.radius = 0.1*length
+    self.nptsamples = 5
+    self.npts = 16
+    self.fontsize = fontsize
+    self.colormap = isnil(colormap) ? ViridisMap() : colormap
+
+    var givenTick = !isnil(tickdirn)
+    self.posn = self._asVec(posn, [1, 0, 0])
+    self.dirn = self._asVec(dirn, [0, 1, 0], unit=true)
+    self.tickdirn = self._asVec(tickdirn, [1, 0, 0], unit=true)
+    self.tickdirn -= self.tickdirn.inner(self.dirn)*self.dirn
+    var tn = self.tickdirn.norm()
+    if (tn < 1e-12) {
+      if (givenTick) _PltSclBrVctrErr.throw()
+      var a = (abs(self.dirn[0]) < 0.9) ? Matrix([1, 0, 0]) : Matrix([0, 1, 0])
+      self.tickdirn = _plotCross3D(self.dirn, a)
+      tn = self.tickdirn.norm()
+    }
+    self.tickdirn /= tn
+    self.perp = _plotCross3D(self.tickdirn, self.dirn)
+    self.textdirn = self._asVec(textdirn, self.tickdirn, unit=true)
+    self.textvertical = self._asVec(textvertical, self.dirn, unit=true)
+    self.textcolor = textcolor
+  }
+
+  ticks(a, b, nmax) { return _niceTicks(a, b, nmax) }
+
+  coords(x, y, z) {
+    return self.posn + x*self.tickdirn + y*self.perp + z*self.dirn
+  }
+
+  getFontSize(ticks) {
+    var ngap = (ticks.count() > 1) ? ticks.count()-1 : 1
+    var size = self.fontsize
+    if (size/72 > self.length/ngap) size = floor(self.length/ngap*72)
+    return size
+  }
+  getfontsize(ticks) { return self.getFontSize(ticks) } // [Compatibility shim]
+
+  /** Extrude a (x,y) section along dirn. closed wraps the last edge to the first. */
+  _mesh(section, closed) {
+    var nsec = section.count()
+    var nseg = 2*self.nptsamples
+    if (nseg < 1) nseg = 1
+    var nslice = nseg + 1, nv = nsec*nslice
+    var nt = 2*nseg*(closed ? nsec : nsec-1)
+    var L = self.length/2, nch = _plotChannels(self.colormap)
+    var pos = Matrix(3, nv), nrm = Matrix(3, nv), col = Matrix(nch, nv)
+
+    for (k in 0...nslice) {
+      var z = -L + k*(self.length/nseg)
+      var rgb = _plotColorColumn(self.colormap, nch, Float(k)/Float(nseg))
+      for (j in 0...nsec) {
+        var xy = section[j], x = xy[0], y = xy[1], idx = k*nsec + j
+        pos.setColumn(idx, self.coords(x, y, z))
+        var n = x*self.tickdirn + y*self.perp, nn = n.norm()
+        nrm.setColumn(idx, closed ? ((nn > 1e-12) ? n/nn : self.perp) : self.perp)
+        col.setColumn(idx, rgb)
+      }
+    }
+
+    var conn = Sparse(nv, nt), itri = 0, nj = closed ? nsec : nsec-1
+    for (k in 0...nseg) {
+      for (j in 0...nj) {
+        var jn = (j+1 == nsec) ? 0 : j+1
+        var a = k*nsec + j, b = k*nsec + jn, c = (k+1)*nsec + j, d = (k+1)*nsec + jn
+        self._tri(conn, itri, a, c, b); itri += 1
+        self._tri(conn, itri, b, c, d); itri += 1
+      }
+    }
+    return TriangleComplex(pos, nrm, ColorTable(col), conn)
+  }
+
+  _show(tri) {
+    var g = Graphics()
+    g.display(tri, flat=true)
+    return g
+  }
+
+  drawBar() {
+    var r = self.radius, n = self.npts, sec = []
+    for (j in 0...n) {
+      var th = 2*Pi*j/n
+      sec.append((r*cos(th), r*sin(th)))
+    }
+    return self._show(self._mesh(sec, true))
+  }
+  drawbar() { return self.drawBar() } // [Compatibility shim]
+
+  drawLabel(min, max) {
+    var ticks = self.ticks(min, max, self.nticks)
+    var w = max - min, g = Graphics()
+    var fsize = self.getFontSize(ticks)
+    var toffset = abs(self.dirn.inner(self.textdirn))
+    var tvert = sqrt(1 - toffset^2)
+    for (t in ticks) {
+      var x = (abs(w) < 1e-12) ? 0 : (t - min)/w - 0.5
+      var label = String(t)
+      var width = (0.6*label.count()*fsize/72)/2, height = fsize/72
+      g.display(Cylinder(self.coords(1.2*self.radius, 0, x*self.length),
+                         self.coords(1.5*self.radius, 0, x*self.length), color=White))
+      g.display(Text(label,
+        self.coords((1.8 + toffset)*self.radius, 0,
+                    x*self.length - 0.25*height*tvert - width*toffset),
+        size=fsize, dirn=self.textdirn, vertical=self.textvertical, color=self.textcolor))
+    }
+    return g
+  }
+  drawlabel(min, max) { return self.drawLabel(min, max) } // [Compatibility shim]
+
+  draw(min, max) { return self.drawBar() + self.drawLabel(min, max) }
+}
+
+class ScaleBarStrip is ScaleBar {
+  drawBar() {
+    var r = self.radius
+    return self._show(self._mesh(((-r, 0), (r, 0)), false))
+  }
+}
+
+fn _wantScalebar(Bool x) { return x }
+fn _wantScalebar(ScaleBar x) { return true }
+fn _wantScalebar(x) { return false }
+
+fn _scalebarObj(ScaleBar x) { return x }
+fn _scalebarObj(x) { return nil }
+
+/* *******************************************************************************************
  * Plot — scientific visualization as a Scene
  ******************************************************************************************* */
 
 class Plot is Scene {
-  _setup(source, title=nil, background=nil, axes=false, colorbar=false) {
+  _setup(source, title=nil, background=nil, axes=false, scalebar=false) {
     super.init(title=title, background=background)
     self.source = source
     self.entries = Dictionary()
     self.bounds = nil
     self.wantAxes = axes
-    self.wantColorbar = colorbar
+    self.wantScalebar = _wantScalebar(scalebar)
+    self.scaleBar = _scalebarObj(scalebar)
     self.colormap = nil
     self.cmin = nil
     self.cmax = nil
@@ -704,7 +859,7 @@ class Plot is Scene {
 
   _finish() {
     if (self.wantAxes) self._drawAxes()
-    if (self.wantColorbar) self._drawColorbar()
+    if (self.wantScalebar) self._drawScalebar()
   }
 
   _recordEntry(role, id) {
@@ -732,33 +887,37 @@ class Plot is Scene {
     _mergeGraphicsInto(self, _frameLabels(self.bounds, nticks=nticks), "axes")
   }
 
-  _drawColorbar() {
-    if (self.entries.contains("colorbar")) return
+  _drawScalebar() {
+    if (self.entries.contains("scalebar")) return
     if (isnil(self.colormap) || isnil(self.cmin) || isnil(self.cmax)) return
 
-    var length = 1.0
-    var posn = Matrix([1, 0, 0])
-    if (!isnil(self.bounds)) {
-      var info = _boundsLoHi(self.bounds)
-      var lo = info[0], hi = info[1], dim = info[2]
-      var sx = hi[0] - lo[0]
-      var sy = (dim >= 2) ? (hi[1] - lo[1]) : 1.0
-      var sz = (dim >= 3) ? (hi[2] - lo[2]) : 0.0
-      var span = abs(sy)
-      if (abs(sz) > span) span = abs(sz)
-      if (span < 1e-12) span = abs(sx)
-      if (span < 1e-12) span = 1.0
-      length = span
-      var gap = 0.15*((abs(sx) > 1e-12) ? abs(sx) : span)
-      posn = Matrix([
-        hi[0] + gap,
-        (dim >= 2) ? 0.5*(lo[1] + hi[1]) : 0,
-        (dim >= 3) ? 0.5*(lo[2] + hi[2]) : 0
-      ])
+    var bar = self.scaleBar
+    if (isnil(bar)) {
+      var length = 1.0
+      var posn = Matrix([1, 0, 0])
+      if (!isnil(self.bounds)) {
+        var info = _boundsLoHi(self.bounds)
+        var lo = info[0], hi = info[1], dim = info[2]
+        var sx = hi[0] - lo[0]
+        var sy = (dim >= 2) ? (hi[1] - lo[1]) : 1.0
+        var sz = (dim >= 3) ? (hi[2] - lo[2]) : 0.0
+        var span = abs(sy)
+        if (abs(sz) > span) span = abs(sz)
+        if (span < 1e-12) span = abs(sx)
+        if (span < 1e-12) span = 1.0
+        length = span
+        var gap = 0.15*((abs(sx) > 1e-12) ? abs(sx) : span)
+        posn = Matrix([
+          hi[0] + gap,
+          (dim >= 2) ? 0.5*(lo[1] + hi[1]) : 0,
+          (dim >= 3) ? 0.5*(lo[2] + hi[2]) : 0
+        ])
+      }
+      bar = ScaleBar(length=length, posn=posn, colormap=self.colormap)
+    } else {
+      bar.colormap = self.colormap
     }
-
-    var bar = _colorBarNew(length=length, posn=posn, colormap=self.colormap)
-    _mergeGraphicsInto(self, bar.draw(self.cmin, self.cmax), "colorbar")
+    _mergeGraphicsInto(self, bar.draw(self.cmin, self.cmax), "scalebar")
   }
 
   /** Toggle domain-frame chrome via stored entry IDs. */
@@ -773,12 +932,31 @@ class Plot is Scene {
     return true
   }
 
-  /** Re-sample Field → rebuild data entries (+ colorbar if present).
+  /** Toggle scalebar chrome via stored entry IDs. */
+  scalebar(Bool show) {
+    if (show) {
+      self.wantScalebar = true
+      if (!self.entries.contains("scalebar")) self._drawScalebar()
+    } else {
+      self.wantScalebar = false
+      self._clearRole("scalebar")
+    }
+    return true
+  }
+  scalebar(ScaleBar bar) {
+    self.wantScalebar = true
+    self.scaleBar = bar
+    self._clearRole("scalebar")
+    self._drawScalebar()
+    return true
+  }
+
+  /** Re-sample Field → rebuild data entries (+ scalebar if present).
    *  MD: refresh() / refresh(view). Optional-nil arity is a Morpho trap — keep overloads. */
   _rebuildField(view) {
     if (!isfield(self.source)) return false
 
-    var hadColorbar = self.entries.contains("colorbar") || self.wantColorbar
+    var hadScalebar = self.entries.contains("scalebar") || self.wantScalebar
     var info = _fieldColors(self.source, selection=self.selection, grade=self.grade,
                             colormap=self.colormap, style=self.style, scale=self.scale,
                             cmin=self.cmin, cmax=self.cmax, center=self.center)
@@ -808,9 +986,9 @@ class Plot is Scene {
     self._meshInto(mesh, selection=sel, grade=showgrades, color=col,
                    style=self.style)
 
-    if (hadColorbar) {
-      self._clearRole("colorbar")
-      self._drawColorbar()
+    if (hadScalebar) {
+      self._clearRole("scalebar")
+      self._drawScalebar()
     }
     return true
   }
@@ -1055,7 +1233,7 @@ class Plot is Scene {
   }
 
   _drawField(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
-             scalebar=nil, cmin=nil, cmax=nil, center=nil) {
+             cmin=nil, cmax=nil, center=nil) {
     self.selection = selection
     self.grade = grade
     self.style = style
@@ -1069,33 +1247,28 @@ class Plot is Scene {
     self.cmax = bnd[1]
     self.center = center
     self._meshInto(mesh, selection=sel, grade=showgrades, color=col, style=style)
-
-    if (!isnil(scalebar)) {
-      scalebar.colormap = cm
-      _mergeGraphicsInto(self, scalebar.draw(bnd[0], bnd[1]), "colorbar")
-    }
   }
 
   init(Mesh mesh, selection=nil, grade=nil, color=nil,
-       title=nil, background=nil, axes=false, colorbar=false, style=nil) {
-    self._setup(mesh, title=title, background=background, axes=axes, colorbar=colorbar)
+       title=nil, background=nil, axes=false, scalebar=false, style=nil) {
+    self._setup(mesh, title=title, background=background, axes=axes, scalebar=scalebar)
     self._drawMesh(mesh, selection=selection, grade=grade, color=color, style=style)
     self._finish()
   }
 
   init(Selection sel, mesh=nil, grade=nil, color=nil,
-       title=nil, background=nil, axes=false, colorbar=false, style=nil) {
-    self._setup(sel, title=title, background=background, axes=axes, colorbar=colorbar)
+       title=nil, background=nil, axes=false, scalebar=false, style=nil) {
+    self._setup(sel, title=title, background=background, axes=axes, scalebar=scalebar)
     self._drawSelection(sel, mesh=mesh, grade=grade, color=color, style=style)
     self._finish()
   }
 
   init(Field field, selection=nil, grade=nil, colormap=nil, style=nil, scale=true,
-       scalebar=nil, cmin=nil, cmax=nil, center=nil,
-       title=nil, background=nil, axes=false, colorbar=false) {
-    self._setup(field, title=title, background=background, axes=axes, colorbar=colorbar)
+       scalebar=false, cmin=nil, cmax=nil, center=nil,
+       title=nil, background=nil, axes=false) {
+    self._setup(field, title=title, background=background, axes=axes, scalebar=scalebar)
     self._drawField(field, selection=selection, grade=grade, colormap=colormap, style=style,
-                    scale=scale, scalebar=scalebar, cmin=cmin, cmax=cmax, center=center)
+                    scale=scale, cmin=cmin, cmax=cmax, center=center)
     self._finish()
   }
 }
@@ -1168,113 +1341,3 @@ fn plotmeshlabels(mesh, grade=0, selection=nil, fontsize=10, offset=nil, dirn=ni
   }
   return gout
 }
-
-/* *******************************************************************************************
- * ColorBar / ScaleBar
- ******************************************************************************************* */
-
-class ScaleBar {
-  _vector(Matrix val, default, normalize=false) {
-    var out = val
-    if (normalize) out /= out.norm()
-    return out
-  }
-  _vector(List val, default, normalize=false) {
-    return self._vector(Matrix(val), default, normalize=normalize)
-  }
-  _vector(val, default, normalize=false) {
-    return self._vector(Matrix(default), default, normalize=normalize)
-  }
-
-  init(nticks=5, colormap=nil, length=1, posn=nil, dirn=nil, tickdirn=nil,
-       textdirn=nil, textvertical=nil, textcolor=nil, fontsize=16) {
-    self.nticks = nticks
-    self.length = length // Length of colorbar
-    self.radius = 0.1*length // Radius of colorbar
-    self.nptsamples = 5 // Number of samples
-    self.npts = 16 // Number of azimuthal samples
-    self.fontsize = fontsize // Maximum font size for labels
-    self.colormap = isnil(colormap) ? ViridisMap() : colormap
-
-    self.posn = self._vector(posn, [1, 0, 0])
-    self.dirn = self._vector(dirn, [0, 1, 0], normalize=true)
-    self.tickdirn = self._vector(tickdirn, [1, 0, 0], normalize=true)
-    var lambda = self.tickdirn.inner(self.dirn)
-    if (abs(lambda - 1) > 1e-8) self.tickdirn -= lambda*self.dirn
-    self.tickdirn /= self.tickdirn.norm()
-
-    self.perp = _plotCross3D(self.tickdirn, self.dirn)
-    self.textdirn = self._vector(textdirn, self.tickdirn, normalize=true)
-    self.textvertical = self._vector(textvertical, self.dirn, normalize=true)
-    self.textcolor = textcolor
-  }
-
-  /* Nice ticks on [a,b] — shared with axes chrome via _niceTicks. */
-  ticks(a, b, nmax) { return _niceTicks(a, b, nmax) }
-
-  coords(x, y, z) {
-    return self.posn + x*self.tickdirn + y*self.perp + z*self.dirn
-  }
-
-  getFontSize(ticks) {
-    var size = self.fontsize
-    var csize = (size/72) // Size of a line in our units
-    var vsep = self.length/ticks.count() // Separation between ticks
-    if (csize > vsep) size = floor((vsep/csize)*size)
-    return size
-  }
-  getfontsize(ticks) { return self.getFontSize(ticks) } // legacy
-
-  drawBar() {
-    var L = self.length/2
-    var r = self.radius
-    var m1 = AreaMesh(fn (u, v) self.coords(r*cos(u), r*sin(u), v),
-                      -Pi..Pi:Pi/self.npts, -L..L:L/self.nptsamples, closed=[true, false])
-    var m2 = AreaMesh(fn (u, R) self.coords(R*cos(u), R*sin(u), -L),
-                      -Pi..Pi:Pi/self.npts, 0..r:r)
-    var m3 = AreaMesh(fn (u, R) self.coords(R*cos(u), R*sin(u), L),
-                      -Pi..Pi:Pi/self.npts, 0..r:r)
-    var m = MeshMerge([m1, m2, m3]).merge()
-    return plotfield(Field(m, fn (x, y, z) Matrix([x, y, z]).inner(self.dirn)),
-                     style="interpolate", colormap=self.colormap)
-  }
-  drawbar() { return self.drawBar() } // legacy
-
-  drawLabel(min, max) {
-    var ticks = self.ticks(min, max, self.nticks)
-    var w = max - min
-    var g = Graphics()
-    var fsize = self.getFontSize(ticks)
-    var toffset = abs(self.dirn.inner(self.textdirn))
-    var tvert = sqrt(1 - toffset^2)
-
-    for (t in ticks) {
-      var x = (t - min)/w - 0.5
-      var label = String(t)
-      var width = (0.6*label.count()*fsize/72)/2 // Estimate the width
-      var height = fsize/72 // Estimate the height
-      g.display(Cylinder(self.coords(1.2*self.radius, 0, x*self.length),
-                         self.coords(1.5*self.radius, 0, x*self.length), color=White))
-      g.display(Text(label,
-        self.coords((1.8 + toffset)*self.radius, 0,
-                    x*self.length - 0.25*height*tvert - width*toffset),
-        size=fsize, dirn=self.textdirn, vertical=self.textvertical, color=self.textcolor))
-    }
-    return g
-  }
-  drawlabel(min, max) { return self.drawLabel(min, max) } // legacy
-
-  draw(min, max) {
-    return self.drawBar() + self.drawLabel(min, max)
-  }
-}
-
-/** Modern constructor alias for ScaleBar. */
-fn ColorBar(nticks=5, colormap=nil, length=1, posn=nil, dirn=nil, tickdirn=nil,
-            textdirn=nil, textvertical=nil, textcolor=nil, fontsize=16) {
-  return ScaleBar(nticks=nticks, colormap=colormap, length=length, posn=posn, dirn=dirn,
-                  tickdirn=tickdirn, textdirn=textdirn, textvertical=textvertical,
-                  textcolor=textcolor, fontsize=fontsize)
-}
-
-_colorBarNew = ScaleBar

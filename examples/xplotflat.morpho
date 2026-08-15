@@ -25,7 +25,7 @@ var f = Field(m, quadrupole)
 var p = Plot(f, style="interpolate",
              colormap=BlueWhiteRedMap,
              center=0,
-             axes=true, colorbar=true,
+             axes=true, scalebar=true,
              title="xplotflat (xy through origin)",
              background=Color(0.08, 0.09, 0.11))
 

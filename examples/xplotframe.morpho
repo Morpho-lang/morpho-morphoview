@@ -1,4 +1,4 @@
-// xplot Phase 3 yardstick: domain frame axes + optional colorbar.
+// xplot Phase 3 yardstick: domain frame axes + optional scalebar.
 //
 //   morpho6 examples/xplotframe.morpho
 //
@@ -15,8 +15,8 @@ var m = AreaMesh(fn (u, v) [u, v, 0.15*sin(3*u)*cos(2*v)],
 var f = Field(m, fn (x, y, z) x)
 
 var p = Plot(f, style="interpolate", colormap=ViridisMap(),
-             axes=true, colorbar=true,
-             title="xplotframe (axes + colorbar)",
+             axes=true, scalebar=true,
+             title="xplotframe (axes + scalebar)",
              background=Color(0.08, 0.09, 0.11))
 
 var v = View(p, connecttimeout=20000)
