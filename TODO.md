@@ -15,18 +15,19 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 
 ## Backlog
 
-### Upstream
+### Upstream (package work is done; still to land in morpho)
 
-- [ ] Push settled pieces from [`xgraphics.morpho`](share/modules/xgraphics.morpho) (`Graphics` / `Scene` / events) plus [`xshow.morpho`](share/modules/xshow.morpho) (`Show`) and [`xfonts.morpho`](share/modules/xfonts.morpho) to morpho `graphics.morpho` / `show` / `fonts`
-- [ ] Keep core `graphics.morpho` free of `meshtools` (prototype: local sphere tessellation in xgraphics; examples like soapbubble may still `import meshtools`)
+- [ ] Push [`xgraphics.morpho`](share/modules/xgraphics.morpho) / [`xshow.morpho`](share/modules/xshow.morpho) / [`xfonts.morpho`](share/modules/xfonts.morpho) to morpho `graphics` / `show` / `fonts`
+- [ ] Push [`xcolor.morpho`](share/modules/xcolor.morpho) to morpho `color` (`Color` alpha, `Coloring`, `ColorTable`, ColorMap ≠ Color)
+- [ ] Push [`xplot.morpho`](share/modules/xplot.morpho) to morpho `plot` (dogfood this package first)
+- [ ] Keep core `graphics.morpho` free of `meshtools` (already true here: UV sphere in xgraphics; examples like soapbubble may still `import meshtools`)
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
-- [ ] Extend morpho `color` module with alpha (`Color(r,g,b)` / `Color(r,g,b,a)` via MD, always store `a`; `rgba` / `alpha`); `Coloring` shared kind; ColorMap not a Color; wire `Show` via Coloring MD — **prototyped in package `xcolor` + `xgraphics`**
-- [ ] `xcolor` backlog: `Normalizer` / `LinearNorm` / `LogNorm` + `ColorScale` (under/over/bad); `ListedMap` + `reverse` / `truncate` / `discretize`; perceptual / named scientific cyclic (`PhaseMap`); optional `HueMap` → `HSVMap` alias; bulk `colors(values)` if mesh coloring needs it
-- [ ] Modernize morpho `plot` against xgraphics / xcolor — **prototyped in package `xplot`** (Phases 1–5 done: `Plot is Scene`, bulk primitives, axes/`ScaleBar`, normalize/`center=`, live `axes`/`colormap`/`range`/`center`/`refresh(view)`; ScaleBar is a meshtools-free tube, `ScaleBarStrip` for a flat bar). **Dogfood next**; optional `plotvectors` is a future refinement.
 
-### Transport
+### This package
 
-- [ ] Binary / byte-buffer vertex transport — viewer IR already accepts float/index blobs; Morpho needs a binary serialize path and ZMQ framing. Biggest win on fat `v` / `U V` paths; redraw often avoids blobs entirely.
+- [ ] Binary vertex transport — viewer IR already takes float/index blobs; Morpho still needs a way to serialize those buffers and send them over ZMQ. Biggest win on fat `v` / `U V` paths; redraw often avoids blobs entirely.
+- [ ] Transparent centroid cache — recompute object AABB centroid only when geometry changes, not every frame
+- [ ] Draw-list hygiene — merge adjacent draws that share VAO/material when packing the renderlist (matters at larger object counts)
 
 ### Events (viewer → Morpho)
 
@@ -40,21 +41,14 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 | `view <16 floats>` | Later | Camera / view matrix |
 | `click …` | Later | Mouse click (gated / on request to avoid flood) |
 
-### Viewer polish
+## Done in this package
 
-- [x] **Per-vertex alpha** — format letter `a` (1 float); Show emits `xnca`/`xca` for RGBA ColorTables. Uniform `Color.a` still uses `C`. Transparent sort remains object-centroid. Motivated by `Plot(field, colormap=Opacity(ViridisMap(), …))`.
-- [ ] Transparent centroid cache — recompute object AABB centroid only when geometry changes, not every frame
-- [ ] Draw-list hygiene — merge adjacent draws that share VAO/material when packing the renderlist (matters at larger object counts)
-
-### Language / framework
-
-- [ ] Formal Morpho dependents (learn from Graphics→View; formalize a general dependent-object framework later)
-
-## Completed in this rewrite
-
-Live Graphics/Scene/View stack through Text draw-slots: stable ids, define vs draw, Broadcaster listeners, selective pose redraw, unit Sphere/Cylinder/Arrow mesh cache, `U O` / `U V` / `X O` / `X D`, materials/lighting/opacity, framing/auto-fit, ZMQ `View` session API, and yardsticks (`boing`, `nbody`, `soapbubble`, `vectors`, `flyingtext`).
-
-Graphics compactification: `GraphicsEntry.effectiveColor()`, primitive color never nil, uniform morphoview color via draw-slot `C` (ColorTable stays `xnc`/`xc`), `_ViewerSlot` serializer bookkeeping, `TriangleComplex.faceIndices`, modules `xfonts` / `xshow` split out of `xgraphics`.
+- [x] Live Graphics/Scene/View through Text draw-slots: stable ids, define vs draw, Broadcaster listeners, selective pose redraw, unit Sphere/Cylinder/Arrow mesh cache, `U O` / `U V` / `X O` / `X D`, materials/lighting/opacity, framing/auto-fit, ZMQ `View` session API, yardsticks (`boing`, `nbody`, `soapbubble`, `vectors`, `flyingtext`)
+- [x] Graphics compactification: `GraphicsEntry.effectiveColor()`, primitive color never nil, uniform color via draw-slot `C`, `_ViewerSlot` serializer bookkeeping, `TriangleComplex.faceIndices`, modules `xfonts` / `xshow` split out of `xgraphics`
+- [x] Local UV-sphere tessellation (no meshtools in xgraphics)
+- [x] `xcolor`: `Color(r,g,b)` / `Color(r,g,b,a)`, `Coloring`, `ColorTable` RGB/RGBA, ColorMap ≠ Color, Show via Coloring MD
+- [x] `xplot` Phases 1–5: `Plot is Scene`, bulk primitives, axes/`ScaleBar`/`ScaleBarStrip`, normalize/`center=`, live `axes`/`colormap`/`range`/`center`/`refresh(view)`
+- [x] Per-vertex alpha: format letter `a`; Show emits `xnca`/`xca` for RGBA ColorTables. Uniform `Color.a` still uses `C`. Transparent sort remains object-centroid.
 
 ## Compatibility shims — remove after the migration window
 
@@ -65,6 +59,5 @@ Tagged `// [Compatibility shim]` in source. Delete the whole group in one pass w
 - `plotmesh` / `plotselection` / `plotfield` legacy transparency
 - `POVRaytracer` mirrored camera fields (`viewpoint`, `viewangle`, …)
 - `ColorTable.column`
-- selected lowercase compatibility aliases on Plot
 - ScaleBar `getfontsize` / `drawbar` / `drawlabel`
 - PATH fallback in `findMorphoViewBin` (bare `morphoview`)
