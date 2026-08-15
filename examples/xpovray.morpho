@@ -26,6 +26,8 @@ g.display(Arrow([-1,-1,-1], [-1,-1,-0.5], aspectratio=0.05, color=Blue))
 var ring = []
 for (t in 0...2*Pi:2*Pi/40) ring.append([cos(t), sin(t), 0])
 g.display(Tube(ring, 0.05, color=Gray(0.5), closed=true))
+g.display(Polygon([[-0.4, -0.4, -0.4], [0.4, -0.4, -0.4], [0.4, 0.4, -0.4], [-0.4, 0.4, -0.4]],
+                  color=Color(0.2, 0.4, 0.9, 0.5)))
 g.display(Text("xpovray", [0, 1.2, 0], size=24, color=Black))
 
 var pov = POVRaytracer(g)

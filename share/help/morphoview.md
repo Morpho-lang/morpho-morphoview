@@ -123,6 +123,7 @@ Graphical elements for `display` (from `xgraphics`):
 * `Text(string, posn=, font=, color=, …)` — draw-slot text; move/remove like meshes; string/font via `replace`
 * `TriangleComplex(position, normals, color, connectivity, …)` — triangle mesh
 * `PointCloud` / `LineSet` — points and lines with entry pose
+* `Polygon` — convex planar n-gon; winding defines the normal; tessellates to triangles
 * `Tube` — tube along a path
 
 All of these are `GraphicsPrimitive`s sharing `color`, `filter`, and `transmit`.

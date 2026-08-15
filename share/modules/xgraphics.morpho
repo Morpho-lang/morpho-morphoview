@@ -25,6 +25,8 @@ var _GfxEntryClr = Error("GfxEntryClr",
   "GraphicsEntry.color is a uniform presentation override; ColorTable belongs on the primitive.")
 var _GfxClrTblLen = Error("GfxClrTblLen",
   "ColorTable must have one color per vertex.")
+var _GfxPoly = Error("GfxPoly",
+  "Polygon must be a convex planar n-gon (n>=3); winding defines the normal.")
 
 /* **************************************
  * Utility functions
@@ -820,6 +822,66 @@ class LineSet is GraphicsPrimitive {
     return out
   }
 
+}
+
+/** Convex planar polygon. Vertex winding defines the face normal;
+ *  reverse the vertices to flip it. Tessellates to a TriangleComplex fan. */
+class Polygon is GraphicsPrimitive {
+  init(position, color=nil) {
+    super.init(color=color)
+    self.position = _asVertexMatrix(position)
+    _requireVertexColors(self.color, self.position.dimensions()[1])
+    self._validate()
+  }
+
+  /** Unit geometric normal from winding of the first triangle. */
+  normal() {
+    var p = self.position
+    var n = _cross3D(p.column(1)-p.column(0),
+                     p.column(2)-p.column(0))
+    var nn = n.norm()
+    if (nn < _eps) _GfxPoly.throw()
+    return n/nn
+  }
+
+  _validate() {
+    var p = self.position, d = p.dimensions()
+    var nv = d[1]
+    if (d[0] != 3 || nv < 3) _GfxPoly.throw()
+
+    var n = self.normal()
+    var scale = (p.column(1)-p.column(0)).norm()
+    var eps = max(1e-8, 1e-6*scale)
+
+    for (i in 3...nv) {
+      if (abs((p.column(i)-p.column(0)).inner(n)) > eps)
+        _GfxPoly.throw()
+    }
+
+    for (i in 0...nv) {
+      var a = p.column(i)
+      var b = p.column(mod(i+1, nv))
+      var c = p.column(mod(i+2, nv))
+      if (_cross3D(b-a, c-b).inner(n) < -eps)
+        _GfxPoly.throw()
+    }
+  }
+
+  toTriangleComplex() {
+    var nv = self.position.dimensions()[1]
+    var n = self.normal()
+    var normals = Matrix(3, nv)
+    for (i in 0...nv) normals.setcolumn(i, n)
+
+    var conn = Sparse(nv, nv-2)
+    for (i in 0...nv-2) {
+      var tri = (0, i+1, i+2)
+      for (v in tri) conn[v, i] = 1
+      conn.setrowindices(i, tri)
+    }
+
+    return TriangleComplex(self.position, normals, self.color, conn)
+  }
 }
 
 /* **************************************

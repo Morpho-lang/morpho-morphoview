@@ -1,0 +1,115 @@
+// Polygon → TriangleComplex fan (viewer `f`). Convex; winding defines the normal.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testpolygon.morpho
+
+import xgraphics
+import xcolor
+import xshow
+import xpovray
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn approx(a, b) { return abs(a - b) < 1e-9 }
+fn approxEps(a, b, eps) { return abs(a - b) < eps }
+
+fn contains(s, needle) {
+  var n = needle.count(), m = s.count()
+  if (n > m) return false
+  for (i in 0..(m-n)) {
+    if (s.substring(i, i+n) == needle) return true
+  }
+  return false
+}
+
+fn anyHas(lines, needle) {
+  for (line in lines) {
+    if (contains(line, needle)) return true
+  }
+  return false
+}
+
+fn threwPoly(blk) {
+  var ok = false
+  try {
+    blk()
+  } catch {
+    "GfxPoly" : ok = true
+  }
+  return ok
+}
+
+fn threwTbl(blk) {
+  var ok = false
+  try {
+    blk()
+  } catch {
+    "GfxClrTblLen" : ok = true
+  }
+  return ok
+}
+
+/* ---- triangle: one fan face, +z normal ---- */
+var tri = Polygon([[0, 0, 0], [1, 0, 0], [0, 1, 0]], color=Red)
+expect(tri.position.dimensions()[1] == 3, "triangle vertex count")
+var n = tri.normal()
+expect(approx(n[0], 0) && approx(n[1], 0) && approx(n[2], 1), "+z winding")
+var tc = tri.toTriangleComplex()
+expect(tc.clss() == TriangleComplex, "tessellates to TriangleComplex")
+expect(tc.connectivity.dimensions()[1] == 1, "triangle: one face")
+var fi = tc.faceIndices(0)
+expect(fi.count() == 3 && fi[0] == 0 && fi[1] == 1 && fi[2] == 2, "fan winding 0 1 2")
+expect(approx(tc.normals.column(0)[2], 1), "flat vertex normals")
+
+/* ---- reverse winding flips the normal ---- */
+var flip = Polygon([[0, 0, 0], [0, 1, 0], [1, 0, 0]], color=Blue)
+var nf = flip.normal()
+expect(approx(nf[0], 0) && approx(nf[1], 0) && approx(nf[2], -1), "reversed winding → -z")
+
+/* ---- square: two fan faces ---- */
+var sq = Polygon([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], color=Green)
+expect(sq.toTriangleComplex().connectivity.dimensions()[1] == 2, "square: two triangles")
+expect(approx(sq.normal()[2], 1), "square +z")
+
+/* ---- ColorTable length ---- */
+var tbl = ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
+var pT = Polygon([[0, 0, 0], [1, 0, 0], [0, 1, 0]], color=tbl)
+expect(pT.color.count() == 3, "ColorTable per vertex")
+expect(threwTbl(fn () Polygon([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], color=tbl)),
+       "ColorTable length mismatch throws")
+
+/* ---- degenerate / non-convex / non-planar ---- */
+expect(threwPoly(fn () Polygon([[0, 0, 0], [1, 0, 0]])), "two vertices throws")
+expect(threwPoly(fn () Polygon([[0, 0, 0], [1, 0, 0], [2, 0, 0]])), "collinear throws")
+expect(threwPoly(fn () Polygon([[0, 0, 0], [1, 0, 0], [0.2, 0.2, 0], [0, 1, 0]])),
+       "concave throws")
+expect(threwPoly(fn () Polygon([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 1]])),
+       "non-planar throws")
+
+/* ---- display keeps Polygon; Show tessellates to f ---- */
+var g = Graphics()
+var id = g.display(sq, flat=true)
+expect(g.findEntry(id).item.clss() == Polygon, "display stores Polygon")
+var buf = Buf()
+Show().write(g, buf)
+expect(anyHas(buf.lines, "f"), "Show emits facets")
+expect(anyHas(buf.lines, "0 1 2"), "fan triangle 0 1 2")
+expect(anyHas(buf.lines, "0 2 3"), "fan triangle 0 2 3")
+expect(anyHas(buf.lines, "v \"xn\""), "uniform color uses xn")
+
+var sdl = File(POVRaytracer(g).write("/tmp/testpolygon.pov")).readall()
+expect(contains(sdl, "mesh2"), "POV-Ray mesh2 for Polygon")
+expect(contains(sdl, "vertex_vectors { 4,"), "four vertices")
+expect(contains(sdl, "face_indices { 2,"), "two tessellated faces")
+
+print "ok"

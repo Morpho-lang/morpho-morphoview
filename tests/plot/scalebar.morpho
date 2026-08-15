@@ -123,6 +123,15 @@ expect(tube.item.connectivity.dimensions()[1] == tc[1], "tube wall triangles")
 var fi = tube.item.faceIndices(0)
 expect(fi.count() == 3 && fi[0] != fi[1] && fi[1] != fi[2], "faceIndices winding triple")
 
+var cap0 = gt.displaylist[1]
+var cap1 = gt.displaylist[2]
+expect(cap0.item.clss() == Polygon, "bottom cap is Polygon")
+expect(cap1.item.clss() == Polygon, "top cap is Polygon")
+expect(cap0.flat && cap1.flat, "caps displayed flat/unlit")
+expect(approxEps(cap0.item.normal().inner(sb.dirn), -1, 1e-6), "bottom cap outward -dirn")
+expect(approxEps(cap1.item.normal().inner(sb.dirn), 1, 1e-6), "top cap outward +dirn")
+expect(cap0.item.position.dimensions()[1] == sb.npts, "cap vertex count matches section")
+
 var g = st.draw(0, 1)
 expect(g.displaylist.count() > 1, "strip bar + labels")
 var strip = g.displaylist[0]
@@ -133,10 +142,11 @@ expect(strip.item.position.dimensions()[1] == sc[0], "strip two verts per slice"
 expect(strip.item.color.count() == sc[0], "strip ColorTable count")
 expect(strip.item.connectivity.dimensions()[1] == sc[1], "strip wall triangles only")
 expect(tc[0] > sc[0], "tube has more vertices than strip")
+expect(st.drawBar().displaylist.count() == 1, "strip still uncapped")
 
 /* ---- aliases ---- */
 expect(!isnil(sb.getfontsize(sb.ticks(0, 1, 5))), "getfontsize shim")
-expect(sb.drawbar().displaylist.count() == 1, "drawbar shim")
+expect(sb.drawbar().displaylist.count() == 3, "drawbar: tube + two caps")
 expect(sb.drawlabel(0, 1).displaylist.count() > 0, "drawlabel shim")
 
 /* ---- ranges ---- */

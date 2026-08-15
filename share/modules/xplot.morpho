@@ -7,7 +7,8 @@
  * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot
  * (default style="thick": spheres + tubes, matching classic plot).
  * Presentation: axes=true (domain frame) + scalebar=true / ScaleBar / ScaleBarStrip.
- * ScaleBar is a vertex-colored TriangleComplex (tube; ScaleBarStrip is an open strip).
+ * ScaleBar is a vertex-colored TriangleComplex tube plus Polygon end caps
+ * (ScaleBarStrip is an open strip, no caps).
  * Built locally: cross-section → positions / normals / ColorTable / connectivity. No meshtools.
  * Field coloring: linear normalize (safe on uniform fields) + optional center= for diverging maps.
  * Live: axes / colormap / range / center / refresh [view] mutate Scene (fields: morph via View, not recolor).
@@ -679,7 +680,7 @@ fn _smoothVertexNormals(mesh, vertMat, centroid, selection=nil) {
 }
 
 /* *******************************************************************************************
- * ScaleBar — tube TriangleComplex; ScaleBarStrip is an open strip
+ * ScaleBar — tube TriangleComplex + Polygon end caps; ScaleBarStrip is an open strip
  ******************************************************************************************* */
 
 class ScaleBar {
@@ -791,7 +792,18 @@ class ScaleBar {
       var th = 2*Pi*j/n
       sec.append((r*cos(th), r*sin(th)))
     }
-    return self._show(self._mesh(sec, true))
+    var mesh = self._mesh(sec, true)
+    var pos = mesh.position, nv = pos.dimensions()[1]
+    var lower = Matrix(3, n), upper = Matrix(3, n)
+    for (j in 0...n) {
+      lower.setColumn(j, pos.column(j))
+      upper.setColumn(j, pos.column(nv-1-j)) // reverse last ring → outward +dirn
+    }
+    var g = Graphics()
+    g.display(mesh, flat=true)
+    g.display(Polygon(lower, color=self.colormap.color(0)), flat=true)
+    g.display(Polygon(upper, color=self.colormap.color(1)), flat=true)
+    return g
   }
   drawbar() { return self.drawBar() } // [Compatibility shim]
 
