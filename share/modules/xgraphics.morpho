@@ -81,11 +81,13 @@ fn _orthogonalize(m) {
 /** Coerce list or Matrix to a stored position Matrix (3-vector). nil → origin. */
 fn _asPosition(Matrix p) { return p.clone() }
 fn _asPosition(List p) { return Matrix(p) }
+fn _asPosition(Tuple p) { return Matrix(p) }
 fn _asPosition(p) { return isnil(p) ? Matrix([0, 0, 0]) : Matrix(p) }
 
 /** Coerce scale: nil → 1; scalar; or 3-vector Matrix (non-uniform). */
 fn _asScale(Matrix s) { return s.clone() }
 fn _asScale(List s) { return Matrix(s) }
+fn _asScale(Tuple s) { return Matrix(s) }
 fn _asScale(s) { return isnil(s) ? 1 : s }
 
 /** Scalar radius for sphere refine / mesh keys (max |component| if Matrix/list). */
@@ -96,6 +98,7 @@ fn _effectiveRadius(Matrix scale) {
   return m
 }
 fn _effectiveRadius(List scale) { return _effectiveRadius(Matrix(scale)) }
+fn _effectiveRadius(Tuple scale) { return _effectiveRadius(Matrix(scale)) }
 fn _effectiveRadius(scale) { return isnil(scale) ? 1 : scale }
 
 // Public aliases — Morpho `_` helpers are not imported across modules.
@@ -323,7 +326,7 @@ class Cylinder is GraphicsPrimitive {
 
 /* Unit UV-sphere by level (cached). No meshtools. */
 
-var _sphereCache = Dictionary() // level → [verts, faces]
+var _sphereCache = Dictionary() // level → (verts, faces)
 
 /** Vertex index: poles are 0 / nv-1; else ring i∈1…st−1, slot j. */
 fn _sphereIx(i, j, st, sl, nv) {
@@ -350,15 +353,15 @@ fn _uvSphere(level) {
         var jn = mod(j + 1, sl)
         var a = _sphereIx(i, j, st, sl, nv), b = _sphereIx(i, jn, st, sl, nv)
         var c = _sphereIx(i + 1, j, st, sl, nv), d = _sphereIx(i + 1, jn, st, sl, nv)
-        if (a == b || c == d) tris.append(a == b ? [a, c, d] : [a, c, b])
-        else { tris.append([a, c, b]); tris.append([b, c, d]) }
+        if (a == b || c == d) tris.append(a == b ? (a, c, d) : (a, c, b))
+        else { tris.append((a, c, b)); tris.append((b, c, d)) }
       }
     }
   }
   var f = Sparse(nv, tris.count())
   for (tri, i in tris) { for (p in tri) f[p, i] = 1 }
   for (tri, i in tris) f.setrowindices(i, tri)
-  _sphereCache[level] = [v, f]
+  _sphereCache[level] = (v, f)
   return _sphereCache[level]
 }
 
@@ -385,9 +388,8 @@ class Sphere is GraphicsPrimitive {
     var col = self.color
     var mesh = _uvSphere(self._refinementLevel(isnil(radiusforrefine) ? self.r : radiusforrefine))
     var unit = mesh[0], v = unit.clone(), nv = v.dimensions()[1]
-    var x0 = islist(self.center) ? Matrix(self.center) : self.center
+    var x0 = scale ? _asPosition(self.center) : Matrix([0, 0, 0])
     var r = scale ? self.r : 1
-    if (!scale) x0 = Matrix([0, 0, 0])
     for (i in 0...nv) v.setcolumn(i, x0 + r * unit.column(i))
     return TriangleComplex(v, unit.clone(), col, mesh[1].clone())
   }
@@ -592,13 +594,8 @@ class Text is GraphicsPrimitive {
   init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil, filter=nil, transmit=nil) {
     super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.posn = _asPosition(posn)
-
-    self.dirn = dirn // Direction of flow for the text
-    if (islist(self.dirn)) self.dirn = Matrix(self.dirn)
-
-    self.vertical = vertical // Vertical direction
-    if (islist(self.vertical)) self.vertical = Matrix(self.vertical)
-
+    self.dirn = isnil(dirn) ? nil : _asPosition(dirn)
+    self.vertical = isnil(vertical) ? nil : _asPosition(vertical)
     self.string = string
     self.font = font
     self.size = size
@@ -625,7 +622,7 @@ class Text is GraphicsPrimitive {
 
 /** Copy Text with origin posn — pose lives on the GraphicsEntry (Phase 5f). */
 fn _textAtOrigin(Text item) {
-  return Text(item.string, [0, 0, 0], dirn=item.dirn, vertical=item.vertical,
+  return Text(item.string, (0, 0, 0), dirn=item.dirn, vertical=item.vertical,
               size=item.size, font=item.font, color=item.color)
 }
 
@@ -635,6 +632,11 @@ fn _textAtOrigin(Text item) {
 
 /** Flat index list for GL_LINES from connectivity (nil → polyline). */
 fn _segIndices(List conn, nv, closed) {
+  var out = []
+  for (seg in conn) { out.append(seg[0]); out.append(seg[1]) }
+  return out
+}
+fn _segIndices(Tuple conn, nv, closed) {
   var out = []
   for (seg in conn) { out.append(seg[0]); out.append(seg[1]) }
   return out

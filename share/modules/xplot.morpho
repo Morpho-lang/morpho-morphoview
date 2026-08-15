@@ -475,11 +475,11 @@ fn _wirebox(lo, hi, color) {
     [y0, y0, y1, y1, y0, y0, y1, y1],
     [z0, z0, z0, z0, z1, z1, z1, z1]
   ])
-  var edges = [
-    [0, 1], [1, 2], [2, 3], [3, 0],
-    [4, 5], [5, 6], [6, 7], [7, 4],
-    [0, 4], [1, 5], [2, 6], [3, 7]
-  ]
+  var edges = (
+    (0, 1), (1, 2), (2, 3), (3, 0),
+    (4, 5), (5, 6), (6, 7), (7, 4),
+    (0, 4), (1, 5), (2, 6), (3, 7)
+  )
   return LineSet(pos, edges, color=color)
 }
 
@@ -502,7 +502,7 @@ fn _domainWire(bnds, color) {
       [x0, x1, x1, x0],
       [y0, y0, y1, y1],
       [z, z, z, z]
-    ]), [[0, 1], [1, 2], [2, 3], [3, 0]], color=color)
+    ]), ((0, 1), (1, 2), (2, 3), (3, 0)), color=color)
   }
 
   return _wirebox(lo, hi, color)
@@ -1121,7 +1121,7 @@ class Plot is Scene {
         var rgb = _plotColorColumn(_plotColorForElement(lcol, i), nch)
         ecol.setColumn(2*k, rgb)
         ecol.setColumn(2*k + 1, rgb)
-        edges.append([2*k, 2*k + 1])
+        edges.append((2*k, 2*k + 1))
       }
       self._recordEntry("lines",
         self.display(LineSet(pos, edges, color=ColorTable(ecol))))
@@ -1130,7 +1130,7 @@ class Plot is Scene {
       var edges = []
       for (i in segs) {
         var el = lines.rowindices(i)
-        edges.append([el[0], el[1]])
+        edges.append((el[0], el[1]))
       }
       self._recordEntry("lines",
         self.display(LineSet(vertMat, edges, color=lcol)))

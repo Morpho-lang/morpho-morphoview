@@ -7,9 +7,9 @@ class FontFinder {
 
   folders() {
     var platform = System.platform()
-    if (platform=="macos") return ["/System/Library/Fonts"]
-    if (platform=="windows") return [Folder.normalizePath("C:/Windows/Fonts")]
-    return ["/usr/share/fonts", "/usr/local/share/fonts"]
+    if (platform=="macos") return ("/System/Library/Fonts",)
+    if (platform=="windows") return (Folder.normalizePath("C:/Windows/Fonts"),)
+    return ("/usr/share/fonts", "/usr/local/share/fonts")
   }
 
   match(file, font) {
@@ -54,24 +54,21 @@ class FontFinder {
   /** Platform default body face (Helvetica / arial / FreeSans). */
   default() {
     var platform = System.platform()
-    var candidates
     if (platform=="macos") {
-      candidates = ["Helvetica", "Arial", "DejaVuSans", "FreeSans"]
+      return self.pick(("Helvetica", "Arial", "DejaVuSans", "FreeSans"))
     } else if (platform=="windows") {
-      candidates = ["arial", "segoeui", "calibri", "tahoma"]
-    } else {
-      candidates = ["DejaVuSans", "FreeSans", "LiberationSans", "NimbusSans-Regular", "Ubuntu-R"]
+      return self.pick(("arial", "segoeui", "calibri", "tahoma"))
     }
-    return self.pick(candidates)
+    return self.pick(("DejaVuSans", "FreeSans", "LiberationSans", "NimbusSans-Regular", "Ubuntu-R"))
   }
 
   /** Math / emoji / symbol coverage when available. */
   symbol() {
-    return self.pick(["Apple Symbols", "seguisym", "DejaVuSans", "FreeSans", "Symbola"])
+    return self.pick(("Apple Symbols", "seguisym", "DejaVuSans", "FreeSans", "Symbola"))
   }
 
   /** CJK body face when available. */
   cjk() {
-    return self.pick(["Hiragino Sans GB", "msyh", "NotoSansCJK-Regular", "NotoSansCJKjp-Regular", "TakaoPGothic"])
+    return self.pick(("Hiragino Sans GB", "msyh", "NotoSansCJK-Regular", "NotoSansCJKjp-Regular", "TakaoPGothic"))
   }
 }
