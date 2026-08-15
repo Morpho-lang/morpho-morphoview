@@ -23,7 +23,7 @@ var seedCol = Color(1, 0.82, 0.38)
 var walkerCol = Color(0.95, 0.97, 1)
 var proto = Sphere([0, 0, 0], 1, color=White, maxrefine=2)
 
-fn randompt() {
+fn randomPt() {
   var x = Matrix([randomnormal(), randomnormal(), randomnormal()])
   return R*x/x.norm()
 }
@@ -47,7 +47,7 @@ var tree = KDTree(pts)
 var g = Scene(title="DLA", background=Color(0.07, 0.08, 0.1))
 g.display(proto, origin, scale=r, color=seedCol)
 
-var x = randompt()
+var x = randomPt()
 var walker = g.display(proto, x, scale=r, color=walkerCol)
 var v = View(g, connecttimeout=20000)
 
@@ -70,14 +70,14 @@ while (n < Np) {
       break
     }
 
-    if (x.norm() > 2*R) x = randompt()
+    if (x.norm() > 2*R) x = randomPt()
   }
 
   if (stuck) {
     g.beginBatch()
     g.move(walker, x)
     g.recolor(walker, clusterColor(n))
-    x = randompt()
+    x = randomPt()
     walker = g.display(proto, x, scale=r, color=walkerCol)
     g.endBatch()
   } else {

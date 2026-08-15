@@ -15,7 +15,7 @@ var lo = [-1.0, -1.0, -1.0]
 var hi = [ 1.0,  1.0,  1.0]
 
 /** Unit wireframe box as a LineSet (12 edges). */
-fn wirebox(lo, hi, color) {
+fn wireBox(lo, hi, color) {
   var x0 = lo[0], x1 = hi[0]
   var y0 = lo[1], y1 = hi[1]
   var z0 = lo[2], z1 = hi[2]
@@ -34,7 +34,7 @@ fn wirebox(lo, hi, color) {
 }
 
 /** Evenly spaced tick values from a to b inclusive (n ≥ 2). */
-fn tickvalues(a, b, n) {
+fn tickValues(a, b, n) {
   var out = []
   if (n < 2) {
     out.append(a)
@@ -45,13 +45,13 @@ fn tickvalues(a, b, n) {
 }
 
 /** Format a tick label without excess zeros. */
-fn ticklabel(t) {
+fn tickLabel(t) {
   var s = Float(t).format("%0.4g")
   return s
 }
 
 /** RGB axes from the low corner, white names, numerical ticks with marks. */
-fn framelabels(lo, hi, size=18, ticksize=12, nticks=5) {
+fn frameLabels(lo, hi, size=18, ticksize=12, nticks=5) {
   var g = Graphics()
   var o = Matrix(lo)
   var sx = hi[0] - lo[0]
@@ -82,9 +82,9 @@ fn framelabels(lo, hi, size=18, ticksize=12, nticks=5) {
                  dirn=[1, 0, 0], vertical=[0, 1, 0], size=size, color=White))
 
   // Numerical ticks along each spine
-  var xt = tickvalues(lo[0], hi[0], nticks)
-  var yt = tickvalues(lo[1], hi[1], nticks)
-  var zt = tickvalues(lo[2], hi[2], nticks)
+  var xt = tickValues(lo[0], hi[0], nticks)
+  var yt = tickValues(lo[1], hi[1], nticks)
+  var zt = tickValues(lo[2], hi[2], nticks)
 
   // x-axis ticks: marks in -y, labels further along -y
   for (t in xt) {
@@ -92,7 +92,7 @@ fn framelabels(lo, hi, size=18, ticksize=12, nticks=5) {
     var p1 = Matrix([t, lo[1] - ticklen, lo[2]])
     g.display(LineSet(Matrix([[p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]]]),
                       color=tickColor))
-    g.display(Text(ticklabel(t), Matrix([t, lo[1] - labeloff, lo[2]]),
+    g.display(Text(tickLabel(t), Matrix([t, lo[1] - labeloff, lo[2]]),
                    dirn=[1, 0, 0], vertical=[0, 1, 0], size=ticksize, color=White))
   }
 
@@ -102,7 +102,7 @@ fn framelabels(lo, hi, size=18, ticksize=12, nticks=5) {
     var p1 = Matrix([lo[0] - ticklen, t, lo[2]])
     g.display(LineSet(Matrix([[p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]]]),
                       color=tickColor))
-    g.display(Text(ticklabel(t), Matrix([lo[0] - labeloff, t, lo[2]]),
+    g.display(Text(tickLabel(t), Matrix([lo[0] - labeloff, t, lo[2]]),
                    dirn=[1, 0, 0], vertical=[0, 1, 0], size=ticksize, color=White))
   }
 
@@ -112,7 +112,7 @@ fn framelabels(lo, hi, size=18, ticksize=12, nticks=5) {
     var p1 = Matrix([lo[0] - ticklen, lo[1], t])
     g.display(LineSet(Matrix([[p0[0], p1[0]], [p0[1], p1[1]], [p0[2], p1[2]]]),
                       color=tickColor))
-    g.display(Text(ticklabel(t), Matrix([lo[0] - labeloff, lo[1], t]),
+    g.display(Text(tickLabel(t), Matrix([lo[0] - labeloff, lo[1], t]),
                    dirn=[1, 0, 0], vertical=[0, 1, 0], size=ticksize, color=White))
   }
 
@@ -120,7 +120,7 @@ fn framelabels(lo, hi, size=18, ticksize=12, nticks=5) {
 }
 
 /** Point cloud colored by height (z), jittered inside the box. */
-fn heightcloud(n, lo, hi) {
+fn heightCloud(n, lo, hi) {
   var pos = Matrix(3, n)
   var col = Matrix(3, n)
   var dx = hi[0] - lo[0]
@@ -142,9 +142,9 @@ fn heightcloud(n, lo, hi) {
 /* ---- scene ---- */
 var g = Graphics()
 g.title = "Plot frame"
-g.display(wirebox(lo, hi, Color(0.55, 0.55, 0.6)))
-g = g + framelabels(lo, hi)
-g.display(heightcloud(400, lo, hi))
+g.display(wireBox(lo, hi, Color(0.55, 0.55, 0.6)))
+g = g + frameLabels(lo, hi)
+g.display(heightCloud(400, lo, hi))
 
 var v = View()
 if (!v.open(g)) {

@@ -43,7 +43,7 @@ fn worldPos(x, y, z) {
 }
 
 /* Magenta wireframe floor + back wall, pitched for default −Z camera. */
-fn wireroom(half, n, height) {
+fn wireRoom(half, n, height) {
   var pts = []
   var segs = []
   var h = 2*half/Float(n)
@@ -86,7 +86,7 @@ fn wireroom(half, n, height) {
   return LineSet(pts, segs, color=roomWire)
 }
 
-fn checkersphere(nlat, nlon) {
+fn checkerSphere(nlat, nlon) {
   var nv = nlat*nlon*4
   var pos = Matrix(3, nv)
   var nrm = Matrix(3, nv)
@@ -134,31 +134,14 @@ fn checkersphere(nlat, nlon) {
   return TriangleComplex(pos, nrm, col, Sparse(triplets))
 }
 
-fn unitshadow() {
+fn unitShadow() {
   var n = 28
-  var pos = Matrix(3, n+1)
-  var nrm = Matrix(3, n+1)
-  var col = Matrix(3, n+1)
-  var triplets = []
-  var nn = pitchN([0, 1, 0])
-  var p0 = pitchPt([0, 0.02, 0])
-  pos[0,0]=p0[0]; pos[1,0]=p0[1]; pos[2,0]=p0[2]
-  nrm[0,0]=nn[0]; nrm[1,0]=nn[1]; nrm[2,0]=nn[2]
-  col[0,0]=ballShadow.r; col[1,0]=ballShadow.g; col[2,0]=ballShadow.b
+  var ring = []
   for (i in 0...n) {
-    var a = 2*Pi*Float(i)/Float(n)
-    var pp = pitchPt([cos(a), 0.02, 0.65*sin(a)])
-    pos[0,i+1]=pp[0]; pos[1,i+1]=pp[1]; pos[2,i+1]=pp[2]
-    nrm[0,i+1]=nn[0]; nrm[1,i+1]=nn[1]; nrm[2,i+1]=nn[2]
-    col[0,i+1]=ballShadow.r; col[1,i+1]=ballShadow.g; col[2,i+1]=ballShadow.b
+    var a = -2*Pi*Float(i)/Float(n) // −θ so winding normal is +Y before pitch
+    ring.append(pitchPt([cos(a), 0.02, 0.65*sin(a)]))
   }
-  for (i in 0...n) {
-    var j = i+1
-    if (j == n) j = 0
-    triplets.append([0,i,1]); triplets.append([i+1,i,1]); triplets.append([j+1,i,1])
-  }
-  var sh = TriangleComplex(pos, nrm, ballShadow.opacity(0.65), Sparse(triplets))
-  return sh
+  return Polygon(ring, color=ballShadow.opacity(0.65))
 }
 
 fn shadowScale(cy) {
@@ -180,9 +163,9 @@ var g = Scene(title="Boing", background=roomGrey)
    translucent-then-vertex-color case); ball last. */
 var sp = worldPos(x, 0.04, z)
 var bp = worldPos(x, y, z)
-var shadow = g.display(unitshadow(), sp, scale=shadowScale(y), flat=true)
-g.display(wireroom(roomHalf, roomTiles, wallH))
-var ball = g.display(checkersphere(nLat, nLon), bp, scale=ballR, rotate=[angle, 0, 1, 0],
+var shadow = g.display(unitShadow(), sp, scale=shadowScale(y), flat=true)
+g.display(wireRoom(roomHalf, roomTiles, wallH))
+var ball = g.display(checkerSphere(nLat, nLon), bp, scale=ballR, rotate=[angle, 0, 1, 0],
                      flat=true)
 
 var v = View(g, connecttimeout=10000)
