@@ -22,7 +22,7 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
 - [ ] Extend morpho `color` module with alpha (`Color(r,g,b)` / `Color(r,g,b,a)` via MD, always store `a`; `rgba` / `alpha`); `Coloring` shared kind; ColorMap not a Color; wire `Show` via Coloring MD — **prototyped in package `xcolor` + `xgraphics`**
 - [ ] `xcolor` backlog: `Normalizer` / `LinearNorm` / `LogNorm` + `ColorScale` (under/over/bad); `ListedMap` + `reverse` / `truncate` / `discretize`; perceptual / named scientific cyclic (`PhaseMap`); optional `HueMap` → `HSVMap` alias; bulk `colors(values)` if mesh coloring needs it
-- [ ] Modernize morpho `plot` against xgraphics / xcolor — **prototyped in package `xplot`** (Phases 1–5 done: `Plot is Scene`, bulk primitives, axes/`ScaleBar`, normalize/`center=`, live `axes`/`colormap`/`range`/`center`/`refresh(view)`; ScaleBar is a meshtools-free tube, `ScaleBarStrip` for a flat bar). **Dogfood next**; `xnca` per-vertex alpha and optional `plotvectors` are future refinements.
+- [ ] Modernize morpho `plot` against xgraphics / xcolor — **prototyped in package `xplot`** (Phases 1–5 done: `Plot is Scene`, bulk primitives, axes/`ScaleBar`, normalize/`center=`, live `axes`/`colormap`/`range`/`center`/`refresh(view)`; ScaleBar is a meshtools-free tube, `ScaleBarStrip` for a flat bar). **Dogfood next**; optional `plotvectors` is a future refinement.
 
 ### Transport
 
@@ -42,7 +42,7 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 
 ### Viewer polish
 
-- [ ] **Per-vertex alpha** — today `v "xnc"` is opaque RGB; translucency is uniform (`C` RGBA / `Color.a`), including as a draw-slot override on ColorTable geometry. Add a format such as `v "xnca"` so interpolated field plots can honor `Opacity(colormap, a)` / maps with varying alpha. Wire through Show (`TriangleComplex` / PointCloud / LineSet), `U V`, and transparent sort (still object-centroid until finer OIT). Motivated by `Plot(field, colormap=Opacity(ViridisMap(), …))`.
+- [x] **Per-vertex alpha** — format letter `a` (1 float); Show emits `xnca`/`xca` for RGBA ColorTables. Uniform `Color.a` still uses `C`. Transparent sort remains object-centroid. Motivated by `Plot(field, colormap=Opacity(ViridisMap(), …))`.
 - [ ] Transparent centroid cache — recompute object AABB centroid only when geometry changes, not every frame
 - [ ] Draw-list hygiene — merge adjacent draws that share VAO/material when packing the renderlist (matters at larger object counts)
 

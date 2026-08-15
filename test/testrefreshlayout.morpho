@@ -1,5 +1,5 @@
-// Phase 5dx.2: U V / refreshMesh float layout matches define (xn vs xnc).
-// ColorTable stays xnc; uniform Color (opaque or translucent) uses xn.
+// Phase 5dx.2: U V / refreshMesh float layout matches define (xn / xnc / xnca).
+// ColorTable RGB is xnc; RGBA is xnca; uniform Color uses xn.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testrefreshlayout.morpho
@@ -66,6 +66,15 @@ fn makeTri(alpha) {
     Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
     Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
     Color(1, 0, 0, alpha),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn makeTriRgba() {
+  return TriangleComplex(
+    Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    ColorTable(Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0], [0.4, 0.5, 0.6]])),
     Matrix([[1], [1], [1]])
   )
 }
@@ -150,5 +159,24 @@ var bufRep = Buf()
 expect(showU.emitEntryReplace(gUni, idUni, bufRep), "replace after xn→xnc")
 expect(showU.slots[idUni].layout == "xnc", "replace updates slot to xnc")
 expect(!hasPrefix(bufRep.lines[0], "U V "), "replace is not U V")
+
+/* ---- RGBA ColorTable: define xnca, morph xnca (3 verts × 10 floats) ---- */
+var gA = Scene()
+var idA = gA.display(makeTriRgba())
+var showA = Show()
+var defineA = Buf()
+showA.write(gA, defineA)
+expect(showA.slots[idA].layout == "xnca", "RGBA layout is xnca")
+var sawXnca = false
+for (line in defineA.lines) {
+  if (line == "v \"xnca\"") sawXnca = true
+}
+expect(sawXnca, "RGBA define emits v \"xnca\"")
+var morphA = Buf()
+expect(showA.emitEntryVertices(gA, idA, morphA), "RGBA morph emits")
+expect(countUvFloats(morphA.lines) == 30, "RGBA morph is 3×10 floats")
+expect(showA.canRefreshVertices(idA, makeTriRgba()), "xnca → xnca can U V")
+expect(!showA.canRefreshVertices(idA, makeTri()), "xnca → xnc cannot U V")
+expect(!showO.canRefreshVertices(idOpaque, makeTriRgba()), "xnc → xnca cannot U V")
 
 print "ok"

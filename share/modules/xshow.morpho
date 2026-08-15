@@ -12,9 +12,6 @@ import xcolor
 import xfonts
 
 var _fntntfnd = Error("FntNtFnd", "Font not found.")
-var _GfxXnca = Error("GfxXnca",
-  "ColorTable per-vertex alpha is dropped until the viewer supports xnca.")
-var _warnedXnca = false
 
 /** Escape `\` and `"` for morphoview quoted protocol strings. */
 fn _mvEscape(s) {
@@ -334,20 +331,8 @@ class Show {
   _perElement(Coloring col) { return false }
   _perElement(col) { return false }
 
-  // [Compatibility shim]
-  _warnDroppedVertexAlpha(ColorTable col) {
-    if (_warnedXnca) return
-    if (col.channels() < 4) return
-    var n = col.count()
-    for (i in 0...n) {
-      if (col.alpha(i) < 0.999) {
-        _warnedXnca = true
-        _GfxXnca.warning("ColorTable per-vertex alpha is not sent to the viewer yet (no xnca). Use uniform Color.a.")
-        return
-      }
-    }
-  }
-  _warnDroppedVertexAlpha(col) { }
+  _tableHasAlpha(ColorTable col) { return col.channels() >= 4 }
+  _tableHasAlpha(col) { return false }
 
   _rgbValue(Coloring col) { return col.rgb(0) }
   _rgbValue(col) { return Gray(0.5).rgb(0) }
@@ -452,9 +437,10 @@ class Show {
     return true
   }
 
-  /** Vertex format Show would emit for this item (`xn` / `xnc`), or nil if not a mesh. */
+  /** Vertex format Show would emit for this item (`xn` / `xnc` / `xnca`), or nil if not a mesh. */
   vertexLayoutOf(TriangleComplex item) {
-    return self._perElement(item.color) ? "xnc" : "xn"
+    if (!self._perElement(item.color)) return "xn"
+    return self._tableHasAlpha(item.color) ? "xnca" : "xnc"
   }
   vertexLayoutOf(item) { return nil }
 
@@ -467,8 +453,8 @@ class Show {
   }
 
   /** Same-length vertex replace for a mapped TriangleComplex (`U V`).
-   *  Float layout must match define (`xn` vs `xnc`); returns false if unmapped,
-   *  wrong type, layout unknown, or xn↔xnc (never emit a length the viewer will drop). */
+   *  Float layout must match define (`xn` / `xnc` / `xnca`); returns false if unmapped,
+   *  wrong type, layout unknown, or a layout change (never emit a length the viewer will drop). */
   emitEntryVertices(graphic, graphicsId, out) {
     if (!self.slots.contains(graphicsId)) return false
     var entry = graphic.findEntry(graphicsId)
@@ -482,7 +468,7 @@ class Show {
     var layout = slot.layout
     var vid = slot.objectid
     out.write("U V ${vid}")
-    if (layout == "xnc") {
+    if (layout == "xnc" || layout == "xnca") {
       self._triangleComplexVertexFloats(item, out, includecolor=true)
     } else if (layout == "xn") {
       self._triangleComplexVertexFloats(item, out, includecolor=false)
@@ -525,8 +511,9 @@ class Show {
   }
 
   triangleComplexObjectData(item, out, includecolor=true) {
+    var hasA = includecolor && self._tableHasAlpha(item.color)
     if (includecolor) {
-      out.write("v \"xnc\"")
+      out.write(hasA ? "v \"xnca\"" : "v \"xnc\"")
     } else {
       out.write("v \"xn\"")
     }
@@ -542,13 +529,13 @@ class Show {
     }
   }
 
-  /** Position + normal [+ RGB] float rows only (shared by define `v` and `U V`).
-   *  ColorTable per-vertex alpha is dropped until viewer xnca. */
+  /** Position + normal [+ RGB [+ alpha]] float rows (shared by define `v` and `U V`). */
   _triangleComplexVertexFloats(item, out, includecolor=true) {
     var x = item.position
     var n = item.normals
     var col = item.color
     var indexed = self._perElement(col)
+    var includealpha = includecolor && self._tableHasAlpha(col)
     var rgb = indexed ? nil : self._rgbValue(col)
     var dimensions = x.dimensions()
     var dim = dimensions[0]
@@ -561,6 +548,7 @@ class Show {
       if (includecolor) {
         var c = indexed ? col.rgb(i) : rgb
         line += "${self.fmt(c[0])} ${self.fmt(c[1])} ${self.fmt(c[2])} "
+        if (includealpha) line += "${self.fmt(col.alpha(i))} "
       }
       out.write(line)
     }
@@ -580,7 +568,6 @@ class Show {
    *  Does not emit `C` — draw-slot select is written immediately before `d`. */
   _stampUniformC(entry, item, out) {
     var hasTable = self._perElement(item.color)
-    if (hasTable) self._warnDroppedVertexAlpha(item.color)
     self._lastColorId = nil
     self._lastVertexLayout = nil
     if (!hasTable || !isnil(entry.color)) {
@@ -590,28 +577,29 @@ class Show {
   }
 
   /** Define a TriangleComplex (`o`/`v`/`f`); returns viewer object id.
-   *  Uniform coloring → `xn`. ColorTable → `xnc`. `C` is emitted at draw time. */
+   *  Uniform coloring → `xn`. ColorTable → `xnc` / `xnca`. `C` is emitted at draw time. */
   defineTriangleComplex(entry, item, out) {
     var id = self.uid()
     var hasTable = self._stampUniformC(entry, item, out)
-    self._lastVertexLayout = hasTable ? "xnc" : "xn"
+    self._lastVertexLayout = hasTable ? self.vertexLayoutOf(item) : "xn"
     out.write("o ${id}")
     self.triangleComplexObjectData(item, out, includecolor=hasTable)
     return id
   }
 
-  /** Emit vertex positions (+ optional per-vertex RGB) for points/lines. */
+  /** Emit vertex positions (+ optional per-vertex RGB [+ alpha]) for points/lines. */
   pointLineVertexData(item, out, includecolor=true) {
     var x = item.position
     var col = item.color
     var indexed = self._perElement(col)
+    var includealpha = includecolor && self._tableHasAlpha(col)
     var rgb = indexed ? nil : self._rgbValue(col)
     var dimensions = x.dimensions()
     var dim = dimensions[0]
     var nv = dimensions[1]
 
     if (includecolor) {
-      out.write("v \"xc\"")
+      out.write(includealpha ? "v \"xca\"" : "v \"xc\"")
     } else {
       out.write("v \"x\"")
     }
@@ -622,6 +610,7 @@ class Show {
       if (includecolor) {
         var c = indexed ? col.rgb(i) : rgb
         line += "${self.fmt(c[0])} ${self.fmt(c[1])} ${self.fmt(c[2])} "
+        if (includealpha) line += "${self.fmt(col.alpha(i))} "
       }
       out.write(line)
     }

@@ -95,6 +95,13 @@ var faceM = pMap.findEntry(pMap.entries["faces"][0]).item
 expect(faceM.color.clss() == ColorTable && faceM.color.channels() == 4, "map opacity → ColorTable RGBA")
 expect(approx(faceM.color.alpha(0), 0.5), "colormap opacity kept")
 expect(pMap.findEntry(pMap.entries["faces"][0]).flat == false, "interpolated faces not flat")
+var bufMap = Buf()
+Show().write(pMap, bufMap)
+var sawXncaMap = false
+for (line in bufMap.lines) {
+  if (line == "v \"xnca\"") sawXncaMap = true
+}
+expect(sawXncaMap, "interpolated Opacity colormap emits xnca")
 
 /* ---- center= with diverging map ---- */
 var fSigned = Field(am, fn (x, y, z) x) // on [0,1]

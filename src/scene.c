@@ -187,6 +187,7 @@ static int scene_entrysizefromformat(scene *s, char *format) {
             case 'x':
             case 'n': size+=s->dim; break;
             case 'c': size+=3; break;
+            case 'a': size+=1; break;
             default: break;
         }
     }
@@ -301,6 +302,7 @@ bool scene_computebbox(scene *s) {
         for (char *c=obj->vertexdata.format; *c!='\0' && *c!='x'; c++) {
             if (*c=='n') xpos+=s->dim;
             else if (*c=='c') xpos+=3;
+            else if (*c=='a') xpos+=1;
         }
 
         float *M=NULL;

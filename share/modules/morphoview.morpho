@@ -6,7 +6,7 @@
  *    var v = View(scene)            // open + listen
  *    v.open(commands)               // or ASCII chunk
  *    scene.move(id, ...)            // → pose-only d / C
-   *    v.morph(id, item)              // same-layout U V; xn↔xnc → replace
+   *    v.morph(id, item)              // same-layout U V; layout change → replace
  *    v.poll(timeoutms=0)
  *    v.wait(sessiontimeout=1500)
  *    v.close()
@@ -217,8 +217,8 @@ class View with Listener {
     return self._sendWait(self._takeCommands())
   }
 
-  /** Swap item and push vertices. `U V` only when the slot layout matches (`xn`→`xn`
-   *  or `xnc`→`xnc`); `xn`↔`xnc` falls back to a full object replace. Validates the
+  /** Swap item and push vertices. `U V` only when the slot layout matches
+   *  (`xn`/`xnc`/`xnca`); a layout change falls back to a full object replace. Validates the
    *  Show slot before mutating; rolls back the Scene item if the emit fails. */
   morph(graphicsId, item) {
     if (self.closed || isnil(self.graphics) || isnil(self.show)) return false
@@ -245,7 +245,7 @@ class View with Listener {
     return true
   }
 
-  /** Push U V for a TriangleComplex entry (layout must match define: xn / xnc). */
+  /** Push U V for a TriangleComplex entry (layout must match define: xn / xnc / xnca). */
   refreshMesh(graphicsId) {
     if (self.closed || isnil(self.show) || isnil(self.graphics)) return false
     return self._emitAndWait(fn () {

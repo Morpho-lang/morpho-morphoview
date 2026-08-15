@@ -94,10 +94,11 @@ I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V
 - **`M shaded`** (default) — Phong/Lambert; defaults \(k_a=k_d=0.5\), \(k_s=0\). Optional floats override coeffs.
 - **`M flat`** — unlit albedo (diagrams / categorical color).
 - **Uniform color:** `c` / `C` then `v "xn"` (or `v "x"` for points/lines) — `C` sets albedo (and optional alpha) for subsequent draws.
-- **Vertex color:** `v "xnc"` / `v "xc"` with a draw-slot in empty color mode — per-vertex RGB is the albedo (opaque). `C <id>` on the same draw-slot is a uniform override that hides vertex colors without redefining geometry. Bare `C` then `d` clears that override. `d` without a preceding `C` preserves the current mode. Package `Show` emits `C` or `C <id>` immediately before each `d` so the color mode is self-contained (bare `C` for an intrinsic ColorTable).
-- **Opacity:** `c <id> <r g b a>` — opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off. Transparent objects sorted **far → near** by object centroid. Closed translucent meshes draw back faces then front. Not triangle-level / OIT — intersecting translucents can still artifact.
+- **Vertex format:** `v` / `U V` take a format string whose letters name fields in order: `x` position (`dim` floats), `n` normal (`dim`), `c` RGB (3), `a` alpha (1). Missing `c`/`n`/`a` use defaults (white, +z, alpha 1). Typical Show layouts: `xn`, `xnc`, `xnca`, `x`, `xc`, `xca`.
+- **Vertex color:** `v "xnc"` / `v "xc"` with a draw-slot in empty color mode — per-vertex RGB is the albedo (opaque unless `a` is also present). `C <id>` on the same draw-slot is a uniform RGB override that hides vertex colors without redefining geometry; vertex `a` is unchanged. Bare `C` then `d` clears that override. `d` without a preceding `C` preserves the current mode. Package `Show` emits `C` or `C <id>` immediately before each `d` so the color mode is self-contained (bare `C` for an intrinsic ColorTable).
+- **Opacity:** `c <id> <r g b a>` — opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off. A format that includes `a` is treated as transparent. Transparent objects sorted **far → near** by object centroid. Closed translucent meshes draw back faces then front. Not triangle-level / OIT — intersecting translucents can still artifact.
 - **Facet winding:** Package `Show` emits sparse face indices via `rowindices`. At upload, the viewer reorients triangles so geometric normals agree with averaged vertex normals (needed for the transparent back/front pass).
-- **Graphics alpha:** Package `Show` maps uniform `Color.a` (and `Coloring.opacity`) to `c`/`C` + colorless geometry (`v "xn"` / `v "x"`). `Color(r,g,b)` is opaque with `a=1`; `Color(r,g,b,a)` sets alpha. A `ColorTable` on a vertex-bearing primitive is one color per vertex; `Show` always emits `v "xnc"` / `v "xc"` RGB for those objects (per-vertex alpha is dropped until viewer `xnca`) and uses draw-slot `C` for a uniform `GraphicsEntry.color` override. `GraphicsEntry.color` is not a `ColorTable`.
+- **Graphics alpha:** Package `Show` maps uniform `Color.a` (and `Coloring.opacity`) to `c`/`C` + colorless geometry (`v "xn"` / `v "x"`). `Color(r,g,b)` is opaque with `a=1`; `Color(r,g,b,a)` sets alpha. A `ColorTable` on a vertex-bearing primitive is one color per vertex; RGB tables emit `v "xnc"` / `v "xc"`, RGBA tables emit `v "xnca"` / `v "xca"`. Draw-slot `C` is a uniform `GraphicsEntry.color` override (not a `ColorTable`).
 
 Lighting and eye position are in model space (stable under camera rotation). By default the light sits outside the scene AABB. `L <x> <y> <z>` sets an explicit position (default white); optional `<r g b>` sets light color; `L a` resumes AABB auto placement.
 
@@ -135,7 +136,7 @@ C 0
 d 1
 ```
 
-Fixtures under `test/command/`: `linespts`, `polyhedra`, `twoscenes`, `largebbox` (auto-fit), `flatshade`, `uniformphong`, `materials`, `opacity`, `depthsort`, `transparentspheres`, `light`, `background`, `color-override`, plus define/draw fixtures (`definedraw-*`).
+Fixtures under `test/command/`: `linespts`, `polyhedra`, `twoscenes`, `largebbox` (auto-fit), `flatshade`, `uniformphong`, `materials`, `opacity`, `vertexalpha`, `depthsort`, `transparentspheres`, `light`, `background`, `color-override`, plus define/draw fixtures (`definedraw-*`).
 
 ## C API
 

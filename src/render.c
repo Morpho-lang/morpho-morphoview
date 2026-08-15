@@ -35,9 +35,11 @@ const char *vertexshader =
     "layout (location = 0) in vec3 vPos;\n"
     "layout (location = 1) in vec3 vColor;\n"
     "layout (location = 2) in vec3 vNormal;\n"
+    "layout (location = 3) in float vAlpha;\n"
     "out vec3 fragColor;\n"
     "out vec3 fragPos;\n"
     "out vec3 normal;\n"
+    "out float fragAlpha;\n"
     "uniform mat4 model;\n"
     "uniform mat4 view;\n"
     "uniform mat4 proj;\n"
@@ -48,6 +50,7 @@ const char *vertexshader =
     "   fragColor = vColor;\n"
     "   fragPos = vec3(model * vec4(vPos, 1.0));\n"
     "   normal = normalMatrix * vNormal;\n"
+    "   fragAlpha = vAlpha;\n"
     "}\n";
 
 const char *fragmentshader =
@@ -56,6 +59,7 @@ const char *fragmentshader =
     "in vec3 fragColor;\n"
     "in vec3 fragPos;\n"
     "in vec3 normal;\n"
+    "in float fragAlpha;\n"
     "uniform vec3 lightColor;\n"
     "uniform vec3 lightPos;\n"
     "uniform vec3 viewPos;\n"
@@ -69,7 +73,7 @@ const char *fragmentshader =
     "\n"
     "void main() {\n"
     "   vec3 albedo = (uUseUniform != 0) ? uColor.rgb : fragColor;\n"
-    "   float alpha = (uUseUniform != 0) ? uColor.a : 1.0;\n"
+    "   float alpha = ((uUseUniform != 0) ? uColor.a : 1.0) * fragAlpha;\n"
     "   if (uFlat != 0) {\n"
     "       FragColor = vec4(albedo, alpha);\n"
     "       return;\n"
@@ -543,6 +547,7 @@ int render_entrysizefromformat(scene *s, char *format) {
             case 'x':
             case 'n': size+=s->dim; break;
             case 'c': size+=3; break;
+            case 'a': size+=1; break;
             default: break;
         }
     }
@@ -564,6 +569,7 @@ static void render_orient_facets(scene *s, gobject *obj, gelement *el) {
         if (*fmt=='x') { xpos=pos; pos+=s->dim; }
         else if (*fmt=='n') { npos=pos; pos+=s->dim; }
         else if (*fmt=='c') pos+=3;
+        else if (*fmt=='a') pos+=1;
     }
     if (xpos<0 || npos<0) return;
 
@@ -630,6 +636,10 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
             glVertexAttribPointer(2, s->dim, GL_FLOAT, GL_FALSE, sizeof(GLfloat)*entrysize, (void*) (sizeof(GLfloat)*offset));
             glEnableVertexAttribArray(2);
             offset += s->dim;
+        } else if (b->format[j]=='a') {
+            glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(GLfloat)*entrysize, (void*) (sizeof(GLfloat)*offset));
+            glEnableVertexAttribArray(3);
+            offset += 1;
         }
     }
     
@@ -874,7 +884,8 @@ static void render_setgeometryuniforms(renderer *r, mat4x4 view, mat4x4 proj,
 #define RENDER_OPAQUE_ALPHA_EPS 0.999f
 
 /** True when the current uniform/vertex color is treated as transparent. */
-static bool render_is_transparent(int use_uniform, float alpha) {
+static bool render_is_transparent(int use_uniform, float alpha, const char *format) {
+    if (format && strchr(format, 'a')) return true;
     float a = (use_uniform!=0) ? alpha : 1.0f;
     return (a < RENDER_OPAQUE_ALPHA_EPS);
 }
@@ -916,6 +927,7 @@ static bool render_object_centroid(scene *s, gobject *obj, vec3 out) {
     for (char *c=obj->vertexdata.format; *c!='\0' && *c!='x'; c++) {
         if (*c=='n') xpos+=s->dim;
         else if (*c=='c') xpos+=3;
+        else if (*c=='a') xpos+=1;
     }
 
     float bbox[6];
@@ -1068,7 +1080,8 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
                  * `C` uses use_uniform=0 so a prior translucent `C` cannot leak. */
                 int use_uniform = st.use_uniform;
                 float alpha = st.ucolor[3];
-                bool trans=render_is_transparent(use_uniform, alpha);
+                const char *fmt = (ins->obj && ins->obj->obj) ? ins->obj->obj->vertexdata.format : NULL;
+                bool trans=render_is_transparent(use_uniform, alpha, fmt);
                 if (pass==RENDER_PASS_OPAQUE && !trans) {
                     /* Force GPU state even if a prior uniform `C` left uUseUniform set. */
                     glUniform1i(r->uniforms.uUseUniform, use_uniform);
@@ -1112,9 +1125,10 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    /* Default vertex color/normal when format lacks those attributes */
+    /* Default vertex color/normal/alpha when format lacks those attributes */
     glVertexAttrib3f(1, 1.0f, 1.0f, 1.0f);
     glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
+    glVertexAttrib1f(3, 1.0f);
     
     vec3 lightcolor = {1.0f, 1.0f, 1.0f};
     vec3 lightposn = {2.0f, 1.0f, 5.0f};

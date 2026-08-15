@@ -282,20 +282,19 @@ var g3 = Graphics()
 g3.display(TriangleComplex(pos, nrm, ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.4, 0.5, 0.6]])), conn))
 var buf3 = Buf()
 Show().write(g3, buf3)
-var sawXnc = false
+var sawXnca = false
 var sawXn = false
-var droppedAlpha = true
+var sawAlpha = false
 for (line in buf3.lines) {
-  if (line == "v \"xnc\"") sawXnc = true
+  if (line == "v \"xnca\"") sawXnca = true
   if (line == "v \"xn\"") sawXn = true
   var parts = line.split(" ")
-  if (parts.count() >= 10 && parts[0] != "c" && parts[0] != "C") {
-    // vertex row: x y z nx ny nz r g b  — not 10th alpha
-    if (parts.count() > 10) droppedAlpha = false
+  if (parts.count() >= 10 && parts[0] != "c" && parts[0] != "C" && parts[0] != "v") {
+    if (parts[9] == "0.4") sawAlpha = true
   }
 }
-expect(sawXnc && !sawXn, "ColorTable RGBA still xnc")
-expect(droppedAlpha, "Show drops ColorTable per-vertex alpha")
+expect(sawXnca && !sawXn, "ColorTable RGBA → xnca")
+expect(sawAlpha, "Show emits per-vertex alpha")
 
 var badLen = false
 try {
@@ -327,11 +326,11 @@ var gOpaque = Graphics()
 gOpaque.display(TriangleComplex(pos, nrm, ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1]])), conn))
 var bufOpaque = Buf()
 Show().write(gOpaque, bufOpaque)
-var sawOpaqueXnc = false
+var sawOpaqueXnca = false
 for (line in bufOpaque.lines) {
-  if (line == "v \"xnc\"") sawOpaqueXnc = true
+  if (line == "v \"xnca\"") sawOpaqueXnca = true
 }
-expect(sawOpaqueXnc, "opaque RGBA ColorTable still xnc")
+expect(sawOpaqueXnca, "4-channel ColorTable is xnca even if a=1")
 
 var gEsc = Graphics(title="say \"hi\"")
 gEsc.display(Text("a\\b\"c", [0, 0, 0], color=White))

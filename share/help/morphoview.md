@@ -59,7 +59,7 @@ View makes use of the `Listener` protocol to track changes in a `Scene`.
 
 * `open(commands)` / `open(Graphics)` / `open(Scene)` — bind, spawn viewer, send first chunk, wait for `ok`
 * `update(commands)` / `update(Graphics)` / `update(Scene)` — send another chunk (`Graphics` uses full `U S` replace)
-* `morph(id, item)` — same-layout vertex push (`U V` for `xn`→`xn` or `xnc`→`xnc`); `xn`↔`xnc` falls back to a full replace
+* `morph(id, item)` — same-layout vertex push (`U V` for `xn`/`xnc`/`xnca`); a layout change falls back to a full replace
 * `refreshMesh(id)` — push `U V` for an existing TriangleComplex entry
 * `redraw(commands)` — clear draws (`D`) and re-issue draw ASCII (tests / escape hatch)
 * `write(line)` — File-compatible sink for `Show.write`
@@ -129,4 +129,4 @@ All of these are `GraphicsPrimitive`s sharing `color`, `filter`, and `transmit`.
 
 `transmit` / `filter` map to viewer alpha (`alpha = 1 − clamp(transmit + filter, 0, 1)`). True POVRay filter-vs-transmit pigment behavior remains POVRay-only.
 
-Every `Color` has an alpha channel (`Color(r,g,b)` sets `a=1`; use `Color(r,g,b,a)` for translucency). In morphoview, `transmit`/`filter` on an item take priority when set; otherwise `Show` uses the presentation or item `Color.a`.
+Every `Color` has an alpha channel (`Color(r,g,b)` sets `a=1`; use `Color(r,g,b,a)` for translucency). Uniform alpha is sent as draw-slot `C`; a `ColorTable` with a fourth row is sent as per-vertex `a` (`xnca` / `xca`).

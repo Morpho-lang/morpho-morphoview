@@ -1169,7 +1169,7 @@ class Scene is Graphics with Broadcaster {
   }
 
   /** Same-length mesh swap: set entry.item only. Pair with View.morph or View.refreshMesh.
-   *  Connectivity or xn↔xnc layout changes need replace (`View.morph` falls back). */
+   *  Connectivity or layout changes (xn/xnc/xnca) need replace (`View.morph` falls back). */
   morph(id, GraphicsPrimitive item) {
     var e = self.findEntry(id)
     if (isnil(e)) return false

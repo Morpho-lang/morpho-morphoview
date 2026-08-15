@@ -62,6 +62,13 @@ expect(anyExact(lines, "l 0 2 1 2"), "explicit segment pairs")
 expect(anyExact(lines, "M flat"), "points/lines should request flat shading")
 expect(!anyExact(lines, "v \"xnc\""), "should not emit triangle xnc for point/line prims")
 
+var g4 = Graphics()
+g4.display(PointCloud(pos, color=ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.4, 0.5, 0.6]]))))
+var buf4 = Buf()
+Show().write(g4, buf4)
+expect(anyExact(buf4.lines, "v \"xca\""), "RGBA PointCloud → xca")
+expect(!anyExact(buf4.lines, "v \"xc\""), "RGBA PointCloud is not xc")
+
 // Translucent points → alpha on color table
 var g2 = Graphics()
 g2.display(PointCloud(pos, color=Color(1, 0, 0, 0.5)))
