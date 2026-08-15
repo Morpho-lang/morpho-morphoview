@@ -45,6 +45,8 @@ typedef struct {
         int length;
     } vertexdata;
     varray_gelement elements;
+    float centroid[3];   /**< Local-space AABB center of positions */
+    bool centroid_valid; /**< False until computed; cleared on geometry change */
 } gobject;
 
 DECLARE_VARRAY(gobject, gobject);

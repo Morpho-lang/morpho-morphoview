@@ -369,6 +369,8 @@ gobject *scene_addobject(scene *s, int id) {
     obj.vertexdata.indx=SCENE_EMPTY;
     obj.vertexdata.length=SCENE_EMPTY;
     varray_gelementinit(&obj.elements);
+    obj.centroid[0]=obj.centroid[1]=obj.centroid[2]=0.0f;
+    obj.centroid_valid=false;
 
     varray_gobjectadd(&s->objectlist, &obj, 1);
     return &s->objectlist.data[s->objectlist.count-1];
@@ -386,6 +388,7 @@ bool scene_clearobject(scene *s, int id) {
     varray_gelementinit(&obj->elements);
     obj->vertexdata.indx = SCENE_EMPTY;
     obj->vertexdata.length = SCENE_EMPTY;
+    obj->centroid_valid = false;
     return true;
 }
 
@@ -451,6 +454,7 @@ bool scene_replacevertices(scene *s, int id, const float *data, int n) {
     if (obj->vertexdata.indx == SCENE_EMPTY || obj->vertexdata.length != n)
         return false;
     memcpy(&s->data.data[obj->vertexdata.indx], data, sizeof(float) * (size_t) n);
+    obj->centroid_valid = false;
     return true;
 }
 

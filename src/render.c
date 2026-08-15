@@ -342,23 +342,102 @@ void render_preparefonts(renderer *r, scene *scene) {
     glBindVertexArray(0);
 }
 
-/** Prepares text for display */
-void render_preparetext(renderer *r, scene *s, gdraw *drw, GLuint *carray) {
-    (void) carray;
+/* -------------------------------------------------------
+ * Pack renderlist (skip redundant adjacent state)
+ * ------------------------------------------------------- */
 
+/** Tracks last emitted VAO / color / shade while packing the display list. */
+typedef struct {
+    GLuint array;
+    bool have_color;
+    float rgba[4];
+    int use_uniform;
+    bool have_shade;
+    int shade_mode;
+    float ka, kd, ks, shininess;
+} renderpackstate;
+
+static void render_packstate_reset(renderpackstate *st) {
+    st->array=0;
+    st->have_color=false;
+    st->rgba[0]=st->rgba[1]=st->rgba[2]=st->rgba[3]=1.0f;
+    st->use_uniform=0;
+    st->have_shade=false;
+    st->shade_mode=SCENE_SHADE_SHADED;
+    st->ka=SCENE_MATERIAL_KA_DEFAULT;
+    st->kd=SCENE_MATERIAL_KD_DEFAULT;
+    st->ks=SCENE_MATERIAL_KS_DEFAULT;
+    st->shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
+}
+
+static bool render_pack_color_same(const renderpackstate *st, const float rgba[4], int use_uniform) {
+    return st->have_color &&
+           st->use_uniform==use_uniform &&
+           st->rgba[0]==rgba[0] && st->rgba[1]==rgba[1] &&
+           st->rgba[2]==rgba[2] && st->rgba[3]==rgba[3];
+}
+
+static void render_pack_array(renderer *r, renderpackstate *st, GLuint handle, renderobject *obj) {
+    if (st->array==handle && handle!=0) return;
+    renderinstruction ins = { .instruction = RARRAY, .data.array.handle = handle, .obj=obj };
+    varray_renderinstructionadd(&r->renderlist, &ins, 1);
+    st->array=handle;
+}
+
+static void render_pack_color(renderer *r, renderpackstate *st, const float rgba[4],
+                              int use_uniform, renderobject *obj) {
+    if (render_pack_color_same(st, rgba, use_uniform)) return;
+    renderinstruction cins = { .instruction = RCOLOR, .obj=obj };
+    cins.data.color.rgba[0]=rgba[0];
+    cins.data.color.rgba[1]=rgba[1];
+    cins.data.color.rgba[2]=rgba[2];
+    cins.data.color.rgba[3]=rgba[3];
+    cins.data.color.use_uniform=use_uniform;
+    varray_renderinstructionadd(&r->renderlist, &cins, 1);
+    st->have_color=true;
+    st->rgba[0]=rgba[0]; st->rgba[1]=rgba[1];
+    st->rgba[2]=rgba[2]; st->rgba[3]=rgba[3];
+    st->use_uniform=use_uniform;
+}
+
+static void render_pack_shade(renderer *r, renderpackstate *st, int mode,
+                              float ka, float kd, float ks, float shininess) {
+    if (st->have_shade &&
+        st->shade_mode==mode &&
+        st->ka==ka && st->kd==kd && st->ks==ks && st->shininess==shininess) return;
+    renderinstruction ins = { .instruction = RSHADE };
+    ins.data.shade.mode=mode;
+    ins.data.shade.ka=ka;
+    ins.data.shade.kd=kd;
+    ins.data.shade.ks=ks;
+    ins.data.shade.shininess=shininess;
+    varray_renderinstructionadd(&r->renderlist, &ins, 1);
+    st->have_shade=true;
+    st->shade_mode=mode;
+    st->ka=ka; st->kd=kd; st->ks=ks; st->shininess=shininess;
+}
+
+/** Resolve draw-slot or color-id albedo into rgba + use_uniform. */
+static void render_resolve_color(scene *s, int colorid, float rgba[4], int *use_uniform) {
+    rgba[0]=rgba[1]=rgba[2]=rgba[3]=1.0f;
+    *use_uniform=0;
+    if (colorid==SCENE_EMPTY) return;
+    gcolor *color = scene_getcolorfromid(s, colorid);
+    if (!color) return;
+    int ncomp = (color->components==4) ? 4 : 3;
+    for (int k=0; k<3; k++) rgba[k]=s->data.data[color->indx+k];
+    rgba[3]=(ncomp==4) ? s->data.data[color->indx+3] : 1.0f;
+    *use_uniform=1;
+}
+
+/** Prepares text for display */
+void render_preparetext(renderer *r, scene *s, gdraw *drw, renderpackstate *st) {
     /* Per-draw-slot uniform albedo when stamped (Phase 5f). */
     if (drw->colorid != SCENE_EMPTY) {
-        gcolor *color = scene_getcolorfromid(s, drw->colorid);
-        if (color) {
-            renderinstruction cins = { .instruction = RCOLOR, .obj = NULL };
-            int ncomp = (color->components == 4) ? 4 : 3;
-            for (int k = 0; k < 3; k++)
-                cins.data.color.rgba[k] = s->data.data[color->indx + k];
-            cins.data.color.rgba[3] =
-                (ncomp == 4) ? s->data.data[color->indx + 3] : 1.0f;
-            cins.data.color.use_uniform = 1;
-            varray_renderinstructionwrite(&r->renderlist, cins);
-        }
+        float rgba[4];
+        int use_uniform;
+        render_resolve_color(s, drw->colorid, rgba, &use_uniform);
+        if (use_uniform) render_pack_color(r, st, rgba, use_uniform, NULL);
     }
 
     /* Change the model matrix if provided */
@@ -689,38 +768,23 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
 }
 
 /** Prepares an object for rendering, inserting appropriate instructions into the render list */
-void render_prepareobject(renderer *r, scene *s, gdraw *drw, GLuint *carray) {
+void render_prepareobject(renderer *r, scene *s, gdraw *drw, renderpackstate *st) {
     renderobject *obj = render_findrenderobjectwithid(&r->objects, drw->id);
     if (!obj || !obj->obj || obj->bufferindex<0 ||
         (unsigned) obj->bufferindex>=r->glbuffers.count) return;
 
     renderglbuffers *buf = &r->glbuffers.data[obj->bufferindex];
 
-    /* Select the vertex array — always rebind (don't skip); VAO switches between
-     * `xn` (no color attrib) and `xnc` must not leave stale bindings. */
-    renderinstruction ins = { .instruction = RARRAY, .data.array.handle = buf->array, .obj=obj };
-    varray_renderinstructionadd(&r->renderlist, &ins, 1);
-    *carray=buf->array;
+    /* Bind VAO only when it changes (xn vs xnc must not leave a stale binding). */
+    render_pack_array(r, st, buf->array, obj);
 
     /* Per-draw albedo: `C` on the slot is a uniform override (even on `xnc`/`xc`).
-     * Always emit RCOLOR so a prior translucent `C` cannot leak into the next object. */
+     * Emit RCOLOR when the effective color differs so a prior translucent `C` cannot leak. */
     {
-        renderinstruction cins = { .instruction = RCOLOR, .obj=obj };
-        cins.data.color.rgba[0]=1.0f;
-        cins.data.color.rgba[1]=1.0f;
-        cins.data.color.rgba[2]=1.0f;
-        cins.data.color.rgba[3]=1.0f;
-        cins.data.color.use_uniform=0;
-        if (drw->colorid != SCENE_EMPTY) {
-            gcolor *color = scene_getcolorfromid(s, drw->colorid);
-            if (color) {
-                int ncomp = (color->components==4) ? 4 : 3;
-                for (int k=0; k<3; k++) cins.data.color.rgba[k]=s->data.data[color->indx+k];
-                cins.data.color.rgba[3]=(ncomp==4) ? s->data.data[color->indx+3] : 1.0f;
-                cins.data.color.use_uniform=1;
-            }
-        }
-        varray_renderinstructionadd(&r->renderlist, &cins, 1);
+        float rgba[4];
+        int use_uniform;
+        render_resolve_color(s, drw->colorid, rgba, &use_uniform);
+        render_pack_color(r, st, rgba, use_uniform, obj);
     }
 
     /* Change the model matrix if provided */
@@ -799,27 +863,24 @@ void render_preparescene(renderer *r, scene *s) {
     }
     
     /* Now create the object render list */
-    GLuint carray=0;
+    renderpackstate pack;
+    render_packstate_reset(&pack);
     for (unsigned int i=0; i<s->displaylist.count; i++) {
         gdraw *drw=&s->displaylist.data[i];
         switch (drw->type) {
             case OBJECT:
-                render_prepareobject(r, s, drw, &carray);
+                render_prepareobject(r, s, drw, &pack);
                 break;
             case TEXT:
-                render_preparetext(r, s, drw, &carray);
+                render_preparetext(r, s, drw, &pack);
                 break;
             case COLOR:
             {
-                gcolor *color = scene_getcolorfromid(s, drw->id);
-                
-                if (color) {
-                    renderinstruction ins = { .instruction = RCOLOR };
-                    int ncomp = (color->components==4) ? 4 : 3;
-                    for (int k=0; k<3; k++) ins.data.color.rgba[k]=s->data.data[color->indx+k];
-                    ins.data.color.rgba[3]=(ncomp==4) ? s->data.data[color->indx+3] : 1.0f;
-                    ins.data.color.use_uniform=1;
-                    varray_renderinstructionadd(&r->renderlist, &ins, 1);
+                float rgba[4];
+                int use_uniform;
+                render_resolve_color(s, drw->id, rgba, &use_uniform);
+                if (use_uniform) {
+                    render_pack_color(r, &pack, rgba, use_uniform, NULL);
                 } else {
                     printf("Color %i not found.\n", drw->id);
                 }
@@ -827,20 +888,15 @@ void render_preparescene(renderer *r, scene *s) {
                 break;
             case SHADE:
             {
-                renderinstruction ins = { .instruction = RSHADE };
-                ins.data.shade.mode=drw->id;
-                ins.data.shade.ka=SCENE_MATERIAL_KA_DEFAULT;
-                ins.data.shade.kd=SCENE_MATERIAL_KD_DEFAULT;
-                ins.data.shade.ks=SCENE_MATERIAL_KS_DEFAULT;
-                ins.data.shade.shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
+                float ka=SCENE_MATERIAL_KA_DEFAULT;
+                float kd=SCENE_MATERIAL_KD_DEFAULT;
+                float ks=SCENE_MATERIAL_KS_DEFAULT;
+                float shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
                 if (drw->matindx!=SCENE_EMPTY) {
                     float *m=&s->data.data[drw->matindx];
-                    ins.data.shade.ka=m[0];
-                    ins.data.shade.kd=m[1];
-                    ins.data.shade.ks=m[2];
-                    ins.data.shade.shininess=m[3];
+                    ka=m[0]; kd=m[1]; ks=m[2]; shininess=m[3];
                 }
-                varray_renderinstructionadd(&r->renderlist, &ins, 1);
+                render_pack_shade(r, &pack, drw->id, ka, kd, ks, shininess);
             }
                 break;
         }
@@ -915,10 +971,18 @@ static void render_geostate_reset(rendergeostate *st) {
     st->curvao=0;
 }
 
-/** Local-space AABB center of object positions; false if no usable vertices. */
+/** Local-space AABB center of object positions; false if no usable vertices.
+ *  Caches on @p obj until geometry/format changes (pose-only updates leave it). */
 static bool render_object_centroid(scene *s, gobject *obj, vec3 out) {
     if (!s || !obj || !obj->vertexdata.format || !strchr(obj->vertexdata.format, 'x')) return false;
     if (obj->vertexdata.indx==SCENE_EMPTY || obj->vertexdata.length<=0) return false;
+
+    if (obj->centroid_valid) {
+        out[0]=obj->centroid[0];
+        out[1]=obj->centroid[1];
+        out[2]=obj->centroid[2];
+        return true;
+    }
 
     int stride=render_entrysizefromformat(s, obj->vertexdata.format);
     if (stride<=0) return false;
@@ -949,9 +1013,13 @@ static bool render_object_centroid(scene *s, gobject *obj, vec3 out) {
     }
     if (!any) return false;
 
-    out[0]=0.5f*(bbox[0]+bbox[1]);
-    out[1]=0.5f*(bbox[2]+bbox[3]);
-    out[2]=0.5f*(bbox[4]+bbox[5]);
+    obj->centroid[0]=0.5f*(bbox[0]+bbox[1]);
+    obj->centroid[1]=0.5f*(bbox[2]+bbox[3]);
+    obj->centroid[2]=0.5f*(bbox[4]+bbox[5]);
+    obj->centroid_valid=true;
+    out[0]=obj->centroid[0];
+    out[1]=obj->centroid[1];
+    out[2]=obj->centroid[2];
     return true;
 }
 
@@ -1075,7 +1143,7 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
             case RTRIANGLES:
             case RLINES:
             case RPOINTS: {
-                /* Trust the last RCOLOR for this object (always emitted at prepare).
+                /* Trust the last RCOLOR for this object (emitted at prepare when color changes).
                  * A draw-slot `C` may override vertex colors; colorless/`xnc` without
                  * `C` uses use_uniform=0 so a prior translucent `C` cannot leak. */
                 int use_uniform = st.use_uniform;

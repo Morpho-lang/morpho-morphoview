@@ -20,14 +20,14 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 - [ ] Push [`xgraphics.morpho`](share/modules/xgraphics.morpho) / [`xshow.morpho`](share/modules/xshow.morpho) / [`xfonts.morpho`](share/modules/xfonts.morpho) to morpho `graphics` / `show` / `fonts`
 - [ ] Push [`xcolor.morpho`](share/modules/xcolor.morpho) to morpho `color` (`Color` alpha, `Coloring`, `ColorTable`, ColorMap ≠ Color)
 - [ ] Push [`xplot.morpho`](share/modules/xplot.morpho) to morpho `plot` (dogfood this package first)
-- [ ] Keep core `graphics.morpho` free of `meshtools` (already true here: UV sphere in xgraphics; examples like soapbubble may still `import meshtools`)
+- [X] Keep core `graphics.morpho` free of `meshtools` (already true here: UV sphere in xgraphics; examples like soapbubble may still `import meshtools`)
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
 
 ### This package
 
 - [ ] Binary vertex transport — viewer IR already takes float/index blobs; Morpho still needs a way to serialize those buffers and send them over ZMQ. Biggest win on fat `v` / `U V` paths; redraw often avoids blobs entirely.
-- [ ] Transparent centroid cache — recompute object AABB centroid only when geometry changes, not every frame
-- [ ] Draw-list hygiene — merge adjacent draws that share VAO/material when packing the renderlist (matters at larger object counts)
+- [x] Transparent centroid cache — recompute object AABB centroid only when geometry changes, not every frame
+- [x] Draw-list hygiene — merge adjacent draws that share VAO/material when packing the renderlist (matters at larger object counts)
 
 ### Events (viewer → Morpho)
 

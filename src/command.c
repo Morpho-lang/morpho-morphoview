@@ -318,6 +318,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 if (obj->vertexdata.format) free(obj->vertexdata.format);
                 obj->vertexdata.format = c->format;
                 c->format = NULL;
+                obj->centroid_valid = false;
             }
             /* Prefer in-place GL upload; fall back to full prepare if unprepared. */
             bool uploaded = false;
@@ -470,6 +471,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                     free(ctx->cobject->vertexdata.format);
                 ctx->cobject->vertexdata.format=c->format;
                 c->format=NULL; /* transferred */
+                ctx->cobject->centroid_valid=false;
             }
 
             if (c->length>0 && c->data) {
@@ -480,6 +482,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                     ctx->cobject->vertexdata.length=0;
                 }
                 ctx->cobject->vertexdata.length += c->length;
+                ctx->cobject->centroid_valid=false;
             }
             command_touchscene(ctx);
             return true;
