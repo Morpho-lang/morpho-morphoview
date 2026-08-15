@@ -4,6 +4,7 @@
 //   cd test && morpho6 testcylinderarrow.morpho
 
 import xgraphics
+import xshow
 import xcolor
 
 class Buf {
@@ -82,7 +83,7 @@ var id3 = sc.display(Arrow([0, 0, 0], [0, 0, 1], aspectratio=0.2, n=6, color=Gre
 var show2 = Show()
 var openBuf = Buf()
 show2.write(sc, openBuf)
-expect(show2.objectMap[id1] == show2.objectMap[id2], "scene cylinders share o")
+expect(show2.slots[id1].objectid == show2.slots[id2].objectid, "scene cylinders share o")
 
 expect(sc.move(id1, [0.5, 0, 0], scale=[0.1, 0.1, 1.5]), "move cylinder")
 var poseBuf = Buf()
@@ -101,6 +102,6 @@ var remBuf = Buf()
 show2.emitEntryRemove(id2, remBuf)
 expect(countPrefix(remBuf.lines, "X D ${id2}") == 1, "X D for removed")
 expect(countPrefix(remBuf.lines, "X O ") == 0, "shared o retained")
-expect(show2.objectMap.contains(id1), "sibling cylinder still mapped")
+expect(show2.slots.contains(id1), "sibling cylinder still mapped")
 
 print "ok"

@@ -45,9 +45,9 @@ show.write(g, buf)
 
 expect(countPrefix(buf.lines, "o ") == 1, "one shared sphere object")
 expect(countPrefix(buf.lines, "d ") == 3, "three draw slots")
-expect(show.objectMap[1] == show.objectMap[2], "entries 1 and 2 share viewer id")
-expect(show.objectMap[1] == show.objectMap[3], "entries 1 and 3 share viewer id")
-expect(show.objectMap.contains(1), "sphere 1 is mapped")
+expect(show.slots[1].objectid == show.slots[2].objectid, "entries 1 and 2 share viewer id")
+expect(show.slots[1].objectid == show.slots[3].objectid, "entries 1 and 3 share viewer id")
+expect(show.slots.contains(1), "sphere 1 is mapped")
 
 // Pose-only emit uses draw id alone.
 var poseBuf = Buf()

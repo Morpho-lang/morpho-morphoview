@@ -656,9 +656,10 @@ gdraw *scene_addtextdraw(scene *s, int drawid, int textindex,
     return &s->displaylist.data[s->displaylist.count - 1];
 }
 
-/** Update matrix and/or color; leave matrix alone when !has_matrix. */
+/** Update matrix and/or color; leave matrix alone when !has_matrix.
+ *  When @p stamp_color, set colorid (SCENE_EMPTY clears the uniform override). */
 bool scene_updateobjectdraw(scene *s, gdraw *drw, bool has_matrix,
-                            const float *matrix, int colorid) {
+                            const float *matrix, bool stamp_color, int colorid) {
     if (!s || !drw || (drw->type != OBJECT && drw->type != TEXT)) return false;
     if (has_matrix) {
         if (!matrix) {
@@ -671,7 +672,7 @@ bool scene_updateobjectdraw(scene *s, gdraw *drw, bool has_matrix,
             drw->matindx = scene_adddata(s, tmp, 16);
         }
     }
-    if (colorid != SCENE_EMPTY) drw->colorid = colorid;
+    if (stamp_color) drw->colorid = colorid;
     return true;
 }
 

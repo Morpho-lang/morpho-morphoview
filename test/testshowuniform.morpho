@@ -1,0 +1,167 @@
+// Show uniform C vs ColorTable xnc/xc; entry override; recolor nil.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testshowuniform.morpho
+
+import xgraphics
+import xshow
+import xcolor
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn anyExact(lines, want) {
+  for (line in lines) {
+    if (line == want) return true
+  }
+  return false
+}
+
+fn anyStarts(lines, prefix) {
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) return true
+    }
+  }
+  return false
+}
+
+fn countExact(lines, want) {
+  var n = 0
+  for (line in lines) {
+    if (line == want) n += 1
+  }
+  return n
+}
+
+fn isCLine(line) {
+  if (line == "C") return true
+  if (line.count() < 2) return false
+  return line[0] == "C" && line[1] == " "
+}
+
+fn isDLine(line) {
+  if (line.count() < 1) return false
+  if (line[0] != "d") return false
+  return line.count() == 1 || line[1] == " "
+}
+
+/** Every `d` is immediately preceded by `C` or `C <id>`. */
+fn colorImmediatelyBeforeEachDraw(lines) {
+  var sawDraw = false
+  for (i in 0...lines.count()) {
+    if (!isDLine(lines[i])) continue
+    sawDraw = true
+    if (i == 0) return false
+    if (!isCLine(lines[i-1])) return false
+  }
+  return sawDraw
+}
+
+var pos = Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]])
+var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
+var conn = Matrix([[1], [1], [1]])
+var tbl = ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
+
+/* ---- opaque uniform Color → xn + C, no repeated vertex RGB ---- */
+var gU = Graphics()
+gU.display(TriangleComplex(pos, nrm, Red, conn))
+var bufU = Buf()
+Show().write(gU, bufU)
+expect(anyExact(bufU.lines, "v \"xn\""), "uniform TC → xn")
+expect(!anyExact(bufU.lines, "v \"xnc\""), "uniform TC does not bake xnc")
+expect(anyStarts(bufU.lines, "C "), "uniform TC emits C")
+expect(colorImmediatelyBeforeEachDraw(bufU.lines), "uniform TC: C immediately before d")
+
+var gP = Graphics()
+gP.display(PointCloud(pos, color=Blue))
+var bufP = Buf()
+Show().write(gP, bufP)
+expect(anyExact(bufP.lines, "v \"x\""), "uniform points → x")
+expect(!anyExact(bufP.lines, "v \"xc\""), "uniform points do not bake xc")
+expect(colorImmediatelyBeforeEachDraw(bufP.lines), "uniform points: C immediately before d")
+
+var gL = Graphics()
+gL.display(LineSet(pos, color=Green))
+var bufL = Buf()
+Show().write(gL, bufL)
+expect(anyExact(bufL.lines, "v \"x\""), "uniform lines → x")
+expect(colorImmediatelyBeforeEachDraw(bufL.lines), "uniform lines: C immediately before d")
+
+/* ---- ColorTable + color=Red still encodes xnc/xc and emits C ---- */
+var gTR = Graphics()
+gTR.display(TriangleComplex(pos, nrm, tbl, conn), color=Red)
+var bufTR = Buf()
+Show().write(gTR, bufTR)
+expect(anyExact(bufTR.lines, "v \"xnc\""), "ColorTable+override keeps xnc")
+expect(anyStarts(bufTR.lines, "C "), "override emits C")
+expect(colorImmediatelyBeforeEachDraw(bufTR.lines), "override: C immediately before d")
+
+var gPR = Graphics()
+gPR.display(PointCloud(pos, color=tbl), color=Red)
+var bufPR = Buf()
+Show().write(gPR, bufPR)
+expect(anyExact(bufPR.lines, "v \"xc\""), "ColorTable+override points keep xc")
+expect(anyStarts(bufPR.lines, "C "), "point override emits C")
+expect(colorImmediatelyBeforeEachDraw(bufPR.lines), "point override: C immediately before d")
+
+var gLR = Graphics()
+gLR.display(LineSet(pos, color=tbl), color=Red)
+var bufLR = Buf()
+Show().write(gLR, bufLR)
+expect(anyExact(bufLR.lines, "v \"xc\""), "ColorTable+override lines keep xc")
+expect(anyStarts(bufLR.lines, "C "), "line override emits C")
+expect(colorImmediatelyBeforeEachDraw(bufLR.lines), "line override: C immediately before d")
+
+/* ---- ColorTable without override: xnc + bare C immediately before d ---- */
+var gT = Graphics()
+gT.display(TriangleComplex(pos, nrm, tbl, conn))
+var bufT = Buf()
+Show().write(gT, bufT)
+expect(anyExact(bufT.lines, "v \"xnc\""), "ColorTable → xnc")
+expect(anyExact(bufT.lines, "C"), "intrinsic ColorTable emits bare C")
+expect(!anyStarts(bufT.lines, "C "), "intrinsic ColorTable has no C <id>")
+expect(colorImmediatelyBeforeEachDraw(bufT.lines), "intrinsic ColorTable: C immediately before d")
+
+var gPT = Graphics()
+gPT.display(PointCloud(pos, color=tbl))
+var bufPT = Buf()
+Show().write(gPT, bufPT)
+expect(anyExact(bufPT.lines, "C"), "intrinsic ColorTable points emit bare C")
+expect(colorImmediatelyBeforeEachDraw(bufPT.lines), "intrinsic points: C immediately before d")
+
+/* ---- recolor Red then nil on ColorTable: C id then bare C; no U O ---- */
+var sc = Scene()
+var id = sc.display(TriangleComplex(pos, nrm, tbl, conn))
+var show = Show()
+show.write(sc, Buf())
+expect(sc.recolor(id, Red), "recolor Red")
+var bufR = Buf()
+expect(show.emitEntryRecolor(sc, id, bufR), "emit recolor Red")
+expect(anyStarts(bufR.lines, "C "), "recolor emits C id")
+expect(anyExact(bufR.lines, "d ${id}"), "recolor pose-preserving d")
+expect(!anyStarts(bufR.lines, "U O"), "recolor does not redefine geometry")
+expect(!anyStarts(bufR.lines, "o "), "recolor does not emit object")
+
+expect(sc.recolor(id, nil), "recolor nil")
+var bufN = Buf()
+expect(show.emitEntryRecolor(sc, id, bufN), "emit recolor nil")
+expect(anyExact(bufN.lines, "C"), "clear override is bare C")
+expect(countExact(bufN.lines, "C") == 1, "exactly one bare C")
+expect(anyExact(bufN.lines, "d ${id}"), "clear still pose-preserving d")
+expect(!anyStarts(bufN.lines, "U O"), "clear does not redefine")
+
+print "ok"

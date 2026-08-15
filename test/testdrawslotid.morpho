@@ -4,6 +4,7 @@
 //   cd test && morpho6 testdrawslotid.morpho
 
 import xgraphics
+import xshow
 import xcolor
 
 class Buf {
@@ -57,11 +58,11 @@ var buf = Buf()
 var show = Show()
 show.write(g, buf)
 
-expect(show.objectMap.contains(sid), "sphere mapped")
-expect(show.objectMap.contains(cid), "cylinder mapped")
-expect(show.objectMap.contains(cid2), "second cylinder mapped")
-expect(show.objectMap[sid] != show.objectMap[cid], "sphere and cylinder use different viewer objects")
-expect(show.objectMap[cid] == show.objectMap[cid2], "same-n cylinders share one viewer object")
+expect(show.slots.contains(sid), "sphere mapped")
+expect(show.slots.contains(cid), "cylinder mapped")
+expect(show.slots.contains(cid2), "second cylinder mapped")
+expect(show.slots[sid].objectid != show.slots[cid].objectid, "sphere and cylinder use different viewer objects")
+expect(show.slots[cid].objectid == show.slots[cid2].objectid, "same-n cylinders share one viewer object")
 expect(countPrefix(buf.lines, "o ") == 2, "one sphere o + one shared cylinder o")
 
 var sd = findDraw(buf.lines, sid)
@@ -75,9 +76,9 @@ var rem = Buf()
 show.emitEntryRemove(cid, rem)
 expect(countPrefix(rem.lines, "X D ${cid}") == 1, "remove uses cylinder graphics id")
 expect(countPrefix(rem.lines, "X O ") == 0, "shared cylinder o kept while cid2 remains")
-expect(!show.objectMap.contains(cid), "cylinder unmapped after remove")
-expect(show.objectMap.contains(cid2), "other cylinder still mapped")
-expect(show.objectMap.contains(sid), "sphere still mapped")
+expect(!show.slots.contains(cid), "cylinder unmapped after remove")
+expect(show.slots.contains(cid2), "other cylinder still mapped")
+expect(show.slots.contains(sid), "sphere still mapped")
 
 // Pose emit for sphere still works by graphics id.
 var pose = Buf()

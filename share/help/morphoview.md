@@ -9,7 +9,7 @@ The `morphoview` package provides interactive 3D visualization through the exter
 
     import morphoview
 
-There are two ways to display graphics:
+There are two ways to display graphics. Static `Show` does not need ZeroMQ (`import xshow` is enough); `import morphoview` pulls `Show` via `xshow` plus live `View`.
 
 * **Display only** — build a `Graphics` object and call `Show(g)`. The viewer opens, then exits when you close the window.
 * **Live session** — build a `Scene`, open a `View`, and update with `move` / `recolor` / etc. The viewer stays connected over ZeroMQ.
@@ -31,7 +31,7 @@ Requires `morpho-zeromq` package. Low-level viewer ASCII commands are documented
 ## Show
 [tagshow]: # (Show)
 
-`Show` launches morphoview with a temporary draw file (`-t`). Use it for one-shot display:
+`Show` (module `xshow`) launches morphoview with a temporary draw file (`-t`). Use it for one-shot display:
 
     var g = Graphics()
     g.display(Sphere([0,0,0], 1, color=Red))
@@ -59,7 +59,7 @@ View makes use of the `Listener` protocol to track changes in a `Scene`.
 
 * `open(commands)` / `open(Graphics)` / `open(Scene)` — bind, spawn viewer, send first chunk, wait for `ok`
 * `update(commands)` / `update(Graphics)` / `update(Scene)` — send another chunk (`Graphics` uses full `U S` replace)
-* `morph(id, item)` — same-length vertex push (`U V`); use `replace` for new connectivity
+* `morph(id, item)` — same-layout vertex push (`U V` for `xn`→`xn` or `xnc`→`xnc`); `xn`↔`xnc` falls back to a full replace
 * `refreshMesh(id)` — push `U V` for an existing TriangleComplex entry
 * `redraw(commands)` — clear draws (`D`) and re-issue draw ASCII (tests / escape hatch)
 * `write(line)` — File-compatible sink for `Show.write`
@@ -104,10 +104,10 @@ Optional constructor args: `title=`, `background=` (a `Color`).
 ### Methods
 
 * `move(id, position, scale=, rotate=)` — set position; omitted scale/rotate leave that component unchanged
-* `recolor(id, color)` — set presentation color
+* `recolor(id, color)` — set presentation color; `recolor(id, nil)` clears the override
 * `remove(id)` — remove the entry
 * `replace(id, item)` — swap item (full redefine in the viewer)
-* `morph(id, item)` — same-length mesh swap; pair with `View.morph` or `View.refreshMesh`
+* `morph(id, item)` — same-length mesh swap; `View.morph` uses `U V` when the vertex layout matches
 * `beginBatch()` / `endBatch()` — coalesce Moved/Recolored notifies (via Broadcaster)
 
 Mutators return `true`/`false`. Prefer `View(Scene)` for live sessions.

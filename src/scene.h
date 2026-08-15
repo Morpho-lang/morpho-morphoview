@@ -203,9 +203,10 @@ gdraw *scene_addtextdraw(scene *s, int drawid, int textindex,
                          const float *matrix, int colorid);
 /** Update matrix and/or color on an existing OBJECT or TEXT draw.
  *  If @p has_matrix, replace matrix; otherwise leave matrix unchanged.
- *  If @p colorid != SCENE_EMPTY, stamp it. Returns false if draw missing. */
+ *  If @p stamp_color, set colorid (SCENE_EMPTY clears the uniform override).
+ *  Returns false if draw missing. */
 bool scene_updateobjectdraw(scene *s, gdraw *drw, bool has_matrix,
-                            const float *matrix, int colorid);
+                            const float *matrix, bool stamp_color, int colorid);
 /** Rebind object id on an OBJECT draw (instancing / two-arg `d`). */
 void scene_setobjectdrawobject(gdraw *drw, int objectid);
 

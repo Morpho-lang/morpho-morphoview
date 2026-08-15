@@ -692,28 +692,25 @@ void render_prepareobject(renderer *r, scene *s, gdraw *drw, GLuint *carray) {
     varray_renderinstructionadd(&r->renderlist, &ins, 1);
     *carray=buf->array;
 
-    /* Vertex colors (format has 'c') must not inherit a prior uniform `C`
-     * (e.g. translucent mesh); otherwise uUseUniform stays set and albedo/alpha
-     * come from that uniform instead of fragColor. */
-    if (obj->obj->vertexdata.format && strchr(obj->obj->vertexdata.format, 'c')) {
+    /* Per-draw albedo: `C` on the slot is a uniform override (even on `xnc`/`xc`).
+     * Always emit RCOLOR so a prior translucent `C` cannot leak into the next object. */
+    {
         renderinstruction cins = { .instruction = RCOLOR, .obj=obj };
         cins.data.color.rgba[0]=1.0f;
         cins.data.color.rgba[1]=1.0f;
         cins.data.color.rgba[2]=1.0f;
         cins.data.color.rgba[3]=1.0f;
         cins.data.color.use_uniform=0;
-        varray_renderinstructionadd(&r->renderlist, &cins, 1);
-    } else if (drw->colorid != SCENE_EMPTY) {
-        /* Per-draw-slot uniform albedo (instanced meshes share geometry). */
-        gcolor *color = scene_getcolorfromid(s, drw->colorid);
-        if (color) {
-            renderinstruction cins = { .instruction = RCOLOR, .obj=obj };
-            int ncomp = (color->components==4) ? 4 : 3;
-            for (int k=0; k<3; k++) cins.data.color.rgba[k]=s->data.data[color->indx+k];
-            cins.data.color.rgba[3]=(ncomp==4) ? s->data.data[color->indx+3] : 1.0f;
-            cins.data.color.use_uniform=1;
-            varray_renderinstructionadd(&r->renderlist, &cins, 1);
+        if (drw->colorid != SCENE_EMPTY) {
+            gcolor *color = scene_getcolorfromid(s, drw->colorid);
+            if (color) {
+                int ncomp = (color->components==4) ? 4 : 3;
+                for (int k=0; k<3; k++) cins.data.color.rgba[k]=s->data.data[color->indx+k];
+                cins.data.color.rgba[3]=(ncomp==4) ? s->data.data[color->indx+3] : 1.0f;
+                cins.data.color.use_uniform=1;
+            }
         }
+        varray_renderinstructionadd(&r->renderlist, &cins, 1);
     }
 
     /* Change the model matrix if provided */
@@ -1066,20 +1063,14 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
             case RTRIANGLES:
             case RLINES:
             case RPOINTS: {
-                /* Vertex-colored meshes must never inherit a prior uniform `C`
-                 * (e.g. translucent shadow). That both picks the wrong albedo and
-                 * can yank the mesh into the transparent pass via alpha. */
+                /* Trust the last RCOLOR for this object (always emitted at prepare).
+                 * A draw-slot `C` may override vertex colors; colorless/`xnc` without
+                 * `C` uses use_uniform=0 so a prior translucent `C` cannot leak. */
                 int use_uniform = st.use_uniform;
                 float alpha = st.ucolor[3];
-                if (ins->obj && ins->obj->obj && ins->obj->obj->vertexdata.format &&
-                    strchr(ins->obj->obj->vertexdata.format, 'c')) {
-                    use_uniform = 0;
-                    alpha = 1.0f;
-                }
                 bool trans=render_is_transparent(use_uniform, alpha);
                 if (pass==RENDER_PASS_OPAQUE && !trans) {
-                    /* Force GPU state for vertex-colored draws even if a prior
-                     * uniform `C` left uUseUniform set. */
+                    /* Force GPU state even if a prior uniform `C` left uUseUniform set. */
                     glUniform1i(r->uniforms.uUseUniform, use_uniform);
                     if (use_uniform==0) {
                         float one[4]={1.0f,1.0f,1.0f,1.0f};

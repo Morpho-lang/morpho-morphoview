@@ -1,10 +1,11 @@
 // Phase 5dx.2: U V / refreshMesh float layout matches define (xn vs xnc).
-// Opaque TriangleComplex must morph with xnc stride; translucent with xn.
+// ColorTable stays xnc; uniform Color (opaque or translucent) uses xn.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testrefreshlayout.morpho
 
 import xgraphics
+import xshow
 import xcolor
 
 class Buf {
@@ -76,7 +77,7 @@ var showO = Show()
 var defineO = Buf()
 showO.write(gOpaque, defineO)
 
-expect(showO.vertexLayout[idOpaque] == "xnc", "opaque layout is xnc")
+expect(showO.slots[idOpaque].layout == "xnc", "opaque layout is xnc")
 var sawXnc = false
 for (line in defineO.lines) {
   if (line == "v \"xnc\"") sawXnc = true
@@ -95,7 +96,7 @@ var showT = Show()
 var defineT = Buf()
 showT.write(gTx, defineT)
 
-expect(showT.vertexLayout[idTx] == "xn", "translucent layout is xn")
+expect(showT.slots[idTx].layout == "xn", "translucent layout is xn")
 var sawXn = false
 for (line in defineT.lines) {
   if (line == "v \"xn\"") sawXn = true
@@ -106,6 +107,24 @@ var morphT = Buf()
 expect(showT.emitEntryVertices(gTx, idTx, morphT), "translucent morph emits")
 expect(countUvFloats(morphT.lines) == 18, "translucent morph is 3×6 floats")
 
+/* ---- opaque uniform Color: define xn, morph xn (3 verts × 6 floats) ---- */
+var gUni = Scene()
+var idUni = gUni.display(makeTri(1.0))
+var showU = Show()
+var defineU = Buf()
+showU.write(gUni, defineU)
+expect(showU.slots[idUni].layout == "xn", "opaque uniform layout is xn")
+var sawUniXn = false
+var sawUniXnc = false
+for (line in defineU.lines) {
+  if (line == "v \"xn\"") sawUniXn = true
+  if (line == "v \"xnc\"") sawUniXnc = true
+}
+expect(sawUniXn && !sawUniXnc, "opaque uniform Color emits v \"xn\" + C")
+var morphU = Buf()
+expect(showU.emitEntryVertices(gUni, idUni, morphU), "uniform morph emits")
+expect(countUvFloats(morphU.lines) == 18, "opaque uniform morph is 3×6 floats")
+
 /* ---- unmapped / wrong type fail cleanly ---- */
 expect(!showO.emitEntryVertices(gOpaque, 999, Buf()), "missing id fails")
 var gSph = Scene()
@@ -113,5 +132,23 @@ var sid = gSph.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], 
 var showS = Show()
 showS.write(gSph, Buf())
 expect(!showS.emitEntryVertices(gSph, sid, Buf()), "sphere entry is not mesh morph")
+
+/* ---- xn ↔ xnc cannot U V; same layout can ---- */
+expect(showO.canRefreshVertices(idOpaque, makeTri()), "xnc → xnc can U V")
+expect(!showO.canRefreshVertices(idOpaque, makeTri(1.0)), "xnc → xn cannot U V")
+expect(showU.canRefreshVertices(idUni, makeTri(1.0)), "xn → xn can U V")
+expect(!showU.canRefreshVertices(idUni, makeTri()), "xn → xnc cannot U V")
+expect(!showS.canRefreshVertices(sid, makeTri()), "sphere cannot U V")
+
+gOpaque.morph(idOpaque, makeTri(1.0))
+expect(!showO.emitEntryVertices(gOpaque, idOpaque, Buf()), "U V refused after xn swap")
+gOpaque.morph(idOpaque, makeTri())
+
+/* full replace after layout change updates the slot */
+expect(gUni.morph(idUni, makeTri()), "scene morph to ColorTable")
+var bufRep = Buf()
+expect(showU.emitEntryReplace(gUni, idUni, bufRep), "replace after xn→xnc")
+expect(showU.slots[idUni].layout == "xnc", "replace updates slot to xnc")
+expect(!hasPrefix(bufRep.lines[0], "U V "), "replace is not U V")
 
 print "ok"

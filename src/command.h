@@ -240,11 +240,13 @@ typedef struct {
 } mv_cmd_color;
 
 /** Select the active color for subsequent draws.
- *  Language: `C <id>`
- *  @param id  Color identifier previously defined with `c` */
+ *  Language: `C <id>` or bare `C`
+ *  @param id     Color identifier previously defined with `c` (unused if clear)
+ *  @param clear  Bare `C`: clear the draw-slot override (restore vertex colors) */
 typedef struct {
     mv_command cmd;
     int id;
+    bool clear;
 } mv_cmd_select_color;
 
 /** Set shading mode and optional Phong coefficients for subsequent draws.

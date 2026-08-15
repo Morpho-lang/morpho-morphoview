@@ -52,7 +52,8 @@ var show = Show()
 show.write(g, buf)
 var lines = buf.lines
 
-expect(anyExact(lines, "v \"xc\""), "opaque points/lines should bake color into xc")
+expect(anyExact(lines, "v \"x\""), "uniform points/lines should use colorless x + C")
+expect(!anyExact(lines, "v \"xc\""), "uniform points/lines should not bake per-vertex RGB")
 expect(anyStarts(lines, "p "), "expected point element command")
 expect(anyExact(lines, "p 0 1 2") || anyStarts(lines, "p 0"), "expected point indices")
 expect(anyStarts(lines, "l "), "expected line element command")
@@ -74,8 +75,8 @@ var id3 = g3.display(PointCloud(pos, color=Red), [1, 2, 3], scale=2)
 var buf3 = Buf()
 var show3 = Show()
 show3.write(g3, buf3)
-expect(show3.objectMap.contains(id3), "PointCloud entry is mapped")
+expect(show3.slots.contains(id3), "PointCloud entry is mapped")
 expect(anyStarts(buf3.lines, "t 1"), "posed PointCloud emits translation")
-expect(anyExact(buf3.lines, "d ${id3} ${show3.objectMap[id3]}"), "d graphicsId objectId")
+expect(anyExact(buf3.lines, "d ${id3} ${show3.slots[id3].objectid}"), "d graphicsId objectId")
 
 print "ok"

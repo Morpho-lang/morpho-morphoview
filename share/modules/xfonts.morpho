@@ -1,0 +1,78 @@
+/** Cross-platform font lookup for Show and POV-Ray. */
+
+/** Resolve font files and common font roles across platforms.
+ *  Returns a font *name* for `Text(..., font=...)`, or nil → Show default. */
+class FontFinder {
+  init() { }
+
+  folders() {
+    var platform = System.platform()
+    if (platform=="macos") return ["/System/Library/Fonts"]
+    if (platform=="windows") return [Folder.normalizePath("C:/Windows/Fonts")]
+    return ["/usr/share/fonts", "/usr/local/share/fonts"]
+  }
+
+  match(file, font) {
+    var parts = file.split(".")
+    var n = parts.count()
+    if (n < 2) return false
+    var ext = parts[n-1]
+    var base = file.substring(0, file.count() - ext.count() - 1)
+    return base==font && (ext=="ttc" || ext=="ttf")
+  }
+
+  search(folder, font) {
+    if (!Folder.isFolder(folder)) return nil
+    for (f in Folder.contents(folder)) {
+      var path = Folder.normalizePath("${folder}/${f}")
+      if (self.match(f, font)) return path
+      if (Folder.isFolder(path)) {
+        var nested = self.search(path, font)
+        if (nested) return nested
+      }
+    }
+    return nil
+  }
+
+  /** Filesystem path for a font name, or nil. */
+  find(font) {
+    for (folder in self.folders()) {
+      var found = self.search(folder, font)
+      if (found) return found
+    }
+    return nil
+  }
+
+  /** First candidate that resolves on this machine, else nil. */
+  pick(candidates) {
+    for (name in candidates) {
+      if (self.find(name)) return name
+    }
+    return nil
+  }
+
+  /** Platform default body face (Helvetica / arial / FreeSans). */
+  default() {
+    var platform = System.platform()
+    var candidates
+    if (platform=="macos") {
+      candidates = ["Helvetica", "Arial", "DejaVuSans", "FreeSans"]
+    } else if (platform=="windows") {
+      candidates = ["arial", "segoeui", "calibri", "tahoma"]
+    } else {
+      candidates = ["DejaVuSans", "FreeSans", "LiberationSans", "NimbusSans-Regular", "Ubuntu-R"]
+    }
+    var name = self.pick(candidates)
+    return isnil(name) ? candidates[0] : name
+  }
+
+  /** Math / emoji / symbol coverage when available. */
+  symbol() {
+    return self.pick(["Apple Symbols", "seguisym", "DejaVuSans", "FreeSans", "Symbola"])
+  }
+
+  /** CJK body face when available. */
+  cjk() {
+    return self.pick(["Hiragino Sans GB", "msyh", "NotoSansCJK-Regular", "NotoSansCJKjp-Regular", "TakaoPGothic"])
+  }
+}

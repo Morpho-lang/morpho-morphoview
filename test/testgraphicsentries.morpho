@@ -123,4 +123,28 @@ show.write(gs, buf3)
 expect(buf3.lines.count() > 0 && buf3.lines[0].count() >= 3 && buf3.lines[0][0] == "U",
        "replace path starts with U")
 
+/* ---- faceIndices: dense membership vs sparse winding ---- */
+var dense = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Red,
+  Matrix([[1], [1], [1]])
+)
+expect(dense.faceIndices(0).count() == 3, "dense face has 3 vertices")
+expect(dense.faceIndices(0)[0] == 0 && dense.faceIndices(0)[2] == 2, "dense ascending ids")
+var sp = Sparse(3, 1)
+sp[2, 0] = 1
+sp[0, 0] = 1
+sp[1, 0] = 1
+var sparse = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Red,
+  sp
+)
+var sidx = sparse.faceIndices(0)
+var ridx = sp.rowindices(0)
+expect(sidx.count() == ridx.count() && sidx.count() == 3, "sparse face has 3 vertices")
+expect(sidx[0] == ridx[0] && sidx[1] == ridx[1] && sidx[2] == ridx[2], "sparse faceIndices is rowindices")
+
 print "ok"

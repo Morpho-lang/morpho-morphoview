@@ -33,11 +33,18 @@ typedef struct {
     bool has_object;
 } command_parsectx;
 
+typedef enum {
+    COLORSTAMP_NONE = 0, /**< No `C` in this batch — preserve draw colorid */
+    COLORSTAMP_SET,      /**< `C <id>` — stamp uniform override */
+    COLORSTAMP_CLEAR     /**< Bare `C` — clear override (restore vertex colors) */
+} colorstamp_kind;
+
 typedef struct {
     scene *scene;
     display *display;
     gobject *cobject;
     int current_colorid; /**< Last `C` id, or SCENE_EMPTY */
+    colorstamp_kind colorstamp;
 } command_applyctx;
 
 void command_parsectx_init(command_parsectx *ctx) {
@@ -47,11 +54,30 @@ void command_parsectx_init(command_parsectx *ctx) {
     ctx->has_object=false;
 }
 
+static void command_reset_colorstamp(command_applyctx *ctx) {
+    ctx->current_colorid=SCENE_EMPTY;
+    ctx->colorstamp=COLORSTAMP_NONE;
+}
+
 void command_applyctx_init(command_applyctx *ctx) {
     ctx->scene=NULL;
     ctx->display=NULL;
     ctx->cobject=NULL;
-    ctx->current_colorid=SCENE_EMPTY;
+    command_reset_colorstamp(ctx);
+}
+
+/** Resolve the current batch's `C` into a stamp for `d` / `T`. */
+static void command_draw_colorstamp(command_applyctx *ctx, bool *stamp_color, int *colorid) {
+    if (ctx->colorstamp==COLORSTAMP_SET) {
+        *stamp_color=true;
+        *colorid=ctx->current_colorid;
+    } else if (ctx->colorstamp==COLORSTAMP_CLEAR) {
+        *stamp_color=true;
+        *colorid=SCENE_EMPTY;
+    } else {
+        *stamp_color=false;
+        *colorid=SCENE_EMPTY;
+    }
 }
 
 /** Sticky apply context across command_process batches (follow-up chunks may omit `S`). */
@@ -227,7 +253,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
             ctx->scene = s;
             ctx->cobject = NULL;
-            ctx->current_colorid = SCENE_EMPTY;
+            command_reset_colorstamp(ctx);
             return true;
         }
 
@@ -250,7 +276,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
             ctx->scene = s;
             ctx->cobject = NULL;
-            ctx->current_colorid = SCENE_EMPTY;
+            command_reset_colorstamp(ctx);
             return true;
         }
 
@@ -380,7 +406,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             }
             scene_cleardisplaylist(ctx->scene);
             scene_markchanged(ctx->scene);
-            ctx->current_colorid = SCENE_EMPTY;
+            command_reset_colorstamp(ctx);
             if (ctx->display && ctx->display->window) {
                 glfwMakeContextCurrent(ctx->display->window);
                 render_reset(&ctx->display->render);
@@ -496,13 +522,21 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             return true;
         }
 
-        case MVCMD_SELECT_COLOR:
+        case MVCMD_SELECT_COLOR: {
+            mv_cmd_select_color *c = MVCMD_AS_SELECT_COLOR(cmd);
             if (!ctx->scene) return false;
-            /* Context only: stamp onto subsequent `d` / `T` via current_colorid.
+            /* Context only: stamp onto subsequent `d` / `T`.
              * Do not append COLOR displaylist entries (unbounded on live recolor)
              * or mark the scene changed — draw-slot color lives on the OBJECT/TEXT. */
-            ctx->current_colorid = MVCMD_AS_SELECT_COLOR(cmd)->id;
+            if (c->clear) {
+                ctx->colorstamp = COLORSTAMP_CLEAR;
+                ctx->current_colorid = SCENE_EMPTY;
+            } else {
+                ctx->colorstamp = COLORSTAMP_SET;
+                ctx->current_colorid = c->id;
+            }
             return true;
+        }
 
         case MVCMD_MATERIAL: {
             mv_cmd_material *c = MVCMD_AS_MATERIAL(cmd);
@@ -519,7 +553,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             if (!ctx->scene) return false;
 
             int objectid = c->has_objectid ? c->objectid : c->drawid;
-            int stamp = ctx->current_colorid;
+            bool stamp_color;
+            int stamp;
+            command_draw_colorstamp(ctx, &stamp_color, &stamp);
             gdraw *drw = scene_finddrawbydrawid(ctx->scene, c->drawid);
 
             /* Legacy single-arg: fall back to first OBJECT with this object id. */
@@ -540,10 +576,11 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 bool had_matrix = (drw->matindx != SCENE_EMPTY);
                 int old_color = drw->colorid;
                 scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
-                                       c->has_matrix ? c->matrix : NULL, stamp);
+                                       c->has_matrix ? c->matrix : NULL,
+                                       stamp_color, stamp);
 
                 /* Color is baked into the renderlist at prepare time. */
-                if (stamp != SCENE_EMPTY && stamp != old_color)
+                if (stamp_color && stamp != old_color)
                     need_prepare = true;
                 /* First matrix on a draw needs prepare so RMODEL enters the list. */
                 if (c->has_matrix && !had_matrix)
@@ -553,7 +590,8 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 if (need_prepare) command_touchscene(ctx);
             } else {
                 scene_addobjectdraw(ctx->scene, c->drawid, objectid,
-                                    c->has_matrix ? c->matrix : NULL, stamp);
+                                    c->has_matrix ? c->matrix : NULL,
+                                    stamp_color ? stamp : SCENE_EMPTY);
                 command_touchscene(ctx);
             }
             return true;
@@ -575,7 +613,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 return false;
             }
 
-            int stamp = ctx->current_colorid;
+            bool stamp_color;
+            int stamp;
+            command_draw_colorstamp(ctx, &stamp_color, &stamp);
             const float *matrix = c->has_matrix ? c->matrix : NULL;
 
             if (c->drawid != SCENE_EMPTY) {
@@ -590,14 +630,15 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                     text_prepare(scene_getfontfromid(ctx->scene, c->fontid),
                                  txt->text);
                     scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
-                                           matrix, stamp);
+                                           matrix, stamp_color, stamp);
                     command_touchscene(ctx);
                     return true;
                 }
 
                 int tid = scene_addtext(ctx->scene, c->fontid, c->string);
                 c->string = NULL; /* transferred to scene */
-                scene_addtextdraw(ctx->scene, c->drawid, tid, matrix, stamp);
+                scene_addtextdraw(ctx->scene, c->drawid, tid, matrix,
+                                  stamp_color ? stamp : SCENE_EMPTY);
                 command_touchscene(ctx);
                 return true;
             }
@@ -611,7 +652,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 matindx = scene_adddata(ctx->scene, c->matrix, 16);
             }
             scene_adddraw(ctx->scene, TEXT, tid, matindx);
-            if (stamp != SCENE_EMPTY && ctx->scene->displaylist.count > 0) {
+            if (stamp_color && ctx->scene->displaylist.count > 0) {
                 gdraw *last = &ctx->scene->displaylist.data[
                     ctx->scene->displaylist.count - 1];
                 last->colorid = stamp;
@@ -632,7 +673,7 @@ int command_process(void) {
     command_applyctx *ctx = command_sticky_applyctx();
     /* Per-batch color selection: pose-only `d` must not stamp a stale `C`
      * from a previous ZMQ chunk (e.g. after recolor). */
-    ctx->current_colorid = SCENE_EMPTY;
+    command_reset_colorstamp(ctx);
 
     /* Steal the queue under the lock so apply (GL) does not block the I/O thread. */
     varray_mv_commandptr batch;
@@ -1057,9 +1098,11 @@ bool command_parsecolor(parser *p, void *out) {
 
 bool command_parseselectcolor(parser *p, void *out) {
     (void) out;
-    int id;
-
-    PARSE_CHECK(command_parseinteger(p, &id));
+    bool clear = !parse_checktoken(p, MVTOKEN_INTEGER);
+    int id = SCENE_EMPTY;
+    if (!clear) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+    }
 
     mv_cmd_select_color *cmd = command_new(MVCMD_SELECT_COLOR, sizeof(mv_cmd_select_color));
     if (!cmd) {
@@ -1067,6 +1110,7 @@ bool command_parseselectcolor(parser *p, void *out) {
         return false;
     }
     cmd->id=id;
+    cmd->clear=clear;
     return command_enqueue_owned(p, &cmd->cmd);
 }
 

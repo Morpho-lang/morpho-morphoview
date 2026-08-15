@@ -6,7 +6,7 @@
  *    var v = View(scene)            // open + listen
  *    v.open(commands)               // or ASCII chunk
  *    scene.move(id, ...)            // → pose-only d / C
- *    v.morph(id, item)              // same-length U V (vs replace)
+   *    v.morph(id, item)              // same-layout U V; xn↔xnc → replace
  *    v.poll(timeoutms=0)
  *    v.wait(sessiontimeout=1500)
  *    v.close()
@@ -16,6 +16,7 @@
 
 import zeromq
 import xgraphics
+import xshow
 import broadcast
 
 var _vwopnfl = Error("VwOpnFl", "View failed to open morphoview session.")
@@ -216,11 +217,32 @@ class View with Listener {
     return self._sendWait(self._takeCommands())
   }
 
-  /** Swap item and push same-length vertices (U V). Use replace for new connectivity. */
+  /** Swap item and push vertices. `U V` only when the slot layout matches (`xn`→`xn`
+   *  or `xnc`→`xnc`); `xn`↔`xnc` falls back to a full object replace. Validates the
+   *  Show slot before mutating; rolls back the Scene item if the emit fails. */
   morph(graphicsId, item) {
-    if (self.closed || isnil(self.graphics)) return false
+    if (self.closed || isnil(self.graphics) || isnil(self.show)) return false
+    var entry = self.graphics.findEntry(graphicsId)
+    if (isnil(entry)) return false
+    if (!self.show.slots.contains(graphicsId)) return false
+
+    var sameLayout = self.show.canRefreshVertices(graphicsId, item)
+    var prev = entry.item
     if (!self.graphics.morph(graphicsId, item)) return false
-    return self.refreshMesh(graphicsId)
+
+    var ok
+    if (sameLayout) {
+      ok = self.refreshMesh(graphicsId)
+    } else {
+      ok = self._emitAndWait(fn () {
+        if (!self.show.emitEntryReplace(self.graphics, graphicsId, self)) return
+      })
+    }
+    if (!ok) {
+      self.graphics.morph(graphicsId, prev)
+      return false
+    }
+    return true
   }
 
   /** Push U V for a TriangleComplex entry (layout must match define: xn / xnc). */

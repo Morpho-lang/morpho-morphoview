@@ -6,6 +6,7 @@
 import meshtools
 import xplot
 import xgraphics
+import xshow
 import xcolor
 
 class Buf {

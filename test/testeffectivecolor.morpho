@@ -1,0 +1,80 @@
+// GraphicsEntry.effectiveColor: nil override vs intrinsic, recolor, clear, replace.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testeffectivecolor.morpho
+
+import xgraphics
+import xcolor
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn rgbEq(a, b) {
+  var ca = a.rgb(0), cb = b.rgb(0)
+  return abs(ca[0]-cb[0]) < 1e-12 && abs(ca[1]-cb[1]) < 1e-12 && abs(ca[2]-cb[2]) < 1e-12
+}
+
+fn isGrayHalf(c) {
+  var t = c.rgb(0)
+  return abs(t[0]-0.5) < 1e-12 && abs(t[1]-0.5) < 1e-12 && abs(t[2]-0.5) < 1e-12
+}
+
+/* ---- primitive color is never nil ---- */
+var sph = Sphere([0, 0, 0], 1, color=Blue, maxrefine=1)
+expect(!isnil(sph.color) && rgbEq(sph.color, Blue), "explicit primitive color")
+var sphDef = Sphere([0, 0, 0], 1, maxrefine=1)
+expect(!isnil(sphDef.color) && isGrayHalf(sphDef.color), "missing color → Gray(0.5)")
+
+/* ---- display does not copy intrinsic color onto the entry ---- */
+var scene = Scene()
+var id = scene.display(sph)
+var e = scene.findEntry(id)
+expect(isnil(e.color), "no override after display")
+expect(rgbEq(e.effectiveColor(), Blue), "effectiveColor is intrinsic Blue")
+
+/* ---- recolor is a uniform override ---- */
+expect(scene.recolor(id, Red), "recolor Red")
+expect(rgbEq(e.color, Red), "entry.color is Red")
+expect(rgbEq(e.effectiveColor(), Red), "effectiveColor is Red")
+expect(rgbEq(e.item.color, Blue), "item.color unchanged")
+
+/* ---- recolor(nil) clears the override ---- */
+expect(scene.recolor(id, nil), "recolor nil")
+expect(isnil(e.color), "override cleared")
+expect(rgbEq(e.effectiveColor(), Blue), "effectiveColor restored to Blue")
+
+/* ---- replace with no override adopts new intrinsic color ---- */
+expect(scene.replace(id, Sphere([0, 0, 0], 1, color=Green, maxrefine=1)), "replace Green")
+expect(isnil(e.color), "still no override after replace")
+expect(rgbEq(e.effectiveColor(), Green), "effectiveColor is new Green")
+
+/* ---- explicit recolor survives item replacement ---- */
+expect(scene.recolor(id, Red), "override Red again")
+expect(scene.replace(id, Sphere([0, 0, 0], 1, color=Yellow, maxrefine=1)), "replace Yellow")
+expect(rgbEq(e.color, Red), "override survives replace")
+expect(rgbEq(e.effectiveColor(), Red), "effectiveColor still Red")
+expect(rgbEq(e.item.color, Yellow), "new item is Yellow")
+
+/* ---- Text: omitted color= leaves nil override ---- */
+var gTxt = Scene()
+var tid = gTxt.display(Text("hi", [0, 0, 0], color=White))
+expect(isnil(gTxt.findEntry(tid).color), "text display does not copy color")
+expect(rgbEq(gTxt.findEntry(tid).effectiveColor(), White), "text effectiveColor is White")
+
+/* ---- TriangleComplex ColorTable + display color=Red ---- */
+var pos = Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]])
+var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
+var conn = Matrix([[1], [1], [1]])
+var tbl = ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
+var gMesh = Scene()
+var mid = gMesh.display(TriangleComplex(pos, nrm, tbl, conn), color=Red)
+var me = gMesh.findEntry(mid)
+expect(rgbEq(me.color, Red), "mesh display color= is override")
+expect(rgbEq(me.effectiveColor(), Red), "override hides ColorTable")
+expect(me.item.color.clss() == ColorTable, "item keeps ColorTable")
+
+print "ok"

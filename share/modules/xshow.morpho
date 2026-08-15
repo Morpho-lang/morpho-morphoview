@@ -1,0 +1,773 @@
+/* Morphoview ASCII serializer and static viewer launch.
+ *
+ *  - `Show()`     — serializer only (uid / font / color state)
+ *  - `Show(g)`    — fire-and-forget (temp file + morphoview -t)
+ *  - `show.write(g, out)` — emit ASCII commands to any `out.write(...)` sink
+ *
+ * Live View sessions live in morphoview.morpho (Listener over ZMQ).
+ */
+
+import xgraphics
+import xcolor
+import xfonts
+
+var _fntntfnd = Error("FntNtFnd", "Font not found.")
+var _GfxXnca = Error("GfxXnca",
+  "ColorTable per-vertex alpha is dropped until the viewer supports xnca.")
+var _warnedXnca = false
+
+/** Escape `\` and `"` for morphoview quoted protocol strings. */
+fn _mvEscape(s) {
+  var out = ""
+  var n = s.count()
+  for (i in 0...n) {
+    var ch = s.substring(i, i+1)
+    if (ch == "\\" || ch == "\"") out += "\\"
+    out += ch
+  }
+  return out
+}
+
+fn _effectiveRadius(scale) {
+  if (isnil(scale)) return 1
+  if (ismatrix(scale) || islist(scale)) {
+    var m = abs(scale[0])
+    var a1 = abs(scale[1]), a2 = abs(scale[2])
+    if (a1 > m) m = a1
+    if (a2 > m) m = a2
+    return m
+  }
+  return scale
+}
+
+fn _meshKey(Sphere item, entry) {
+  return "sphere:${item._refinementLevel(_effectiveRadius(entry.scale))}"
+}
+fn _meshKey(Cylinder item, entry) { return "cylinder:${item.n}" }
+fn _meshKey(Arrow item, entry) { return "arrow:${item.n}:${item.aspectratio}" }
+
+fn _unitTri(Sphere item, entry) {
+  return item.toTriangleComplex(scale=false, radiusforrefine=_effectiveRadius(entry.scale))
+}
+fn _unitTri(Cylinder item, entry) { return item.toTriangleComplex(unit=true) }
+fn _unitTri(Arrow item, entry) { return item.toTriangleComplex(unit=true) }
+
+class Font {
+  init (name, size, id=nil) {
+    self.name = name
+    self.size = size
+    self.id = id
+  }
+}
+
+/* **************************************
+ * Resolve morphoview executable (Show launch + View spawn)
+ **************************************** */
+
+var _mvbin = nil
+var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command); please upgrade morphopm.")
+
+fn findMorphoViewBin() {
+  if (!isnil(_mvbin)) return _mvbin
+
+  var exe = (System.platform()=="windows" ? "morphoview.exe" : "morphoview")
+  var roots = []
+  var haspm = System.subprocess(System.platform()=="windows" ? "where morphopm" : "command -v morphopm")
+
+  if (haspm["exitstatus"]==0) {
+    var line = System.subprocess("morphopm path morphoview")["stdout"].split("\n")[0]
+    var parts = line.split("'")
+    var code = (parts.count()>1) ? parts[1] : ""
+    if (code == "ErrMorphoPMUnrcgnzd") _mvpmold.throw()
+    /* Only trust morphopm when it prints a real directory; otherwise fall through
+     * (NotInst, empty/stderr-only output, stale path, other errors). */
+    if (line.count()>0 && Folder.isFolder(line)) roots.append(line)
+  }
+
+  /* No usable morphopm path — scan ~/.morphopackages (dev checkout). */
+  if (roots.count()==0 && Folder.contents(System.homefolder()).contains(".morphopackages")) {
+    for (p in File(Folder.normalizePath("${System.homefolder()}/.morphopackages")).lines()) {
+      if (p.split("/\\").contains("morpho-morphoview")) roots.append(p)
+    }
+  }
+
+  for (root in roots) {
+    var bindir = Folder.normalizePath("${root}/bin")
+    if (root.count()>0 && Folder.isFolder(bindir) && Folder.contents(bindir).contains(exe)) {
+      _mvbin = Folder.normalizePath("${bindir}/${exe}")
+      return _mvbin
+    }
+  }
+
+  // [Compatibility shim] Old Show launched a bare `morphoview` on PATH.
+  _mvbin = "morphoview"
+  return _mvbin
+}
+
+/* **************************************
+ * Show a graphics object
+ *
+ *  - `Show()`     — serializer only (uid / font / color state)
+ *  - `Show(g)`    — fire-and-forget (temp file + morphoview -t)
+ *  - `show.write(g, out)` — emit ASCII commands to any `out.write(...)` sink
+ **************************************** */
+
+/** Private serializer bookkeeping for one Graphics entry's viewer draw slot. */
+class _ViewerSlot {
+  init(objectid, colorid=nil, flat=false, text=false, layout=nil) {
+    self.objectid = objectid
+    self.colorid = colorid
+    self.flat = flat
+    self.text = text
+    self.layout = layout
+  }
+}
+
+class Show {
+  // Serializer only — use write(g, out) with any write-able sink.
+  init() {
+    self.uidInit()
+    self.fonts = []
+    self.colors = Dictionary()
+    self.sceneId = 1
+    self.replace = false
+    self.slots = Dictionary()        // graphicsId → _ViewerSlot
+    self.meshCache = Dictionary()    // mesh key → viewer object id (shared geometry)
+    self._lastColorId = nil
+    self._lastVertexLayout = nil
+  }
+
+  // Fire-and-forget: temp file + morphoview -t.
+  init(g) {
+    self.init()
+    self._launch(g)
+  }
+
+  /** Fire-and-forget: temp file + morphoview -t (viewer unlinks the file on exit). */
+  _launch(g) {
+    var isWindows = System.platform()=="windows"
+    // Build with /; Folder.normalizePath rewrites separators for the platform.
+    var tempFolder = isWindows ?
+      "${System.homefolder()}/AppData/Local/Temp" : "/tmp"
+    var fname = self._randomAlphanumString(10)
+    var path = Folder.normalizePath("${tempFolder}/morpho${fname}.draw")
+    var out = File(path, "w")
+    var bin = findMorphoViewBin()
+
+    self.write(g, out)
+
+    out.close()
+
+    if (isWindows) {
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}'\"")
+    } else {
+      // 1/7/25 Redirect error output to /dev/null
+      system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
+    }
+  }
+
+  /** Generate a random name */
+  _randomAlphanumString(n) {
+    var alpha="abcdefghijklmnopqrstuvwxyz0123456789"
+    var name=""
+    var nalpha = alpha.count()
+    for (i in 1..n) {
+      var k = Int(random()*nalpha)
+      if (k >= nalpha) k = nalpha-1
+      name+=alpha[k]
+    }
+    return name
+  }
+
+  uidInit() {
+    self.uid = 0
+  }
+
+  uid() { // Generate unique identifiers
+    self.uid+=1
+    return self.uid
+  }
+
+  preamble(graphic, out) {
+    if (self.replace) {
+      out.write("U S ${self.sceneId}")
+    } else {
+      out.write("S ${self.sceneId} 3")
+      out.write("W \"${_mvEscape(graphic.title)}\"")
+    }
+    var bg = graphic.background.rgb(0)
+    out.write("G ${self.fmt(bg[0])} ${self.fmt(bg[1])} ${self.fmt(bg[2])}")
+  }
+
+  // 3 significant figures — enough for display; keeps ASCII small vs full doubles.
+  // Morpho requires a width field (`%.3g` is rejected); use 0 to avoid padding spaces.
+  // Coerce via Float: Matrix/Color often yield Ints, and Int.format rejects %g.
+  fmt(x) {
+    return Float(x).format("%0.3g")
+  }
+
+  /* Bake via item.toTriangleComplex(). Separate from visit(entry, item) so typed
+   * overloads can fall back without recursing into themselves. */
+  visitGeneric(entry, item, out) {
+    var tri = item.toTriangleComplex()
+    if (isnil(tri)) return // e.g. zero-length Cylinder/Arrow
+    self.visit(entry, tri, out)
+  }
+
+  visit(entry, GraphicsPrimitive item, out) {
+    self.visitGeneric(entry, item, out)
+  }
+
+  /** Emit entry i / s / r (no translation, no draw). */
+  _emitEntryBasis(entry, out) {
+    out.write("i")
+    var scl = entry.scale
+    if (ismatrix(scl) || islist(scl)) {
+      out.write("s ${self.fmt(scl[0])} ${self.fmt(scl[1])} ${self.fmt(scl[2])}")
+    } else if (scl != 1) {
+      out.write("s ${self.fmt(scl)}")
+    }
+    if (!isnil(entry.rotate)) {
+      var r = entry.rotate
+      if (!(abs(r[0]) < 1e-8)) {
+        out.write("r ${self.fmt(r[0])} ${self.fmt(r[1])} ${self.fmt(r[2])} ${self.fmt(r[3])}")
+      }
+    }
+  }
+
+  /** Emit entry t when position is not the origin. */
+  _emitEntryTranslation(entry, out) {
+    var p = entry.position
+    if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
+      out.write("t ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}")
+    }
+  }
+
+  /** Emit entry SRT as i / s / r / t (no draw command). */
+  _emitEntrySRT(entry, out) {
+    self._emitEntryBasis(entry, out)
+    self._emitEntryTranslation(entry, out)
+  }
+
+  /** Emit i/s/r/t/d. With viewerid: d <graphicsId> <viewerid> (or d <viewerid> if entry.id==0).
+   *  Without viewerid: d <graphicsId> (pose-only). Does not emit `C` (pose-preserving). */
+  emitEntryDraw(entry, out, viewerid=nil) {
+    self._emitEntrySRT(entry, out)
+    self._emitDraw(entry, out, viewerid=viewerid)
+  }
+
+  /** `C` or `C <id>` for a recorded slot. `nil` colorid → bare `C` (intrinsic ColorTable). */
+  _emitSlotC(slot, out) {
+    if (isnil(slot.colorid)) out.write("C")
+    else out.write("C ${slot.colorid}")
+  }
+
+  _emitDraw(entry, out, viewerid=nil) {
+    if (isnil(viewerid)) {
+      out.write("d ${entry.id}")
+    } else if (entry.id != 0) {
+      out.write("d ${entry.id} ${viewerid}")
+    } else {
+      out.write("d ${viewerid}")
+    }
+  }
+
+  /** SRT, then `C` immediately before `d`, so the draw-slot color mode is self-contained. */
+  _emitColoredDraw(entry, out, viewerid=nil) {
+    self._emitEntrySRT(entry, out)
+    if (entry.id != 0 && self.slots.contains(entry.id)) {
+      self._emitSlotC(self.slots[entry.id], out)
+    }
+    self._emitDraw(entry, out, viewerid=viewerid)
+  }
+
+  /** Record graphicsId → viewer draw slot. */
+  _recordObject(entry, viewerid, colorid=nil, flat=false) {
+    if (isnil(entry) || entry.id == 0) return
+    self.slots[entry.id] = _ViewerSlot(viewerid, colorid=colorid, flat=flat,
+                                       layout=self._lastVertexLayout)
+  }
+
+  /** Record a TEXT draw-slot (objectid sentinel = graphicsId; never emit `X O`). */
+  _recordText(entry, colorid=nil) {
+    if (isnil(entry) || entry.id == 0) return
+    self.slots[entry.id] = _ViewerSlot(entry.id, colorid=colorid, text=true)
+  }
+
+  /** Re-issue draws for all mapped entries after `D` (entry SRT).
+   *  TEXT slots need a full `T` redefine (string is not recoverable from `d`). */
+  emitPoseDraws(graphic, out) {
+    for (entry in graphic.displaylist) {
+      if (!self.slots.contains(entry.id)) continue
+      var slot = self.slots[entry.id]
+      if (slot.text) {
+        self.writeEntry(entry, out)
+        continue
+      }
+      if (slot.flat) out.write("M flat")
+      self._emitColoredDraw(entry, out, viewerid=slot.objectid)
+      if (slot.flat) out.write("M shaded")
+    }
+  }
+
+  /** Pose-only draw for one graphics id (no C/M — for in-place `d` update after open). */
+  emitEntryPose(graphic, graphicsId, out) {
+    if (!self.slots.contains(graphicsId)) return false
+    var entry = graphic.findEntry(graphicsId)
+    if (isnil(entry)) return false
+    if (self.slots[graphicsId].text) {
+      self._emitTextTransforms(entry, entry.item, out)
+      out.write("d ${graphicsId}")
+      return true
+    }
+    self.emitEntryDraw(entry, out)
+    return true
+  }
+
+  /** Presentation RGB for an entry (entry.effectiveColor). */
+  entryRgb(entry) {
+    return self._rgbValue(entry.effectiveColor())
+  }
+
+  _perElement(ColorTable col) { return true }
+  _perElement(Coloring col) { return false }
+  _perElement(col) { return false }
+
+  // [Compatibility shim]
+  _warnDroppedVertexAlpha(ColorTable col) {
+    if (_warnedXnca) return
+    if (col.channels() < 4) return
+    var n = col.count()
+    for (i in 0...n) {
+      if (col.alpha(i) < 0.999) {
+        _warnedXnca = true
+        _GfxXnca.warning("ColorTable per-vertex alpha is not sent to the viewer yet (no xnca). Use uniform Color.a.")
+        return
+      }
+    }
+  }
+  _warnDroppedVertexAlpha(col) { }
+
+  _rgbValue(Coloring col) { return col.rgb(0) }
+  _rgbValue(col) { return Gray(0.5).rgb(0) }
+
+  /** Recolor: `C <id>` then `d`, or bare `C` to restore a ColorTable. */
+  emitEntryRecolor(graphic, graphicsId, out) {
+    if (!self.slots.contains(graphicsId)) return false
+    var entry = graphic.findEntry(graphicsId)
+    if (isnil(entry)) return false
+    var slot = self.slots[graphicsId]
+    if (isnil(entry.color) && self._perElement(entry.item.color)) {
+      slot.colorid = nil
+      out.write("C")
+      out.write("d ${graphicsId}")
+      return true
+    }
+    var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
+    slot.colorid = cid
+    out.write("C ${cid}")
+    out.write("d ${graphicsId}")
+    return true
+  }
+
+  /** How many Graphics entries map to this viewer object id (excluding text). */
+  objectUserCount(viewerid) {
+    var n = 0
+    for (gid in self.slots) {
+      var slot = self.slots[gid]
+      if (!slot.text && slot.objectid == viewerid) n += 1
+    }
+    return n
+  }
+
+  /** Drop Show slot for one Graphics entry id. */
+  forgetEntry(graphicsId) {
+    if (self.slots.contains(graphicsId)) self.slots.remove(graphicsId)
+  }
+
+  /** Drop meshCache keys that point at @p viewerid. */
+  _forgetMeshCacheFor(viewerid) {
+    var drop = []
+    for (key in self.meshCache) {
+      if (self.meshCache[key] == viewerid) drop.append(key)
+    }
+    for (key in drop) self.meshCache.remove(key)
+  }
+
+  /** Emit `X D` (+ `X O` if last user of a shared mesh object). Text never emits `X O`. */
+  emitEntryRemove(graphicsId, out) {
+    if (!self.slots.contains(graphicsId)) {
+      out.write("X D ${graphicsId}")
+      return true
+    }
+    var slot = self.slots[graphicsId]
+    var isText = slot.text
+    var vid = slot.objectid
+    out.write("X D ${graphicsId}")
+    self.forgetEntry(graphicsId)
+    if (!isText && self.objectUserCount(vid) == 0) {
+      out.write("X O ${vid}")
+      self._forgetMeshCacheFor(vid)
+    }
+    return true
+  }
+
+  /** Redefine a replaced entry: reuse shared Sphere `o` when possible; else remove + writeEntry. */
+  emitEntryReplace(graphic, graphicsId, out) {
+    var entry = graphic.findEntry(graphicsId)
+    if (isnil(entry)) return false
+    return self._emitReplace(entry, entry.item, out)
+  }
+
+  /** Reuse cached unit `o` when key still matches; else remove + rewrite. */
+  _emitCachedReplace(entry, item, key, out) {
+    var graphicsId = entry.id
+    var oldVid = self.slots.contains(graphicsId) ? self.slots[graphicsId].objectid : nil
+    if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
+      var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
+      self.slots[graphicsId].colorid = cid
+      self._emitColoredDraw(entry, out, viewerid=oldVid)
+      return true
+    }
+    self.emitEntryRemove(graphicsId, out)
+    self.writeEntry(entry, out)
+    return true
+  }
+
+  _emitReplace(entry, Sphere item, out) {
+    return self._emitCachedReplace(entry, item, _meshKey(item, entry), out)
+  }
+  _emitReplace(entry, Cylinder item, out) {
+    return self._emitCachedReplace(entry, item, _meshKey(item, entry), out)
+  }
+  _emitReplace(entry, Arrow item, out) {
+    return self._emitCachedReplace(entry, item, _meshKey(item, entry), out)
+  }
+
+  /** Unique mesh: drop old draw/object, then define+draw fresh. */
+  _emitReplace(entry, item, out) {
+    self.emitEntryRemove(entry.id, out)
+    self.writeEntry(entry, out)
+    return true
+  }
+
+  /** Vertex format Show would emit for this item (`xn` / `xnc`), or nil if not a mesh. */
+  vertexLayoutOf(TriangleComplex item) {
+    return self._perElement(item.color) ? "xnc" : "xn"
+  }
+  vertexLayoutOf(item) { return nil }
+
+  /** True when `U V` is safe: mapped TriangleComplex whose layout matches the existing slot. */
+  canRefreshVertices(graphicsId, item) {
+    if (!self.slots.contains(graphicsId)) return false
+    var layout = self.slots[graphicsId].layout
+    if (isnil(layout)) return false
+    return layout == self.vertexLayoutOf(item)
+  }
+
+  /** Same-length vertex replace for a mapped TriangleComplex (`U V`).
+   *  Float layout must match define (`xn` vs `xnc`); returns false if unmapped,
+   *  wrong type, layout unknown, or xn↔xnc (never emit a length the viewer will drop). */
+  emitEntryVertices(graphic, graphicsId, out) {
+    if (!self.slots.contains(graphicsId)) return false
+    var entry = graphic.findEntry(graphicsId)
+    if (isnil(entry)) return false
+    return self._emitVertices(entry, entry.item, out)
+  }
+
+  _emitVertices(entry, TriangleComplex item, out) {
+    if (!self.canRefreshVertices(entry.id, item)) return false
+    var slot = self.slots[entry.id]
+    var layout = slot.layout
+    var vid = slot.objectid
+    out.write("U V ${vid}")
+    if (layout == "xnc") {
+      self._triangleComplexVertexFloats(item, out, includecolor=true)
+    } else if (layout == "xn") {
+      self._triangleComplexVertexFloats(item, out, includecolor=false)
+    } else {
+      return false
+    }
+    return true
+  }
+
+  _emitVertices(entry, item, out) {
+    return false
+  }
+
+  /** Alpha from Coloring. ColorTable is per-vertex; do not collapse on first-vertex alpha. */
+  _clamp01(a) { return (a < 0) ? 0 : ((a > 1) ? 1 : a) }
+
+  _colorAlpha(ColorTable col) { return 1 }
+  _colorAlpha(Coloring col) { return self._clamp01(col.alpha(0)) }
+  _colorAlpha(col) { return 1 }
+
+  /** Presentation Color.a from effectiveColor (ColorTable does not collapse). */
+  opacity(GraphicsEntry entry) {
+    return self._colorAlpha(entry.effectiveColor())
+  }
+
+  /** Emit `c` for rgb[+alpha]; returns color id. Alpha < ~1 → RGBA. */
+  addRgb(rgb, alpha, out) {
+    var r = self.fmt(rgb[0])
+    var g = self.fmt(rgb[1])
+    var b = self.fmt(rgb[2])
+    var a = self.fmt(alpha)
+    var key = "${r} ${g} ${b} ${a}"
+    if (!self.colors.contains(key)) {
+      var id = self.colors[key] = self.colors.count()
+      out.write(alpha < 0.999 ?
+                "c ${id} ${r} ${g} ${b} ${a}" :
+                "c ${id} ${r} ${g} ${b}")
+    }
+    return self.colors[key]
+  }
+
+  triangleComplexObjectData(item, out, includecolor=true) {
+    if (includecolor) {
+      out.write("v \"xnc\"")
+    } else {
+      out.write("v \"xn\"")
+    }
+    self._triangleComplexVertexFloats(item, out, includecolor=includecolor)
+
+    out.write("f")
+    var nf=item.connectivity.dimensions()[1]
+    for (i in 0...nf) {
+      var indx = item.faceIndices(i)
+      var line = ""
+      for (j in 0...indx.count()) line+="${indx[j]} "
+      out.write(line)
+    }
+  }
+
+  /** Position + normal [+ RGB] float rows only (shared by define `v` and `U V`).
+   *  ColorTable per-vertex alpha is dropped until viewer xnca. */
+  _triangleComplexVertexFloats(item, out, includecolor=true) {
+    var x = item.position
+    var n = item.normals
+    var col = item.color
+    var indexed = self._perElement(col)
+    var rgb = indexed ? nil : self._rgbValue(col)
+    var dimensions = x.dimensions()
+    var dim = dimensions[0]
+    var nv = dimensions[1]
+
+    for (i in 0...nv) {
+      var line = ""
+      for (j in 0...dim) line += "${self.fmt(x[j,i])} "
+      for (j in 0...dim) line += "${self.fmt(n[j,i])} "
+      if (includecolor) {
+        var c = indexed ? col.rgb(i) : rgb
+        line += "${self.fmt(c[0])} ${self.fmt(c[1])} ${self.fmt(c[2])} "
+      }
+      out.write(line)
+    }
+  }
+
+  /** Define a TriangleComplex with `v "xn"` only (no vertex colors); returns viewer id.
+   *  Does not emit `C` — caller stamps color for the draw slot. */
+  defineXnTriangleComplex(item, out) {
+    var id = self.uid()
+    self._lastVertexLayout = "xn"
+    out.write("o ${id}")
+    self.triangleComplexObjectData(item, out, includecolor=false)
+    return id
+  }
+
+  /** Set `_lastColorId` for a uniform effective color or ColorTable override.
+   *  Does not emit `C` — draw-slot select is written immediately before `d`. */
+  _stampUniformC(entry, item, out) {
+    var hasTable = self._perElement(item.color)
+    if (hasTable) self._warnDroppedVertexAlpha(item.color)
+    self._lastColorId = nil
+    self._lastVertexLayout = nil
+    if (!hasTable || !isnil(entry.color)) {
+      self._lastColorId = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
+    }
+    return hasTable
+  }
+
+  /** Define a TriangleComplex (`o`/`v`/`f`); returns viewer object id.
+   *  Uniform coloring → `xn`. ColorTable → `xnc`. `C` is emitted at draw time. */
+  defineTriangleComplex(entry, item, out) {
+    var id = self.uid()
+    var hasTable = self._stampUniformC(entry, item, out)
+    self._lastVertexLayout = hasTable ? "xnc" : "xn"
+    out.write("o ${id}")
+    self.triangleComplexObjectData(item, out, includecolor=hasTable)
+    return id
+  }
+
+  /** Emit vertex positions (+ optional per-vertex RGB) for points/lines. */
+  pointLineVertexData(item, out, includecolor=true) {
+    var x = item.position
+    var col = item.color
+    var indexed = self._perElement(col)
+    var rgb = indexed ? nil : self._rgbValue(col)
+    var dimensions = x.dimensions()
+    var dim = dimensions[0]
+    var nv = dimensions[1]
+
+    if (includecolor) {
+      out.write("v \"xc\"")
+    } else {
+      out.write("v \"x\"")
+    }
+
+    for (i in 0...nv) {
+      var line = ""
+      for (j in 0...dim) line += "${self.fmt(x[j,i])} "
+      if (includecolor) {
+        var c = indexed ? col.rgb(i) : rgb
+        line += "${self.fmt(c[0])} ${self.fmt(c[1])} ${self.fmt(c[2])} "
+      }
+      out.write(line)
+    }
+  }
+
+  /** Define PointCloud geometry (`o`/`v`/`p`); sets `_lastColorId`. Returns viewer id or nil. */
+  definePointCloud(entry, item, out) {
+    var nv = item.position.dimensions()[1]
+    if (nv < 1) return nil
+    var id = self.uid()
+    var hasTable = self._stampUniformC(entry, item, out)
+    out.write("o ${id}")
+    self.pointLineVertexData(item, out, includecolor=hasTable)
+    var pline = "p"
+    for (i in 0...nv) pline += " ${i}"
+    out.write(pline)
+    return id
+  }
+
+  /** Define LineSet geometry (`o`/`v`/`l`); sets `_lastColorId`. Returns viewer id or nil. */
+  defineLineSet(entry, item, out) {
+    var nv = item.position.dimensions()[1]
+    var segs = item._segmentIndices()
+    if (nv < 1 || segs.count() < 2) return nil
+    var id = self.uid()
+    var hasTable = self._stampUniformC(entry, item, out)
+    out.write("o ${id}")
+    self.pointLineVertexData(item, out, includecolor=hasTable)
+    var lline = "l"
+    for (i in 0...segs.count()) lline += " ${segs[i]}"
+    out.write(lline)
+    return id
+  }
+
+  findFont(font) { return FontFinder().find(font) }
+  defaultFontName() { return FontFinder().default() }
+
+  addFont(font, size, out) {
+    var path = self.findFont(font)
+    if (!path) _fntntfnd.throw()
+    var id = self.uid()
+    var fnt = Font(font, size, id=id)
+    self.fonts.append(fnt)
+
+    out.write("F ${id} \"${_mvEscape(path)}\" ${size}")
+    return id
+  }
+
+  findFontId(font, size, out) {
+    for (f in self.fonts) {
+      if (f.name == font && f.size == size) return f.id
+    }
+    return self.addFont(font, size, out)
+  }
+
+  /** Entry SRT (+ optional dirn/vertical `m` before translation) before `T` / pose `d`. */
+  _emitTextTransforms(entry, Text item, out) {
+    self._emitEntryBasis(entry, out)
+    var m = item.transformationMatrix()
+    if (!isnil(m)) {
+      var str = "m"
+      for (i in 0..3) for (j in 0..3) str+=" "+self.fmt(m[i,j])
+      out.write(str)
+    }
+    self._emitEntryTranslation(entry, out)
+  }
+
+  write(graphic, out) {
+    self.preamble(graphic, out)
+    self.slots = Dictionary()
+    self.meshCache = Dictionary()
+
+    for (entry in graphic.displaylist) {
+      self.visit(entry, entry.item, out)
+    }
+  }
+
+  /** Define + draw a single entry (mid-session `defined`); updates object maps. */
+  writeEntry(entry, out) {
+    self.visit(entry, entry.item, out)
+  }
+
+  /** Text draw-slot: entry pose + `T <entryId> <fontId> "…"`. */
+  visit(entry, Text item, out) {
+    var font = item.font
+    if (!font) font = self.defaultFontName()
+    var fid = self.findFontId(font, item.size, out)
+    var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
+    self._recordText(entry, colorid=cid)
+    self._emitTextTransforms(entry, item, out)
+    out.write("C ${cid}")
+    out.write("T ${entry.id} ${fid} \"${_mvEscape(item.string)}\"")
+  }
+
+  /** Unit mesh from cache + entry SRT + `C` immediately before `d`. */
+  _visitUnitMesh(entry, item, out) {
+    var key = _meshKey(item, entry)
+    var vid
+    if (self.meshCache.contains(key)) {
+      vid = self.meshCache[key]
+    } else {
+      var tri = _unitTri(item, entry)
+      if (isnil(tri)) return
+      vid = self.defineXnTriangleComplex(tri, out)
+      self.meshCache[key] = vid
+    }
+    var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
+    self._recordObject(entry, vid, colorid=cid)
+    self._emitColoredDraw(entry, out, viewerid=vid)
+  }
+
+  visit(entry, Sphere item, out) { self._visitUnitMesh(entry, item, out) }
+  visit(entry, Cylinder item, out) { self._visitUnitMesh(entry, item, out) }
+  visit(entry, Arrow item, out) { self._visitUnitMesh(entry, item, out) }
+
+  /** PointCloud: define once, draw with entry SRT. Obeys entry.flat. */
+  visit(entry, PointCloud item, out) {
+    var flat = entry.flat
+    if (flat) out.write("M flat")
+    var vid = self.definePointCloud(entry, item, out)
+    if (!isnil(vid)) {
+      self._recordObject(entry, vid, colorid=self._lastColorId, flat=flat)
+      self._emitColoredDraw(entry, out, viewerid=vid)
+    }
+    if (flat) out.write("M shaded")
+  }
+
+  /** LineSet: define once, draw with entry SRT. Obeys entry.flat. */
+  visit(entry, LineSet item, out) {
+    var flat = entry.flat
+    if (flat) out.write("M flat")
+    var vid = self.defineLineSet(entry, item, out)
+    if (!isnil(vid)) {
+      self._recordObject(entry, vid, colorid=self._lastColorId, flat=flat)
+      self._emitColoredDraw(entry, out, viewerid=vid)
+    }
+    if (flat) out.write("M shaded")
+  }
+
+  /** TriangleComplex: define once for this write, draw with entry SRT.
+   *  Pass `flat=true` on `display` (or set `entry.flat`) for unlit solid facet colors. */
+  visit(entry, TriangleComplex item, out) {
+    var flat = entry.flat
+    if (flat) out.write("M flat")
+    var vid = self.defineTriangleComplex(entry, item, out)
+    self._recordObject(entry, vid, colorid=self._lastColorId, flat=flat)
+    self._emitColoredDraw(entry, out, viewerid=vid)
+    if (flat) out.write("M shaded")
+  }
+}

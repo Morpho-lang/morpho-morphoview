@@ -106,6 +106,13 @@ var su = scene(gu)
 expect(!contains(su, "texture_list"), "uniform color is not texture_list")
 expect(contains(su, "finish { ambient 1 diffuse 0 }"), "flat finish on uniform color")
 
+/* ---- ColorTable + entry color=Red is uniform pigment ---- */
+var gov = Graphics()
+gov.display(TriangleComplex(pos, nrm, cols, conn), color=Red)
+var sov = scene(gov)
+expect(!contains(sov, "texture_list"), "entry override hides ColorTable")
+expect(contains(sov, "pigment { rgb <1, 0, 0> }"), "override is uniform Red")
+
 /* ---- transparent background ---- */
 var gb = Graphics(background=White)
 gb.display(Sphere([0,0,0], 1, color=Black))

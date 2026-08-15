@@ -47,7 +47,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `v` | `MVCMD_VERTICES` | `["format"] <floats…>` | Vertex data for current object |
 | `p` / `l` / `f` | `MVCMD_ELEMENT` | `<indices…>` | Points / lines / facets |
 | `c` | `MVCMD_COLOR` | `<id> <r g b [a]>…` | Color table entry (RGB or RGBA) |
-| `C` | `MVCMD_SELECT_COLOR` | `<id>` | Active color stamped onto subsequent `d` / `T` (parse context only) |
+| `C` | `MVCMD_SELECT_COLOR` | `<id>` or (none) | Active color stamped onto subsequent `d` / `T`. Bare `C` clears the draw-slot override (restore geometry vertex colors). Parse context only |
 | `M` | `MVCMD_MATERIAL` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Unlit or Phong (default ka=kd=0.5, ks=0) |
 | `d` | `MVCMD_DRAW` | `<drawId>` \| `<drawId> <objectId>` | Draw-slot; matrix from prior transforms; stamps `C`. Existing slot → update in place |
 | `D` | `MVCMD_CLEAR_DISPLAY` | — | Clear displaylist only; keep objects/colors/fonts/pools |
@@ -70,7 +70,8 @@ Apply context persists across ZMQ/file batches. Follow-up chunks may omit a lead
 
 ### Draw-slots
 
-- `d <drawId> [objectId]` — object defaults to `drawId` if one arg. If an OBJECT or TEXT draw for that id already exists, **replaces its matrix** (and stamps color) instead of appending. A no-matrix update preserves pose (recolor).
+- `d <drawId> [objectId]` — object defaults to `drawId` if one arg. If an OBJECT or TEXT draw for that id already exists, **replaces its matrix** (and stamps color if `C` preceded this `d`) instead of appending. A no-matrix `d` without `C` preserves pose and color mode (recolor uses `C` then `d`).
+- Bare `C` then `d` clears the uniform override so ColorTable geometry shows again.
 - `D` clears only the displaylist (draws) for the current sticky scene — objects, colors, fonts, and data pools remain.
 - `T <drawId> <fontid> "…"` creates/updates a text draw-slot (matrix like `d`). Legacy `T <fontid> "…"` appends.
 
@@ -92,11 +93,11 @@ I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V
 
 - **`M shaded`** (default) — Phong/Lambert; defaults \(k_a=k_d=0.5\), \(k_s=0\). Optional floats override coeffs.
 - **`M flat`** — unlit albedo (diagrams / categorical color).
-- **Uniform color:** `c` / `C` then `v "xn"` — `C` sets albedo (and optional alpha) for subsequent draws.
-- **Vertex color:** `v "xnc"` without a preceding `C` — per-vertex RGB is the albedo (opaque). At draw time, meshes whose format includes `c` clear uniform-color mode so a prior translucent `C` cannot steal their albedo/alpha.
+- **Uniform color:** `c` / `C` then `v "xn"` (or `v "x"` for points/lines) — `C` sets albedo (and optional alpha) for subsequent draws.
+- **Vertex color:** `v "xnc"` / `v "xc"` with a draw-slot in empty color mode — per-vertex RGB is the albedo (opaque). `C <id>` on the same draw-slot is a uniform override that hides vertex colors without redefining geometry. Bare `C` then `d` clears that override. `d` without a preceding `C` preserves the current mode. Package `Show` emits `C` or `C <id>` immediately before each `d` so the color mode is self-contained (bare `C` for an intrinsic ColorTable).
 - **Opacity:** `c <id> <r g b a>` — opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off. Transparent objects sorted **far → near** by object centroid. Closed translucent meshes draw back faces then front. Not triangle-level / OIT — intersecting translucents can still artifact.
 - **Facet winding:** Package `Show` emits sparse face indices via `rowindices`. At upload, the viewer reorients triangles so geometric normals agree with averaged vertex normals (needed for the transparent back/front pass).
-- **Graphics alpha:** Package `Show` maps uniform `Color.a` (and `Coloring.opacity`) to `c`/`C` + `v "xn"` when alpha &lt; 1. `Color(r,g,b)` is opaque with `a=1`; `Color(r,g,b,a)` sets alpha. A `ColorTable` on a vertex-bearing primitive is one color per vertex; `Show` emits `v "xnc"` RGB and currently drops per-vertex alpha when any alpha is not 1 (viewer `xnca` is not implemented yet). `GraphicsEntry.color` is a uniform presentation override and is not a `ColorTable`.
+- **Graphics alpha:** Package `Show` maps uniform `Color.a` (and `Coloring.opacity`) to `c`/`C` + colorless geometry (`v "xn"` / `v "x"`). `Color(r,g,b)` is opaque with `a=1`; `Color(r,g,b,a)` sets alpha. A `ColorTable` on a vertex-bearing primitive is one color per vertex; `Show` always emits `v "xnc"` / `v "xc"` RGB for those objects (per-vertex alpha is dropped until viewer `xnca`) and uses draw-slot `C` for a uniform `GraphicsEntry.color` override. `GraphicsEntry.color` is not a `ColorTable`.
 
 Lighting and eye position are in model space (stable under camera rotation). By default the light sits outside the scene AABB. `L <x> <y> <z>` sets an explicit position (default white); optional `<r g b>` sets light color; `L a` resumes AABB auto placement.
 
@@ -122,7 +123,6 @@ W "Example"
 G 0 0 0
 M shaded
 c 0 1 0 0
-C 0
 o 1
 v "xn"
 -0.5 -0.5 0  0 0 1
@@ -131,10 +131,11 @@ v "xn"
 l
 0 1 1 2 2 0
 i
+C 0
 d 1
 ```
 
-Fixtures under `test/command/`: `linespts`, `polyhedra`, `twoscenes`, `largebbox` (auto-fit), `flatshade`, `uniformphong`, `materials`, `opacity`, `depthsort`, `transparentspheres`, `light`, `background`, plus define/draw fixtures (`definedraw-*`).
+Fixtures under `test/command/`: `linespts`, `polyhedra`, `twoscenes`, `largebbox` (auto-fit), `flatshade`, `uniformphong`, `materials`, `opacity`, `depthsort`, `transparentspheres`, `light`, `background`, `color-override`, plus define/draw fixtures (`definedraw-*`).
 
 ## C API
 
