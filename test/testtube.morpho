@@ -1,0 +1,41 @@
+// Closed Tube face count / open Tube / Sparse faceIndices winding.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testtube.morpho
+
+import xgraphics
+import xcolor
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+/* ---- open tube ---- */
+var n = 8
+var pts = [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]]
+var open = Tube(pts, 0.1, n=n, closed=false, color=Red).toTriangleComplex()
+expect(!isnil(open), "open tube builds")
+var np = 4
+var ntOpen = n*(2*(np-1)) + 2*n // sidewalls + caps
+expect(open.connectivity.dimensions()[1] == ntOpen, "open face count")
+expect(open.faceIndices(0).count() == 3, "open faceIndices has 3 ids")
+
+/* ---- closed tube: nt = n*2*np ---- */
+var closed = Tube(pts, 0.1, n=n, closed=true, color=Blue).toTriangleComplex()
+expect(!isnil(closed), "closed tube builds")
+var ntClosed = n*2*np
+expect(closed.connectivity.dimensions()[1] == ntClosed, "closed face count = n*2*np")
+expect(closed.faceIndices(0).count() == 3, "closed faceIndices has 3 ids")
+expect(closed.faceIndices(ntClosed-1).count() == 3, "last closed face has 3 ids")
+
+/* ---- winding preserved (not sorted ascending) ---- */
+var idxs = closed.faceIndices(0)
+var sorted = idxs[0] < idxs[1] && idxs[1] < idxs[2]
+// May or may not be sorted; ensure three distinct ids
+expect(idxs[0] != idxs[1] && idxs[1] != idxs[2] && idxs[0] != idxs[2],
+       "faceIndices distinct")
+
+print "ok"

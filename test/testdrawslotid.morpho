@@ -73,7 +73,7 @@ expect(countPrefix(buf.lines, "d ") == 3, "three draw slots")
 
 // Remove one cylinder: X D only (shared o still used by cid2).
 var rem = Buf()
-show.emitEntryRemove(cid, rem)
+show.remove(cid, rem)
 expect(countPrefix(rem.lines, "X D ${cid}") == 1, "remove uses cylinder graphics id")
 expect(countPrefix(rem.lines, "X O ") == 0, "shared cylinder o kept while cid2 remains")
 expect(!show.slots.contains(cid), "cylinder unmapped after remove")
@@ -82,7 +82,7 @@ expect(show.slots.contains(sid), "sphere still mapped")
 
 // Pose emit for sphere still works by graphics id.
 var pose = Buf()
-expect(show.emitEntryPose(g, sid, pose), "sphere pose after cylinder remove")
+expect(show.pose(g, sid, pose), "sphere pose after cylinder remove")
 expect(pose.lines[pose.lines.count()-1] == "d ${sid}", "pose is d <graphicsId>")
 
 print "ok"

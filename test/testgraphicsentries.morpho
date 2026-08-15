@@ -118,7 +118,7 @@ expect(countPrefix(buf2.lines, "d ") == 2, "Show draws two point clouds")
 /* ---- replace / U S preamble still works ---- */
 var buf3 = Buf()
 var show = Show()
-show.replace = true
+show.replacemode = true
 show.write(gs, buf3)
 expect(buf3.lines.count() > 0 && buf3.lines[0].count() >= 3 && buf3.lines[0][0] == "U",
        "replace path starts with U")

@@ -29,6 +29,8 @@ fn _povMatrix(R) {
   return "matrix <${_num(R[0,0])}, ${_num(R[1,0])}, ${_num(R[2,0])}, ${_num(R[0,1])}, ${_num(R[1,1])}, ${_num(R[2,1])}, ${_num(R[0,2])}, ${_num(R[1,2])}, ${_num(R[2,2])}, 0, 0, 0>"
 }
 
+/** Escape `\` and `"` for POV quoted strings.
+ *  Keep in sync with xshow `_mvEscape`. */
 fn _povEscape(s) {
   var out = ""
   var n = s.count()
@@ -237,8 +239,7 @@ class POVRaytracer {
   }
 
   _sweep(item, skin, tail, out) {
-    var mat = item.pts
-    if (islist(mat)) mat = Matrix(mat).transpose()
+    var mat = asVertexMatrix(item.pts)
     var np = mat.dimensions()[1]
     if (np < 2) return
     var n = item.closed ? np + 1 : np

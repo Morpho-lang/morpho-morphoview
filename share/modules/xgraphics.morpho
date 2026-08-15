@@ -79,31 +79,59 @@ fn _orthogonalize(m) {
 }
 
 /** Coerce list or Matrix to a stored position Matrix (3-vector). nil → origin. */
-fn _asPosition(p) {
-  if (isnil(p)) return Matrix([0, 0, 0])
-  if (ismatrix(p)) return p.clone()
-  return Matrix(p)
-}
+fn _asPosition(Matrix p) { return p.clone() }
+fn _asPosition(List p) { return Matrix(p) }
+fn _asPosition(p) { return isnil(p) ? Matrix([0, 0, 0]) : Matrix(p) }
 
 /** Coerce scale: nil → 1; scalar; or 3-vector Matrix (non-uniform). */
-fn _asScale(s) {
-  if (isnil(s)) return 1
-  if (ismatrix(s)) return s.clone()
-  if (islist(s)) return Matrix(s)
-  return s
-}
+fn _asScale(Matrix s) { return s.clone() }
+fn _asScale(List s) { return Matrix(s) }
+fn _asScale(s) { return isnil(s) ? 1 : s }
 
 /** Scalar radius for sphere refine / mesh keys (max |component| if Matrix/list). */
-fn _effectiveRadius(scale) {
-  if (isnil(scale)) return 1
-  if (ismatrix(scale) || islist(scale)) {
-    var m = abs(scale[0])
-    var a1 = abs(scale[1]), a2 = abs(scale[2])
-    if (a1 > m) m = a1
-    if (a2 > m) m = a2
-    return m
+fn _effectiveRadius(Matrix scale) {
+  var m = abs(scale[0]), a1 = abs(scale[1]), a2 = abs(scale[2])
+  if (a1 > m) m = a1
+  if (a2 > m) m = a2
+  return m
+}
+fn _effectiveRadius(List scale) { return _effectiveRadius(Matrix(scale)) }
+fn _effectiveRadius(scale) { return isnil(scale) ? 1 : scale }
+
+// Public aliases — Morpho `_` helpers are not imported across modules.
+fn effectiveRadius(scale) { return _effectiveRadius(scale) }
+
+/** Ones + winding for a Sparse triangle column. */
+fn _tri(conn, i, a, b, c) {
+  conn[a, i] = 1; conn[b, i] = 1; conn[c, i] = 1
+  conn.setrowindices(i, (a, b, c))
+}
+
+/** Face vertex ids from Sparse (winding) or dense membership Matrix. */
+fn _faceIds(Sparse conn, Int i) { return conn.rowindices(i) }
+fn _faceIds(Matrix conn, Int i) {
+  var ids = [], nv = conn.dimensions()[0]
+  for (j in 0...nv) if (conn[j, i] != 0) ids.append(j)
+  return ids
+}
+
+/** Normalize inputs to a dim×n vertex matrix (points as columns). */
+fn _asVertexMatrix(Matrix pts) { return pts }
+fn _asVertexMatrix(List pts) { return Matrix(pts).transpose() }
+fn _asVertexMatrix(pts) { return Matrix(pts).transpose() }
+fn asVertexMatrix(pts) { return _asVertexMatrix(pts) }
+
+/** Unit or authored shaft frame → (x1,x2,dx,length,ndx,px); nil if degenerate. */
+fn _shaftFrame(unit, start, end, aspectratio) {
+  if (unit) {
+    return (Matrix([0, 0, 0]), Matrix([0, 0, 1]), Matrix([0, 0, 1]),
+            1, Matrix([0, 0, 1]), Matrix([1, 0, 0]))
   }
-  return scale
+  var x1 = Matrix(start), x2 = Matrix(end), dx = x2 - x1, length = dx.norm()
+  if (abs(length) < 1e-8) return nil
+  var ndx = dx/length, px = _normalVector(dx), pxnorm = px.norm()
+  if (abs(pxnorm) < 1e-15) return nil
+  return (x1, x2, dx, length, ndx, 0.5*length*aspectratio*px/pxnorm)
 }
 
 /** Angle-axis (phi, ax, ay, az) rotating unit @p from onto unit @p to.
@@ -185,9 +213,7 @@ fn _withLegacyTransp(color, filter, transmit) {
 }
 
 // [Compatibility shim] Public name so xplot veneers can call this across modules.
-fn withLegacyTransp(color, filter, transmit) {
-  return _withLegacyTransp(color, filter, transmit)
-}
+fn withLegacyTransp(color, filter, transmit) { return _withLegacyTransp(color, filter, transmit) }
 
 /* **************************************
  * Graphics primitives
@@ -216,15 +242,7 @@ class TriangleComplex is GraphicsPrimitive {
   }
 
   /** Vertex ids of face @p i. Sparse connectivity preserves winding via rowindices. */
-  faceIndices(Int i) {
-    if (issparse(self.connectivity)) return self.connectivity.rowindices(i)
-    var ids = []
-    var nv = self.connectivity.dimensions()[0]
-    for (j in 0...nv) {
-      if (self.connectivity[j, i] != 0) ids.append(j)
-    }
-    return ids
-  }
+  faceIndices(Int i) { return _faceIds(self.connectivity, i) }
 }
 
 
@@ -245,46 +263,20 @@ class Cylinder is GraphicsPrimitive {
 
   /** @param unit if true, shaft along +z height 1 radius 1 (pose on Graphics entry). */
   toTriangleComplex(unit=false) {
-    var aspectratio = self.aspectratio
-    var n = self.n
+    var aspectratio = self.aspectratio, n = self.n, col = self.color
+    var np = 2*n+2, nt = 4*n, dim = 3
+    var frame = _shaftFrame(unit, self.start, self.end, aspectratio)
+    if (isnil(frame)) return nil
+    var x1 = frame[0], x2 = frame[1], dx = frame[2], length = frame[3]
+    var ndx = frame[4], px = frame[5]
+    if (!unit) dim = x1.count()
+    var vertices = Matrix(dim, np), normals = Matrix(dim, np)
 
-    var col = self.color
-
-    var np=2*n+2 // 2 points at the end plus 2*n point
-    var nt=4*n
-    var dim=3
-    var vertices=Matrix(dim, np)
-    var normals=Matrix(dim, np)
-
-    var x1, x2, dx, length, ndx, px
-    if (unit) {
-      x1 = Matrix([0, 0, 0])
-      x2 = Matrix([0, 0, 1])
-      dx = Matrix([0, 0, 1])
-      length = 1
-      ndx = dx
-      px = Matrix([1, 0, 0])
-    } else {
-      x1=self.start
-      x2=self.end
-      dim=x1.count()
-      vertices=Matrix(dim, np)
-      normals=Matrix(dim, np)
-      dx=x2-x1 // Vector from x1 to x2
-      length = dx.norm()
-      if (abs(length)<1e-8) return nil
-      ndx=dx/length
-      px=_normalVector(dx)
-      var pxnorm=px.norm()
-      if (abs(pxnorm)<1e-15) return nil
-      px=0.5*length*aspectratio*px/pxnorm
-    }
-
-    // Head and base of the arrow
+    // Cap centers + outward unit normals
     vertices.setcolumn(0, x1)
     vertices.setcolumn(np-1, x2)
-    normals.setcolumn(0, -1*dx)
-    normals.setcolumn(np-1, dx)
+    normals.setcolumn(0, -ndx)
+    normals.setcolumn(np-1, ndx)
 
     /* The cylinder is structured like so:
 
@@ -297,8 +289,7 @@ class Cylinder is GraphicsPrimitive {
     // Unit +z shaft: ring offsets without 3×3 rotation matrices (mesh-cache hot path).
     if (unit) {
       for (i in 1..n) {
-        var theta = 2*Pi*(i-1)/n
-        var qx = Matrix([cos(theta), sin(theta), 0])
+        var theta = 2*Pi*(i-1)/n, qx = Matrix([cos(theta), sin(theta), 0])
         var pt = qx+x1
         vertices.setcolumn(i, pt)
         vertices.setcolumn(n+i, pt+dx)
@@ -307,9 +298,7 @@ class Cylinder is GraphicsPrimitive {
       }
     } else {
       for (i in 1..n) {
-        var theta = 2*Pi*(i-1)/n
-        var qx = _rotation(theta, ndx)*px
-        var nn=qx/qx.norm()
+        var theta = 2*Pi*(i-1)/n, qx = _rotation(theta, ndx)*px, nn = qx/qx.norm()
         var pt = qx+x1
         vertices.setcolumn(i, pt)
         vertices.setcolumn(n+i, pt+dx)
@@ -318,29 +307,16 @@ class Cylinder is GraphicsPrimitive {
       }
     }
 
-    var conn=Sparse(np,nt)
+    var conn = Sparse(np, nt)
     for (i in 0...n) {
-      // Layer 0-A
-      conn[0,i]=1
-      conn[i+1,i]=1
-      if (i<n-1) conn[i+2,i]=1 else conn[1,i]=1
-
-      // C-1
-      conn[np-1,n+i]=1
-      conn[n+i+1,n+i]=1
-      if (i<n-1) conn[n+i+2,n+i]=1 else conn[n+1,n+i]=1
-
-      // Layer A-B
-      conn[i+1,2*n+i]=1
-      conn[n+i+1,2*n+i]=1
-      if (i<n-1) conn[i+2,2*n+i]=1 else conn[1,2*n+i]=1
-
-      if (i<n-1) conn[i+2,3*n+i]=1 else conn[1,3*n+i]=1
-      if (i<n-1) conn[n+i+2,3*n+i]=1 else conn[n+1,3*n+i]=1
-      conn[n+i+1,3*n+i]=1
+      var i2 = (i < n-1) ? i+2 : 1, ni2 = (i < n-1) ? n+i+2 : n+1
+      _tri(conn, i, 0, i+1, i2)                 // 0-A cap
+      _tri(conn, n+i, np-1, n+i+1, ni2)         // B-1 cap
+      _tri(conn, 2*n+i, i+1, n+i+1, i2)         // A-B sidewall
+      _tri(conn, 3*n+i, i2, ni2, n+i+1)
     }
 
-      return TriangleComplex(vertices, normals, col, conn)
+    return TriangleComplex(vertices, normals, col, conn)
   }
 
 }
@@ -434,46 +410,19 @@ class Arrow is GraphicsPrimitive {
 
   /** @param unit if true, shaft along +z height 1 radius 1; tip fraction = aspectratio. */
   toTriangleComplex(unit=false) {
-    var aspectratio = self.aspectratio
-    var n = self.n
+    var aspectratio = self.aspectratio, n = self.n, col = self.color
+    var np = 3*n+2, nt = 6*n, dim = 3
+    var frame = _shaftFrame(unit, self.start, self.end, aspectratio)
+    if (isnil(frame)) return nil
+    var x1 = frame[0], x2 = frame[1], dx = frame[2], length = frame[3]
+    var ndx = frame[4], px = frame[5]
+    if (!unit) dim = x1.count()
+    var vertices = Matrix(dim, np), normals = Matrix(dim, np)
 
-    var col = self.color
-
-    var np=3*n+2 // 2 points at the end plus 3*n point
-    var nt=6*n
-    var dim=3
-    var vertices=Matrix(dim, np)
-    var normals=Matrix(dim, np)
-
-    var x1, x2, dx, length, ndx, px
-    if (unit) {
-      x1 = Matrix([0, 0, 0])
-      x2 = Matrix([0, 0, 1])
-      dx = Matrix([0, 0, 1])
-      length = 1
-      ndx = dx
-      px = Matrix([1, 0, 0])
-    } else {
-      x1=self.start
-      x2=self.end
-      dim=x1.count()
-      vertices=Matrix(dim, np)
-      normals=Matrix(dim, np)
-      dx=x2-x1 // Vector from x1 to x2
-      length = dx.norm()
-      if (abs(length)<1e-8) return nil
-      ndx=dx/length
-      px=_normalVector(dx)
-      var pxnorm=px.norm()
-      if (abs(pxnorm)<1e-15) return nil
-      px=0.5*length*aspectratio*px/pxnorm
-    }
-
-    // Head and base of the arrow
     vertices.setcolumn(0, x1)
     vertices.setcolumn(np-1, x2)
-    normals.setcolumn(0, -1*dx)
-    normals.setcolumn(np-1, dx)
+    normals.setcolumn(0, -ndx)
+    normals.setcolumn(np-1, ndx)
 
     /* The arrow is structured like so:
 
@@ -483,11 +432,10 @@ class Arrow is GraphicsPrimitive {
            |               \
            0<----- u --->   1 3n+1
            <------ dx ------> */
-    var u=(1-aspectratio)*dx
+    var u = (1-aspectratio)*dx
     if (unit) {
       for (i in 1..n) {
-        var theta = 2*Pi*(i-1)/n
-        var qx = Matrix([cos(theta), sin(theta), 0])
+        var theta = 2*Pi*(i-1)/n, qx = Matrix([cos(theta), sin(theta), 0])
         var pt = qx+x1
         vertices.setcolumn(i, pt)
         vertices.setcolumn(n+i, pt+u)
@@ -498,9 +446,7 @@ class Arrow is GraphicsPrimitive {
       }
     } else {
       for (i in 1..n) {
-        var theta = 2*Pi*(i-1)/n
-        var qx = _rotation(theta, ndx)*px
-        var nn=qx/qx.norm()
+        var theta = 2*Pi*(i-1)/n, qx = _rotation(theta, ndx)*px, nn = qx/qx.norm()
         var pt = qx+x1
         vertices.setcolumn(i, pt)
         vertices.setcolumn(n+i, pt+u)
@@ -511,35 +457,16 @@ class Arrow is GraphicsPrimitive {
       }
     }
 
-    var conn=Sparse(np,nt)
+    var conn = Sparse(np, nt)
     for (i in 0...n) {
-      // Layer 0-A
-      conn[0,i]=1
-      conn[i+1,i]=1
-      if (i<n-1) conn[i+2,i]=1 else conn[1,i]=1
-
-      // C-1
-      conn[np-1,n+i]=1
-      conn[2*n+i+1,n+i]=1
-      if (i<n-1) conn[2*n+i+2,n+i]=1 else conn[2*n+1,n+i]=1
-
-      // Layer A-B
-      conn[i+1,2*n+i]=1
-      conn[n+i+1,2*n+i]=1
-      if (i<n-1) conn[i+2,2*n+i]=1 else conn[1,2*n+i]=1
-
-      if (i<n-1) conn[i+2,3*n+i]=1 else conn[1,3*n+i]=1
-      if (i<n-1) conn[n+i+2,3*n+i]=1 else conn[n+1,3*n+i]=1
-      conn[n+i+1,3*n+i]=1
-
-      // Layer B-C
-      conn[n+i+1,4*n+i]=1
-      if (i<n-1) conn[n+i+2,4*n+i]=1 else conn[n+1,4*n+i]=1
-      conn[2*n+i+1,4*n+i]=1
-
-      if (i<n-1) conn[n+i+2,5*n+i]=1 else conn[n+1,5*n+i]=1
-      if (i<n-1) conn[2*n+i+2,5*n+i]=1 else conn[2*n+1,5*n+i]=1
-      conn[2*n+i+1,5*n+i]=1
+      var i2 = (i < n-1) ? i+2 : 1, ni2 = (i < n-1) ? n+i+2 : n+1
+      var ci2 = (i < n-1) ? 2*n+i+2 : 2*n+1
+      _tri(conn, i, 0, i+1, i2)                       // 0-A
+      _tri(conn, n+i, np-1, 2*n+i+1, ci2)             // C-1 tip
+      _tri(conn, 2*n+i, i+1, n+i+1, i2)               // A-B
+      _tri(conn, 3*n+i, i2, ni2, n+i+1)
+      _tri(conn, 4*n+i, n+i+1, ni2, 2*n+i+1)          // B-C
+      _tri(conn, 5*n+i, ni2, ci2, 2*n+i+1)
     }
 
     return TriangleComplex(vertices, normals, col, conn)
@@ -572,117 +499,83 @@ class Tube is GraphicsPrimitive {
   }
 
   toTriangleComplex() {
-    var n = self.n
-    var col = self.color
-
-    var mat = self.pts
-    if (islist(self.pts)) mat = Matrix(self.pts).transpose();
-
-    var np=mat.dimensions()[1]
+    var n = self.n, col = self.color, mat = _asVertexMatrix(self.pts)
+    var np = mat.dimensions()[1]
     if (np < 2) return nil
-    var dim=mat.dimensions()[0]
-    var nv=n*np
-    var nt=n*(2*(np-1))
-    if (!self.closed) {
-      nv+=2 // Two points for the caps
-      nt+=2*n // n triangles for each cap
-    }
+    var dim = mat.dimensions()[0], nv = n*np, nt = n*(2*(np-1))
+    if (self.closed) nt += 2*n
+    else { nv += 2; nt += 2*n }
 
-    var vertices=Matrix(dim, nv);
-    var normals=Matrix(dim, nv);
-
+    var vertices = Matrix(dim, nv), normals = Matrix(dim, nv)
     var sep[np], ndx[np]
 
-    // Loop over line segments to calculate separation vectors
+    // Separation vectors along the polyline
     for (k in 0..np-2) {
-      var dx=mat.column(k+1)-mat.column(k)
-      var dlen=dx.norm()
+      var dx = mat.column(k+1)-mat.column(k), dlen = dx.norm()
       if (!(dlen > 1e-8)) return nil
-      sep[k]=dx/dlen
-      ndx[k]+=sep[k]
-      ndx[k+1]+=sep[k]
+      sep[k] = dx/dlen
+      ndx[k] += sep[k]
+      ndx[k+1] += sep[k]
     }
 
-    // Correct ends if closed
     if (self.closed) {
-      var dx=mat.column(0)-mat.column(np-1)
-      var dlen=dx.norm()
+      var dx = mat.column(0)-mat.column(np-1), dlen = dx.norm()
       if (!(dlen > 1e-8)) return nil
-      sep[np-1]=dx/dlen
-      ndx[np-1]+=sep[np-1]
-      ndx[0]+=sep[np-1]
+      sep[np-1] = dx/dlen
+      ndx[np-1] += sep[np-1]
+      ndx[0] += sep[np-1]
     }
 
-    // Now generate vertices
+    // Vertex rings (axis must be unit for _rotation)
     for (k in 0...np) {
-      var px // Vertices are generated from a point plus this displacement
-      if (k==0) {
-        px=self._shaftNormal(ndx[k])
-      } else { // This aligns vertices generated from successive points
-        var dx=vertices.column((k-1)*n)-mat.column(k-1)
-        px=dx-dx.inner(ndx[k])*ndx[k]/ndx[k].norm()
+      var px
+      if (k == 0) {
+        px = self._shaftNormal(ndx[k])
+      } else {
+        var dx = vertices.column((k-1)*n)-mat.column(k-1)
+        px = dx-dx.inner(ndx[k])*ndx[k]/ndx[k].norm()
       }
-      px=self.radius*px/px.norm()
+      px = self.radius*px/px.norm()
 
-      var x1 = mat.column(k)
-      var axis = ndx[k]
+      var x1 = mat.column(k), an = ndx[k].norm()
+      if (!(an > 1e-15)) return nil
+      var axis = ndx[k]/an
       for (i in 0...n) {
-        /* Find vertex ring at point k by rotating px about ndx, to obtain qx, and then adding x1 */
-        var theta = i*2*Pi/n
-        var qx = _rotation(theta, axis)*px
+        var theta = i*2*Pi/n, qx = _rotation(theta, axis)*px
         vertices.setcolumn(k*n+i, x1+qx)
-
         normals.setcolumn(k*n+i, qx/qx.norm())
       }
     }
 
-    /* Loop over segments again to create the triangles */
-    var conn=Sparse(nv,nt)
-
-    var m=0
+    var conn = Sparse(nv, nt), m = 0
     for (k in 0..np-2) {
       for (i in 0...n) {
-        conn[k*n+i,m]=1
-        if (i==n-1) conn[k*n,m]=1 else conn[k*n+i+1,m]=1
-        conn[((k+1)*n+i),m]=1
-        m+=1
-        if (i==n-1) conn[k*n,m]=1 else conn[k*n+i+1,m]=1
-        if (i==n-1) conn[(k+1)*n,m]=1 else conn[((k+1)*n+i)+1,m]=1
-        conn[((k+1)*n+i),m]=1
-        m+=1
+        var a = k*n+i, b = (i == n-1) ? k*n : k*n+i+1, c = (k+1)*n+i
+        var d = (i == n-1) ? (k+1)*n : (k+1)*n+i+1
+        _tri(conn, m, a, b, c); m += 1
+        _tri(conn, m, b, d, c); m += 1
       }
     }
 
     if (self.closed) {
-      // Connect first and last points
-      var k=np-1
+      var k = np-1
       for (i in 0...n) {
-        conn[k*n+i,m]=1
-        if (i==n-1) conn[k*n,m]=1 else conn[k*n+i+1,m]=1
-        conn[i,m]=1
-        m+=1
-        if (i==n-1) conn[k*n,m]=1 else conn[k*n+i+1,m]=1
-        if (i==n-1) conn[0,m]=1 else conn[i+1,m]=1
-        conn[i,m]=1
-        m+=1
+        var a = k*n+i, b = (i == n-1) ? k*n : k*n+i+1
+        var c = i, d = (i == n-1) ? 0 : i+1
+        _tri(conn, m, a, b, c); m += 1
+        _tri(conn, m, b, d, c); m += 1
       }
     } else {
-      // End caps
       vertices.setcolumn(nv-2, mat.column(0))
       vertices.setcolumn(nv-1, mat.column(np-1))
-
-      normals.setcolumn(nv-2, -sep[0]/sep[0].norm())
-      normals.setcolumn(nv-1, sep[np-2]/sep[np-2].norm())
+      normals.setcolumn(nv-2, -sep[0])
+      normals.setcolumn(nv-1, sep[np-2])
 
       for (i in 0...n) {
-        conn[i,m]=1
-        if (i==n-1) conn[0,m]=1 else conn[i+1,m]=1
-        conn[nv-2,m]=1
-        m+=1
-        conn[((np-1)*n+i),m]=1
-        if (i==n-1) conn[(np-1)*n,m]=1 else conn[((np-1)*n+i)+1,m]=1
-        conn[nv-1,m]=1
-        m+=1
+        var b = (i == n-1) ? 0 : i+1
+        var d = (i == n-1) ? (np-1)*n : (np-1)*n+i+1
+        _tri(conn, m, i, b, nv-2); m += 1
+        _tri(conn, m, (np-1)*n+i, d, nv-1); m += 1
       }
     }
 
@@ -698,18 +591,17 @@ class Tube is GraphicsPrimitive {
 class Text is GraphicsPrimitive {
   init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil, filter=nil, transmit=nil) {
     super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
-    self.posn = posn
-    if (islist(self.posn)) self.posn = Matrix(self.posn)
+    self.posn = _asPosition(posn)
 
-    self.dirn = dirn // Direction of flow for the text 
+    self.dirn = dirn // Direction of flow for the text
     if (islist(self.dirn)) self.dirn = Matrix(self.dirn)
 
     self.vertical = vertical // Vertical direction
     if (islist(self.vertical)) self.vertical = Matrix(self.vertical)
-    
-    self.string = string 
+
+    self.string = string
     self.font = font
-    self.size = size 
+    self.size = size
   }
 
   transformationMatrix() {
@@ -741,11 +633,33 @@ fn _textAtOrigin(Text item) {
  * Point and line primitives (viewer `p` / `l`)
  **************************************** */
 
-/** Normalize inputs to a dim×n vertex matrix (points as columns). */
-fn _asVertexMatrix(Matrix pts) { return pts }
-
-fn _asVertexMatrix(pts) { // list of points
-  return Matrix(pts).transpose()
+/** Flat index list for GL_LINES from connectivity (nil → polyline). */
+fn _segIndices(List conn, nv, closed) {
+  var out = []
+  for (seg in conn) { out.append(seg[0]); out.append(seg[1]) }
+  return out
+}
+fn _segIndices(Sparse conn, nv, closed) {
+  var out = [], nf = conn.dimensions()[1]
+  for (i in 0...nf) {
+    var indx = conn.rowindices(i)
+    for (j in 0...indx.count()) out.append(indx[j])
+  }
+  return out
+}
+fn _segIndices(Matrix conn, nv, closed) {
+  var out = [], nf = conn.dimensions()[1], nvf = conn.dimensions()[0]
+  for (i in 0...nf) {
+    for (j in 0...nvf) if (conn[j, i] != 0) out.append(j)
+  }
+  return out
+}
+fn _segIndices(conn, nv, closed) {
+  // nil connectivity → successive polyline
+  var out = [], nseg = closed ? nv : nv - 1
+  if (nseg < 1) return out
+  for (i in 0...nseg) { out.append(i); out.append(mod(i + 1, nv)) }
+  return out
 }
 
 /** Point cloud — positions as Matrix columns (or list of points).
@@ -784,42 +698,7 @@ class LineSet is GraphicsPrimitive {
 
   /** Flat index list for GL_LINES: i0 j0 i1 j1 ... */
   _segmentIndices() {
-    var nv = self.position.dimensions()[1]
-    var conn = self.connectivity
-    var out = []
-
-    if (isnil(conn)) {
-      var nseg = self.closed ? nv : nv - 1
-      if (nseg < 1) return out
-      for (i in 0...nseg) {
-        out.append(i)
-        out.append(mod(i + 1, nv))
-      }
-      return out
-    }
-
-    if (islist(conn)) {
-      for (seg in conn) {
-        out.append(seg[0])
-        out.append(seg[1])
-      }
-      return out
-    }
-
-    // Sparse or dense incidence matrix: columns are segments
-    var nf = conn.dimensions()[1]
-    for (i in 0...nf) {
-      if (issparse(conn)) {
-        var indx = conn.rowindices(i)
-        for (j in 0...indx.count()) out.append(indx[j])
-      } else {
-        var nvf = conn.dimensions()[0]
-        for (j in 0...nvf) {
-          if (conn[j, i] != 0) out.append(j)
-        }
-      }
-    }
-    return out
+    return _segIndices(self.connectivity, self.position.dimensions()[1], self.closed)
   }
 
 }
@@ -874,11 +753,7 @@ class Polygon is GraphicsPrimitive {
     for (i in 0...nv) normals.setcolumn(i, n)
 
     var conn = Sparse(nv, nv-2)
-    for (i in 0...nv-2) {
-      var tri = (0, i+1, i+2)
-      for (v in tri) conn[v, i] = 1
-      conn.setrowindices(i, tri)
-    }
+    for (i in 0...nv-2) _tri(conn, i, 0, i+1, i+2)
 
     return TriangleComplex(self.position, normals, self.color, conn)
   }
@@ -901,9 +776,7 @@ class GraphicsEntry {
   }
 
   /** Visible coloring: entry override if set, else the primitive's intrinsic color. */
-  effectiveColor() {
-    return isnil(self.color) ? self.item.color : self.color
-  }
+  effectiveColor() { return isnil(self.color) ? self.item.color : self.color }
 
   /** Axis-angle rotate → 3×3; nil if identity / missing. */
   rotationMatrix() {
@@ -999,10 +872,7 @@ class Graphics {
   }
 
   /** Look up an entry by Graphics-owned id; nil if missing. */
-  findEntry(id) {
-    if (!self._entryById.contains(id)) return nil
-    return self._entryById[id]
-  }
+  findEntry(id) { return self._entryById.contains(id) ? self._entryById[id] : nil }
 
   /** Allocate id and append a GraphicsEntry; returns the id. No events. */
   _append(item, position=nil, scale=nil, rotate=nil, color=nil, flat=nil) {
@@ -1208,18 +1078,40 @@ class Scene is Graphics with Broadcaster {
     return true
   }
 
-  /** Store unit item on entry; keep SRT. Nil entry.color stays “no override.” */
-  _replaceUnit(id, unitItem) {
+  /** Store unit Sphere and refresh SRT from authored center/r (like display). */
+  replace(id, Sphere item) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    e.item = unitItem
+    e.item = _unitSphere(item)
+    e.position = _asPosition(item.center)
+    e.scale = _asScale(item.r)
     self.notify(GraphicsEventReplaced(id))
     return true
   }
 
-  replace(id, Sphere item) { return self._replaceUnit(id, _unitSphere(item)) }
-  replace(id, Cylinder item) { return self._replaceUnit(id, _unitCylinder(item)) }
-  replace(id, Arrow item) { return self._replaceUnit(id, _unitArrow(item)) }
+  /** Store unit Cylinder and refresh SRT from authored start→end (like display). */
+  replace(id, Cylinder item) {
+    var e = self.findEntry(id)
+    if (isnil(e)) return false
+    var srt = segmentSRT(item.start, item.end, item.aspectratio)
+    if (isnil(srt)) return false
+    e.item = _unitCylinder(item)
+    e.position = srt[0]; e.scale = srt[1]; e.rotate = srt[2]
+    self.notify(GraphicsEventReplaced(id))
+    return true
+  }
+
+  /** Store unit Arrow and refresh SRT from authored start→end (like display). */
+  replace(id, Arrow item) {
+    var e = self.findEntry(id)
+    if (isnil(e)) return false
+    var srt = segmentSRT(item.start, item.end, item.aspectratio)
+    if (isnil(srt)) return false
+    e.item = _unitArrow(item)
+    e.position = srt[0]; e.scale = srt[1]; e.rotate = srt[2]
+    self.notify(GraphicsEventReplaced(id))
+    return true
+  }
 
   /** Replace Text content/orientation; entry SRT unchanged (string/font via redefine). */
   replace(id, Text item) {

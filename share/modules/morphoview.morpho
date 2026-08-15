@@ -128,7 +128,7 @@ class View with Listener {
   _applyModel(Graphics g, replace=false) {
     if (replace && self.closed) return false
     var show = Show()
-    if (replace) show.replace = true
+    if (replace) show.replacemode = true
     self.cmdLines = []
     show.write(g, self)
     var ok = false
@@ -174,26 +174,26 @@ class View with Listener {
   receive(Graphics g, GraphicsEventMoved ev) {
     if (!self._live()) return
     self._tryEmit("moved", fn () {
-      for (id in self._ids(ev)) self.show.emitEntryPose(g, id, self)
+      for (id in self._ids(ev)) self.show.pose(g, id, self)
     })
   }
 
   receive(Graphics g, GraphicsEventRecolored ev) {
     if (!self._live()) return
     self._tryEmit("recolored", fn () {
-      for (id in self._ids(ev)) self.show.emitEntryRecolor(g, id, self)
+      for (id in self._ids(ev)) self.show.recolor(g, id, self)
     })
   }
 
   receive(Graphics g, GraphicsEventRemoved ev) {
     if (!self._live()) return
-    self._tryEmit("removed id ${ev.id}", fn () { self.show.emitEntryRemove(ev.id, self) })
+    self._tryEmit("removed id ${ev.id}", fn () { self.show.remove(ev.id, self) })
   }
 
   receive(Graphics g, GraphicsEventReplaced ev) {
     if (!self._live()) return
     self._tryEmit("replaced id ${ev.id}", fn () {
-      if (!self.show.emitEntryReplace(g, ev.id, self)) return
+      if (!self.show.replace(g, ev.id, self)) return
     })
   }
 
@@ -226,7 +226,7 @@ class View with Listener {
     if (isnil(entry)) return false
     if (!self.show.slots.contains(graphicsId)) return false
 
-    var sameLayout = self.show.canRefreshVertices(graphicsId, item)
+    var sameLayout = self.show.sameverts(graphicsId, item)
     var prev = entry.item
     if (!self.graphics.morph(graphicsId, item)) return false
 
@@ -235,7 +235,7 @@ class View with Listener {
       ok = self.refreshMesh(graphicsId)
     } else {
       ok = self._emitAndWait(fn () {
-        if (!self.show.emitEntryReplace(self.graphics, graphicsId, self)) return
+        if (!self.show.replace(self.graphics, graphicsId, self)) return
       })
     }
     if (!ok) {
@@ -249,7 +249,7 @@ class View with Listener {
   refreshMesh(graphicsId) {
     if (self.closed || isnil(self.show) || isnil(self.graphics)) return false
     return self._emitAndWait(fn () {
-      if (!self.show.emitEntryVertices(self.graphics, graphicsId, self)) return
+      if (!self.show.verts(self.graphics, graphicsId, self)) return
     })
   }
 

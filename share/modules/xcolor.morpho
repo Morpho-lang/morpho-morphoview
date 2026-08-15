@@ -25,6 +25,8 @@ var _warnedRgbRange = false
 var White, Black
 
 fn _clamp01(x) { return (x < 0) ? 0 : ((x > 1) ? 1 : x) }
+// Public alias — Morpho `_` helpers are not imported across modules.
+fn clamp01(x) { return _clamp01(x) }
 
 fn _warnRgbRange(r, g, b) {
   if (_warnedRgbRange) return

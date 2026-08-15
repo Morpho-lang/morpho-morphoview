@@ -51,7 +51,7 @@ expect(show.slots.contains(1), "sphere 1 is mapped")
 
 // Pose-only emit uses draw id alone.
 var poseBuf = Buf()
-expect(show.emitEntryPose(g, 2, poseBuf), "emit pose for id 2")
+expect(show.pose(g, 2, poseBuf), "emit pose for id 2")
 expect(countPrefix(poseBuf.lines, "d ") == 1, "one pose draw")
 var dline = poseBuf.lines[poseBuf.lines.count()-1]
 expect(dline == "d 2", "pose is d <graphicsId> only")

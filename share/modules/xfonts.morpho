@@ -62,8 +62,7 @@ class FontFinder {
     } else {
       candidates = ["DejaVuSans", "FreeSans", "LiberationSans", "NimbusSans-Regular", "Ubuntu-R"]
     }
-    var name = self.pick(candidates)
-    return isnil(name) ? candidates[0] : name
+    return self.pick(candidates)
   }
 
   /** Math / emoji / symbol coverage when available. */

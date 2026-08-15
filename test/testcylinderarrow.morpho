@@ -87,21 +87,33 @@ expect(show2.slots[id1].objectid == show2.slots[id2].objectid, "scene cylinders 
 
 expect(sc.move(id1, [0.5, 0, 0], scale=[0.1, 0.1, 1.5]), "move cylinder")
 var poseBuf = Buf()
-expect(show2.emitEntryPose(sc, id1, poseBuf), "pose emit")
+expect(show2.pose(sc, id1, poseBuf), "pose emit")
 expect(countPrefix(poseBuf.lines, "v ") == 0, "pose has no vertices")
 expect(countPrefix(poseBuf.lines, "f ") == 0, "pose has no facets")
 expect(poseBuf.lines[poseBuf.lines.count()-1] == "d ${id1}", "pose ends with d id")
 
 expect(sc.recolor(id3, Yellow), "recolor arrow")
 var colBuf = Buf()
-expect(show2.emitEntryRecolor(sc, id3, colBuf), "recolor emit")
+expect(show2.recolor(sc, id3, colBuf), "recolor emit")
 expect(countPrefix(colBuf.lines, "d ${id3}") == 1, "recolor redraws slot")
 
 expect(sc.remove(id2), "remove one shared cylinder")
 var remBuf = Buf()
-show2.emitEntryRemove(id2, remBuf)
+show2.remove(id2, remBuf)
 expect(countPrefix(remBuf.lines, "X D ${id2}") == 1, "X D for removed")
 expect(countPrefix(remBuf.lines, "X O ") == 0, "shared o retained")
 expect(show2.slots.contains(id1), "sibling cylinder still mapped")
+
+/* ---- replace Sphere refreshes position/scale like display ---- */
+var gsph = Scene()
+var sid = gsph.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1))
+var se = gsph.findEntry(sid)
+expect(se.position[0] == 0 && se.scale == 1, "initial sphere pose")
+expect(gsph.replace(sid, Sphere([2, 3, 4], 0.5, color=Blue, maxrefine=1)), "replace sphere")
+se = gsph.findEntry(sid)
+expect(se.item.r == 1 && se.item.center[0] == 0, "replaced stores unit sphere")
+expect(abs(se.position[0]-2) < 1e-9 && abs(se.position[1]-3) < 1e-9 && abs(se.position[2]-4) < 1e-9,
+       "replace updates position")
+expect(abs(se.scale - 0.5) < 1e-9, "replace updates scale")
 
 print "ok"

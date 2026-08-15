@@ -94,7 +94,7 @@ for (line in defineO.lines) {
 expect(sawXnc, "opaque define emits v \"xnc\"")
 
 var morphO = Buf()
-expect(showO.emitEntryVertices(gOpaque, idOpaque, morphO), "opaque morph emits")
+expect(showO.verts(gOpaque, idOpaque, morphO), "opaque morph emits")
 expect(hasPrefix(morphO.lines[0], "U V "), "opaque morph starts with U V")
 expect(countUvFloats(morphO.lines) == 27, "opaque morph is 3×9 floats")
 
@@ -113,7 +113,7 @@ for (line in defineT.lines) {
 expect(sawXn, "translucent define emits v \"xn\"")
 
 var morphT = Buf()
-expect(showT.emitEntryVertices(gTx, idTx, morphT), "translucent morph emits")
+expect(showT.verts(gTx, idTx, morphT), "translucent morph emits")
 expect(countUvFloats(morphT.lines) == 18, "translucent morph is 3×6 floats")
 
 /* ---- opaque uniform Color: define xn, morph xn (3 verts × 6 floats) ---- */
@@ -131,32 +131,32 @@ for (line in defineU.lines) {
 }
 expect(sawUniXn && !sawUniXnc, "opaque uniform Color emits v \"xn\" + C")
 var morphU = Buf()
-expect(showU.emitEntryVertices(gUni, idUni, morphU), "uniform morph emits")
+expect(showU.verts(gUni, idUni, morphU), "uniform morph emits")
 expect(countUvFloats(morphU.lines) == 18, "opaque uniform morph is 3×6 floats")
 
 /* ---- unmapped / wrong type fail cleanly ---- */
-expect(!showO.emitEntryVertices(gOpaque, 999, Buf()), "missing id fails")
+expect(!showO.verts(gOpaque, 999, Buf()), "missing id fails")
 var gSph = Scene()
 var sid = gSph.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], scale=0.2)
 var showS = Show()
 showS.write(gSph, Buf())
-expect(!showS.emitEntryVertices(gSph, sid, Buf()), "sphere entry is not mesh morph")
+expect(!showS.verts(gSph, sid, Buf()), "sphere entry is not mesh morph")
 
 /* ---- xn ↔ xnc cannot U V; same layout can ---- */
-expect(showO.canRefreshVertices(idOpaque, makeTri()), "xnc → xnc can U V")
-expect(!showO.canRefreshVertices(idOpaque, makeTri(1.0)), "xnc → xn cannot U V")
-expect(showU.canRefreshVertices(idUni, makeTri(1.0)), "xn → xn can U V")
-expect(!showU.canRefreshVertices(idUni, makeTri()), "xn → xnc cannot U V")
-expect(!showS.canRefreshVertices(sid, makeTri()), "sphere cannot U V")
+expect(showO.sameverts(idOpaque, makeTri()), "xnc → xnc can U V")
+expect(!showO.sameverts(idOpaque, makeTri(1.0)), "xnc → xn cannot U V")
+expect(showU.sameverts(idUni, makeTri(1.0)), "xn → xn can U V")
+expect(!showU.sameverts(idUni, makeTri()), "xn → xnc cannot U V")
+expect(!showS.sameverts(sid, makeTri()), "sphere cannot U V")
 
 gOpaque.morph(idOpaque, makeTri(1.0))
-expect(!showO.emitEntryVertices(gOpaque, idOpaque, Buf()), "U V refused after xn swap")
+expect(!showO.verts(gOpaque, idOpaque, Buf()), "U V refused after xn swap")
 gOpaque.morph(idOpaque, makeTri())
 
 /* full replace after layout change updates the slot */
 expect(gUni.morph(idUni, makeTri()), "scene morph to ColorTable")
 var bufRep = Buf()
-expect(showU.emitEntryReplace(gUni, idUni, bufRep), "replace after xn→xnc")
+expect(showU.replace(gUni, idUni, bufRep), "replace after xn→xnc")
 expect(showU.slots[idUni].layout == "xnc", "replace updates slot to xnc")
 expect(!hasPrefix(bufRep.lines[0], "U V "), "replace is not U V")
 
@@ -173,10 +173,23 @@ for (line in defineA.lines) {
 }
 expect(sawXnca, "RGBA define emits v \"xnca\"")
 var morphA = Buf()
-expect(showA.emitEntryVertices(gA, idA, morphA), "RGBA morph emits")
+expect(showA.verts(gA, idA, morphA), "RGBA morph emits")
 expect(countUvFloats(morphA.lines) == 30, "RGBA morph is 3×10 floats")
-expect(showA.canRefreshVertices(idA, makeTriRgba()), "xnca → xnca can U V")
-expect(!showA.canRefreshVertices(idA, makeTri()), "xnca → xnc cannot U V")
-expect(!showO.canRefreshVertices(idOpaque, makeTriRgba()), "xnc → xnca cannot U V")
+expect(showA.sameverts(idA, makeTriRgba()), "xnca → xnca can U V")
+expect(!showA.sameverts(idA, makeTri()), "xnca → xnc cannot U V")
+expect(!showO.sameverts(idOpaque, makeTriRgba()), "xnc → xnca cannot U V")
+
+/* ---- different nverts, same layout → sameverts false ---- */
+fn makeTri4() {
+  return TriangleComplex(
+    Matrix([[0, 1, 0, 1], [0, 0, 1, 1], [0, 0, 0, 0]]),
+    Matrix([[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 1, 1]]),
+    Matrix([[1, 1, 1, 1], [0, 0, 0, 0], [0, 0, 0, 0]]),
+    Matrix([[1, 1], [1, 1], [1, 0], [0, 1]])
+  )
+}
+expect(showO.slots[idOpaque].nverts == 3, "opaque slot stores nverts")
+expect(showO.layout(makeTri4()) == "xnc", "4-vert mesh same xnc layout")
+expect(!showO.sameverts(idOpaque, makeTri4()), "same layout different nverts refuses U V")
 
 print "ok"

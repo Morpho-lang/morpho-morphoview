@@ -23,7 +23,6 @@ import xcolor
  * -------------------------- */
 
 var _PltMshClErr = Error("PltMshCl", "Color specification for plotmesh should be either a color, a list of [r,g,b] values or a list of colors for each grade.")
-var _PltInvldClErr = Error("PltInvldCl", "Could not convert color to matrix.")
 var _PltFldIntErr = Error("PltFldInt", "Can't use 'interpolate' style: Field lacks values on vertices.")
 var _PltSlctnEmptyErr = Error("PltSlctnEmpty", "Selection is empty.")
 var _PltSclBrVctrErr = Error("PltSclBrVctr", "ScaleBar vector must be a non-zero Matrix, List, or Tuple; tickdirn must not be parallel to dirn.")
@@ -123,6 +122,12 @@ fn _centroid(m, g, id) {
  * Grade / style predicates
  * -------------------------- */
 
+/** Ones + winding for a Sparse triangle column (mirrors xgraphics `_tri`). */
+fn _plotTri(conn, i, a, b, c) {
+  conn[a, i] = 1; conn[b, i] = 1; conn[c, i] = 1
+  conn.setrowindices(i, (a, b, c))
+}
+
 /** Must precede _gradeList: a module-level fn cannot call a fn defined later
  *  (Morpho "Closure unavailable" and it poisons later fns in the file). */
 fn _copySeq(seq) {
@@ -132,36 +137,39 @@ fn _copySeq(seq) {
 }
 
 /** Resolve grade= to a fresh list of grades to draw. */
+fn _gradeList(mesh) { return [mesh.maxgrade()] }
+fn _gradeList(mesh, List grade) { return _copySeq(grade) }
+fn _gradeList(mesh, Int grade) { return [grade] }
+fn _gradeList(mesh, Float grade) { return [grade] }
 fn _gradeList(mesh, grade) {
   if (isnil(grade)) return [mesh.maxgrade()]
-  if (islist(grade)) return _copySeq(grade)
-  if (isnumber(grade)) return [grade]
   if (istuple(grade)) return _copySeq(grade)
+  if (isnumber(grade)) return [grade]
   return [mesh.maxgrade()]
 }
 
 /** True if grade= includes g (nil means all grades). */
+fn _wantsGrade(List grade, g) { return grade.ismember(g) }
+fn _wantsGrade(Int grade, g) { return grade == g }
+fn _wantsGrade(Float grade, g) { return grade == g }
 fn _wantsGrade(grade, g) {
   if (isnil(grade)) return true
-  if (islist(grade)) return grade.ismember(g)
   if (isnumber(grade)) return grade == g
   if (istuple(grade)) {
-    for (x in grade) {
-      if (x == g) return true
-    }
+    for (x in grade) if (x == g) return true
     return false
   }
   return true
 }
 
 /** style= may be a string or list/tuple: "interpolate", "shaded", "spheres", "tubes", "thick", … */
+fn _styleHas(String style, name) { return style == name }
+fn _styleHas(List style, name) { return style.ismember(name) }
 fn _styleHas(style, name) {
   if (isnil(style)) return false
-  if (islist(style) || isarray(style)) return style.ismember(name)
+  if (isarray(style)) return style.ismember(name)
   if (istuple(style)) {
-    for (x in style) {
-      if (x == name) return true
-    }
+    for (x in style) if (x == name) return true
     return false
   }
   return style == name
@@ -328,8 +336,6 @@ fn _selectionColors(mesh, selection, grade) {
  * Field value → colormap [0,1]
  * -------------------------- */
 
-fn _plotClamp01(x) { return (x < 0) ? 0 : ((x > 1) ? 1 : x) }
-
 /** Linear map of val into [0,1] for colormap sampling.
  *  Zero data range (uniform field) → 0.5; never divides by zero.
  *  With center=: two-slope map vmin→0, center→0.5, vmax→1 (diverging). */
@@ -338,16 +344,16 @@ fn linearNormalize(val, vmin, vmax, center=nil) {
     if (val >= center) {
       var hi = vmax - center
       if (abs(hi) < 1e-16) return 0.5
-      return 0.5 + 0.5*_plotClamp01((val - center)/hi)
+      return 0.5 + 0.5*clamp01((val - center)/hi)
     }
     var lo = center - vmin
     if (abs(lo) < 1e-16) return 0.5
-    return 0.5*_plotClamp01((val - vmin)/lo)
+    return 0.5*clamp01((val - vmin)/lo)
   }
 
   var span = vmax - vmin
   if (abs(span) < 1e-16) return 0.5 // uniform field → mid colormap
-  return _plotClamp01((val - vmin)/span)
+  return clamp01((val - vmin)/span)
 }
 
 /** Clamp to [vmin,vmax] then normalize when scale=true; else return raw val. */
@@ -589,7 +595,7 @@ fn _faceEdgeDir(el, a, b) {
 
 /** Orient face normals consistently across the mesh (fixes alternating AreaMesh winding),
  *  then area-weighted average onto vertices. */
-fn _smoothVertexNormals(mesh, vertMat, centroid, selection=nil) {
+fn _smoothVertexNormals(mesh, vertMat, selection=nil) {
   var nv = mesh.count(0)
   var nf = mesh.count(2)
   var acc = Matrix(3, nv)
@@ -697,11 +703,6 @@ class ScaleBar {
     return out
   }
 
-  _tri(conn, i, a, b, c) {
-    conn[a, i] = 1; conn[b, i] = 1; conn[c, i] = 1
-    conn.setrowindices(i, (a, b, c))
-  }
-
   init(nticks=5, colormap=nil, length=1, posn=nil, dirn=nil, tickdirn=nil,
        textdirn=nil, textvertical=nil, textcolor=nil, fontsize=16) {
     if (!(length > 1e-12)) _PltSclBrVctrErr.throw()
@@ -773,8 +774,8 @@ class ScaleBar {
       for (j in 0...nj) {
         var jn = (j+1 == nsec) ? 0 : j+1
         var a = k*nsec + j, b = k*nsec + jn, c = (k+1)*nsec + j, d = (k+1)*nsec + jn
-        self._tri(conn, itri, a, c, b); itri += 1
-        self._tri(conn, itri, b, c, d); itri += 1
+        _plotTri(conn, itri, a, c, b); itri += 1
+        _plotTri(conn, itri, b, c, d); itri += 1
       }
     }
     return TriangleComplex(pos, nrm, ColorTable(col), conn)
@@ -815,7 +816,7 @@ class ScaleBar {
     var tvert = sqrt(1 - toffset^2)
     for (t in ticks) {
       var x = (abs(w) < 1e-12) ? 0 : (t - min)/w - 0.5
-      var label = String(t)
+      var label = _tickLabel(t)
       var width = (0.6*label.count()*fsize/72)/2, height = fsize/72
       g.display(Cylinder(self.coords(1.2*self.radius, 0, x*self.length),
                          self.coords(1.5*self.radius, 0, x*self.length), color=White))
@@ -1156,7 +1157,7 @@ class Plot is Scene {
     var unlit = !wantShade || (perFace && !interpolate)
     var vnorm = nil
     if (!unlit && isnil(planar)) {
-      vnorm = _smoothVertexNormals(mesh, vertMat, centroid, selection=selection)
+      vnorm = _smoothVertexNormals(mesh, vertMat, selection=selection)
     }
 
     // ColorTable only for per-face / interpolated colors (canonical per-vertex).
@@ -1179,16 +1180,15 @@ class Plot is Scene {
 
       var faceNormal
       if (!isnil(planar)) {
-        faceNormal = Matrix(bb.count())
+        faceNormal = Matrix(3)
         faceNormal[planar] = 1
       } else if (isnil(vnorm)) {
         faceNormal = _orientedFaceNormal(v[0], v[1], v[2], centroid)
       }
 
-      var tcol
+      var tcol, a = nnv
       if (perVertex && !interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, i), nch)
       for (j in 0...3) {
-        tri[nnv, nnt] = 1
         nvert.setColumn(nnv, v[j])
         if (!isnil(vnorm)) norm.setColumn(nnv, vnorm.column(el[j]))
         else norm.setColumn(nnv, faceNormal)
@@ -1198,6 +1198,7 @@ class Plot is Scene {
         }
         nnv += 1
       }
+      _plotTri(tri, nnt, a, a+1, a+2)
       nnt += 1
     }
 

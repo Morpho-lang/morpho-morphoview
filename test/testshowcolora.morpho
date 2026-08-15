@@ -61,7 +61,7 @@ var buf5 = Buf()
 show.write(sc, buf5)
 expect(sc.recolor(id, Color(1, 0.5, 0, 0.3)), "recolor with Color.a")
 var buf6 = Buf()
-expect(show.emitEntryRecolor(sc, id, buf6), "emit recolor")
+expect(show.recolor(sc, id, buf6), "emit recolor")
 expect(anyHasAlpha(buf6.lines, "0.3"), "recolor Color.a → alpha 0.3")
 
 /* ---- Color API smoke ---- */

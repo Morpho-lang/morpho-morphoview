@@ -150,7 +150,7 @@ for (line in buf2.lines) {
 }
 expect(hasT, "pose redraw includes translation")
 
-/* ---- event.ids + emitEntryPose (selective, no D) ---- */
+/* ---- event.ids + pose (selective, no D) ---- */
 var g7 = Scene()
 var id7a = g7.display(tc, [0, 0, 0], scale=1)
 var id7b = g7.display(tc, [1, 0, 0], scale=1)
@@ -168,8 +168,8 @@ expect(!isnil(cap7.movedIds) && cap7.movedIds.count() == 2, "event.ids has both 
 expect(cap7.movedIds[0] == id7a && cap7.movedIds[1] == id7b, "event.ids first-seen order")
 
 var bufPose = Buf()
-expect(show7.emitEntryPose(g7, id7a, bufPose), "emitEntryPose a")
-expect(show7.emitEntryPose(g7, id7b, bufPose), "emitEntryPose b")
+expect(show7.pose(g7, id7a, bufPose), "pose a")
+expect(show7.pose(g7, id7b, bufPose), "pose b")
 var hasD = false
 var hasClear = false
 for (line in bufPose.lines) {
@@ -180,7 +180,7 @@ expect(hasD && !hasClear, "selective pose emits d without D")
 
 // Unmapped id: no emit (View must not D+redraw — would blank the window).
 var bufMiss = Buf()
-expect(!show7.emitEntryPose(g7, 999, bufMiss), "unmapped pose fails")
+expect(!show7.pose(g7, 999, bufMiss), "unmapped pose fails")
 expect(bufMiss.lines.count() == 0, "unmapped pose emits nothing")
 
 /* ---- two listeners see the same full id list ---- */
@@ -221,7 +221,7 @@ var show8 = Show()
 var buf8 = Buf()
 show8.write(g8, buf8)
 var bufRecolor = Buf()
-expect(show8.emitEntryRecolor(g8, id8, bufRecolor), "emitEntryRecolor")
+expect(show8.recolor(g8, id8, bufRecolor), "recolor")
 var hasC = false
 var hasPoseD = false
 for (line in bufRecolor.lines) {
@@ -280,7 +280,7 @@ var buf9 = Buf()
 show9.write(g9, buf9)
 expect(show9.slots.contains(id9b), "remaining mapped")
 var bufRm = Buf()
-expect(show9.emitEntryRemove(id9b, bufRm), "emitEntryRemove")
+expect(show9.remove(id9b, bufRm), "remove")
 var hasXD = false
 var hasXO = false
 for (line in bufRm.lines) {
@@ -295,7 +295,7 @@ var buf10w = Buf()
 show10.write(g10, buf10w)
 expect(show10.slots.contains(id10), "mapped before replace emit")
 var bufRep = Buf()
-expect(show10.emitEntryReplace(g10, id10, bufRep), "emitEntryReplace")
+expect(show10.replace(g10, id10, bufRep), "replace")
 var hasXD = false
 var hasDefine = false
 for (line in bufRep.lines) {
@@ -316,7 +316,7 @@ show11.write(g11, buf11)
 expect(show11.slots[id11a].objectid == show11.slots[id11b].objectid, "spheres share viewer o")
 var sharedVid = show11.slots[id11a].objectid
 var bufRmA = Buf()
-show11.emitEntryRemove(id11a, bufRmA)
+show11.remove(id11a, bufRmA)
 var hasXOa = false
 for (line in bufRmA.lines) {
   if (line == "X O ${sharedVid}") hasXOa = true
@@ -324,7 +324,7 @@ for (line in bufRmA.lines) {
 expect(!hasXOa, "shared sphere remove skips X O while sibling remains")
 expect(show11.slots.contains(id11b), "sibling still mapped")
 var bufRmB = Buf()
-show11.emitEntryRemove(id11b, bufRmB)
+show11.remove(id11b, bufRmB)
 var hasXOb = false
 for (line in bufRmB.lines) {
   if (line == "X O ${sharedVid}") hasXOb = true
