@@ -13,6 +13,9 @@ import xcolor
 import xfonts
 
 var _PovExecErr = Error("PovExec", "Could not run POV-Ray.")
+var _PovLightRig = Error("PovLightRig",
+  "Could not form a camera frame for named lighting; emitting no lights (ambient only).")
+var _warnedLightRig = false
 // [Compatibility shim]
 var _PovLegacyCam = Error("PovLegacyCam",
   "POVRaytracer.viewpoint/viewangle/light/look_at/sky/width/height/antialias are mirrored onto camera. Prefer pov.camera.*.")
@@ -61,6 +64,55 @@ fn _pngPath(path) {
     if (ext == ".pov" || ext == ".POV") return path.substring(0, n-4) + ".png"
   }
   return path + ".png"
+}
+
+/** View-space axes matching MorphoView: +X right, +Y up, +Z toward the camera. */
+fn _povCameraAxes(cam) {
+  var z = cam.viewpoint - cam.look_at
+  var zn = z.norm()
+  if (!(zn > 1e-12)) return nil
+  z = z/zn
+  var y = cam.sky - z*cam.sky.inner(z)
+  var yn = y.norm()
+  if (!(yn > 1e-12)) return nil
+  y = y/yn
+  return (cross3D(y, z), y, z)
+}
+
+/** Named rig as distant point lights in the POV camera frame. Empty if the frame fails. */
+fn _povNamedRig(cam, name) {
+  var axes = _povCameraAxes(cam)
+  if (isnil(axes)) {
+    if (!_warnedLightRig) {
+      _warnedLightRig = true
+      _PovLightRig.warning()
+    }
+    return []
+  }
+  var x = axes[0], y = axes[1], z = axes[2]
+  var specs
+  if (name == "threepoint") {
+    specs = [
+      (Matrix([0.5, 0.5, 1.5]), 0.85),
+      (Matrix([-1.5, -2.5, 1.5]), 0.40),
+      (Matrix([0.0, 1.5, -1.5]), 0.10)
+    ]
+  } else {
+    specs = [
+      (Matrix([1.5, -0.5, 1.5]), 0.40),
+      (Matrix([1.5, 1.5, 1.5]), 0.40),
+      (Matrix([-0.5, 1.5, 1.5]), 0.40)
+    ]
+  }
+  var out = []
+  for (s in specs) {
+    var d = s[0]
+    var dir = x*d[0] + y*d[1] + z*d[2]
+    var n = dir.norm()
+    if (!(n > 1e-12)) continue
+    out.append((cam.look_at + 100*(dir/n), s[1]))
+  }
+  return out
 }
 
 class Camera {
@@ -338,12 +390,29 @@ class POVRaytracer {
     out.write("}")
   }
 
+  _writeNamedRig(out, sl, name) {
+    for (lamp in _povNamedRig(self.camera, name)) {
+      var c = lamp[1]
+      out.write("light_source { ${_povVector(lamp[0])} color rgb <${c}, ${c}, ${c}>${sl} }")
+    }
+  }
+
+  _writeLightVal(String name, out, sl) {
+    self._writeNamedRig(out, sl, (asLightName(name) == "threepoint") ? "threepoint" : "neutral")
+  }
+  _writeLightVal(List L, out, sl) {
+    for (p in asLightPositions(L)) {
+      out.write("light_source { ${_povVector(p)} color White${sl} }")
+    }
+  }
+  _writeLightVal(Matrix p, out, sl) { self._writeLightVal(asLightPositions(p), out, sl) }
+  _writeLightVal(Tuple t, out, sl) { self._writeLightVal(asLightPositions(t), out, sl) }
+  _writeLightVal(val, out, sl) { self._writeNamedRig(out, sl, "neutral") }
+
   _writeLights(out, shadowless) {
     var sl = shadowless ? " shadowless" : ""
-    var lights = self.camera.light
-    if (isnil(lights)) lights = [Matrix([-5, -5, 8])]
-    else if (!islist(lights)) lights = [lights]
-    for (L in lights) out.write("light_source { ${_povVector(L)} color White${sl} }")
+    var lights = isnil(self.camera.light) ? self.graphic.light : self.camera.light
+    self._writeLightVal(lights, out, sl)
   }
 
   write(file, transparent=false, shadowless=false) {

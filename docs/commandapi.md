@@ -41,7 +41,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `Q` | `MVCMD_QUIT` | — | Close all windows / quit viewer |
 | `W` | `MVCMD_WINDOW_TITLE` | `"<title>"` | Set current window title |
 | `B` | `MVCMD_BOUNDS` | `<xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; next prepare refits unless user moved camera |
-| `L` | `MVCMD_LIGHT` | `<x> <y> <z> [<r> <g> <b>]` \| `a` | Explicit model-space light (optional color), or `a` for AABB auto |
+| `L` | `MVCMD_LIGHT` | `"neutral"` \| `"threepoint"` \| `"auto"` \| `<n> "x"` \| `<n> "xc"` \| `0` | Named camera-relative rig, or n world-space point lights (cap 4). Omit `L` for Neutral. `L 0` is ambient only |
 | `G` | `MVCMD_BACKGROUND` | `<r> <g> <b>` | Scene clear / background color |
 | `o` | `MVCMD_OBJECT` | `<id>` | Current object (requires a scene) |
 | `v` | `MVCMD_VERTICES` | `["format"] <floats…>` | Vertex data for current object |
@@ -88,7 +88,8 @@ Each successful parse appends `MVCMD_PREPARE`, which calls `display_prepareall()
 Shading uses Phong (Lambert when \(k_s=0\)):
 
 \[
-I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V})^n)\,C_\text{light}\,\text{albedo}
+I = \text{albedo}\,\Bigl(k_a\,\text{ambient}
+    + \sum_i C_i\bigl(k_d \max(\mathbf{N}\cdot\mathbf{L}_i,0) + k_s (\mathbf{R}_i\cdot\mathbf{V})^n\bigr)\Bigr)
 \]
 
 - **`M shaded`** (default) — Phong/Lambert; defaults \(k_a=k_d=0.5\), \(k_s=0\). Optional floats override coeffs.
@@ -100,7 +101,16 @@ I = (k_a + k_d \max(\mathbf{N}\cdot\mathbf{L},0) + k_s (\mathbf{R}\cdot\mathbf{V
 - **Facet winding:** Package `Show` emits sparse face indices via `rowindices`. At upload, the viewer reorients triangles so geometric normals agree with averaged vertex normals (needed for the transparent back/front pass).
 - **Graphics alpha:** Package `Show` maps uniform `Color.a` (and `Coloring.opacity`) to `c`/`C` + colorless geometry (`v "xn"` / `v "x"`). `Color(r,g,b)` is opaque with `a=1`; `Color(r,g,b,a)` sets alpha. A `ColorTable` on a vertex-bearing primitive is one color per vertex; RGB tables emit `v "xnc"` / `v "xc"`, RGBA tables emit `v "xnca"` / `v "xca"`. Draw-slot `C` is a uniform `GraphicsEntry.color` override (not a `ColorTable`).
 
-Lighting and eye position are in model space (stable under camera rotation). By default the light sits outside the scene AABB. `L <x> <y> <z>` sets an explicit position (default white); optional `<r g b>` sets light color; `L a` resumes AABB auto placement.
+World space is right-handed: **+X right, +Y up, +Z toward the home viewer**. Home view is `Scale * Translate(-center)` (no extra rotation). Lighting is evaluated in **view space**; ortho `V = (0,0,1)` (toward the camera). Scene ambient is white in every mode; lamps contribute diffuse and specular only.
+
+- **Default (omit `L`)** — Neutral: three white view-space directionals plus white ambient (colormap-safe; key stays on the camera side when you orbit).
+- **`L "neutral"`** / **`L "auto"`** — same Neutral rig (`"auto"` is an alias).
+- **`L "threepoint"`** — key / fill / rim, also view-relative.
+- **`L <n> "x" <posn>…`** — n world-space point lights, white. Cap 4.
+- **`L <n> "xc" <posn> <color>…`** — same, with RGB per lamp.
+- **`L 0`** — ambient only.
+
+One `L` replaces the whole list. Package `Show` omits `L` when `Graphics.light` is `nil`; set `g.light = "threepoint"` or a 3-vector / list of those to emit `L`.
 
 `G <r> <g> <b>` sets the clear color (default dark bluish gray). Package `Show` emits `G` from `Graphics.background` (default `Black`).
 

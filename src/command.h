@@ -55,7 +55,7 @@
 #define COMMAND_INVLDCOLOR_MSG            "Color data length must be RGB triples or RGBA quads."
 
 #define COMMAND_INVLDLIGHT                "InvldLght"
-#define COMMAND_INVLDLIGHT_MSG            "Unrecognized light (expected a or x y z [r g b])."
+#define COMMAND_INVLDLIGHT_MSG            "Unrecognized light (expected \"neutral\", \"threepoint\", \"auto\", or <n> \"x\"|\"xc\" ...)."
 
 /* -------------------------------------------------------
  * Command IR — header + typed payloads
@@ -72,7 +72,7 @@ typedef enum {
     MVCMD_QUIT,           /**< Quit viewer (`Q`) */
     MVCMD_WINDOW_TITLE,   /**< Set window title (`W`) */
     MVCMD_BOUNDS,         /**< Set scene AABB (`B`) */
-    MVCMD_LIGHT,          /**< Explicit light or auto (`L`) */
+    MVCMD_LIGHT,          /**< Named rig or explicit world point list (`L`) */
     MVCMD_BACKGROUND,     /**< Set clear / background color (`G`) */
     MVCMD_OBJECT,         /**< Select/create current object (`o`) */
     MVCMD_VERTICES,       /**< Append vertex data (`v`) */
@@ -172,18 +172,18 @@ typedef struct {
     float bbox[6];
 } mv_cmd_bounds;
 
-/** Set an explicit model-space light, or clear it for AABB auto placement.
- *  Language: `L <x> <y> <z> [r g b]` | `L a`
- *  @param auto_mode  If true, clear explicit light
- *  @param has_color  If true (and not auto), also set light color
- *  @param pos        Model-space light position
- *  @param color      Light RGB when @p has_color is true */
+/** Set scene lighting: a named camera-relative rig, or n world-space point lights.
+ *  Language: `L "neutral"|"threepoint"|"auto"` | `L <n> "x"|"xc" ...` | `L 0`
+ *  @param mode     Neutral / ThreePoint / Explicit
+ *  @param nlights  Explicit count (0 = ambient only); ignored for named rigs
+ *  @param pos      World-space xyz + w (1 = point) per light
+ *  @param color    RGB per light */
 typedef struct {
     mv_command cmd;
-    bool auto_mode;
-    bool has_color;
-    float pos[3];
-    float color[3];
+    scene_light_mode mode;
+    int nlights;
+    float pos[SCENE_MAX_LIGHTS][4];
+    float color[SCENE_MAX_LIGHTS][3];
 } mv_cmd_light;
 
 /** Set the scene clear / background color.

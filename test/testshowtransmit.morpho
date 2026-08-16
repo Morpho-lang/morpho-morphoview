@@ -55,6 +55,16 @@ expect(anyExact(lines, "v \"xn\""), "transparent meshes should use xn (uniform a
 expect(anyHasAlpha(lines, "0.6"), "Color.a 0.6")
 expect(anyHasAlpha(lines, "0.75"), "opacity 0.75")
 expect(!anyExact(lines, "v \"xnc\""), "should not bake vertex colors when translucent")
+var drew = false
+for (i in 0...lines.count()) {
+  var line = lines[i]
+  if (line.count() < 1 || line[0] != "d") continue
+  if (line.count() > 1 && line[1] != " ") continue
+  drew = true
+  expect(i > 0 && lines[i-1].count() >= 2 && lines[i-1][0] == "C" && lines[i-1][1] == " ",
+         "translucent xn: C immediately before d (else generic attrib is white)")
+}
+expect(drew, "expected at least one draw")
 
 /* [Compatibility shim] transmit=/filter= → Color.a */
 var st = Sphere([0, 0, 0], 1, color=Red, transmit=0.4)

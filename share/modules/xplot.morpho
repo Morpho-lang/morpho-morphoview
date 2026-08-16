@@ -31,11 +31,6 @@ var _PltSclBrVctrErr = Error("PltSclBrVctr", "ScaleBar vector must be a non-zero
  * Geometry / bounds
  * -------------------------- */
 
-/* Module-private; not _cross3D — that name collides with xgraphics under MD. */
-fn _plotCross3D(a, b) {
-  return Matrix([ a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0] ])
-}
-
 /** Bounding box from a vertex matrix: list of [min,max] per coordinate row. */
 fn _boundingBox(m) {
   var col = m.transpose()
@@ -202,11 +197,16 @@ fn _plotLegacyTransp(color, filter, transmit) {
   return withLegacyTransp(color, filter, transmit)
 }
 
+/** True if an optional selection excludes this element. */
+fn _unselected(selection, grade, i) {
+  return isselection(selection) && !selection.isselected(grade, i)
+}
+
 /** Element ids of `grade` that pass an optional selection. */
 fn _selectedIds(mesh, selection, grade) {
   var ids = []
   for (i in 0...mesh.count(grade)) {
-    if (isselection(selection) && !selection.isselected(grade, i)) continue
+    if (_unselected(selection, grade, i)) continue
     ids.append(i)
   }
   return ids
@@ -570,16 +570,9 @@ fn _mergeGraphicsInto(plot, gfx, role) {
   }
 }
 
-/** Face normal from triangle winding (no centroid flip). */
+/** Face normal from triangle winding (OpenGL CCW: (v1-v0)×(v2-v0)). */
 fn _faceNormal(v0, v1, v2) {
-  return _plotCross3D(v2 - v1, v1 - v0)
-}
-
-/** Face normal oriented outward relative to centroid (flat shading only). */
-fn _orientedFaceNormal(v0, v1, v2, centroid) {
-  var normal = _faceNormal(v0, v1, v2)
-  if (normal.inner(v0 - centroid) < 0) normal = -normal
-  return normal
+  return cross3D(v1 - v0, v2 - v0)
 }
 
 /** +1 if face winding contains a→b, -1 if b→a, else 0. */
@@ -593,20 +586,21 @@ fn _faceEdgeDir(el, a, b) {
   return 0
 }
 
-/** Orient face normals consistently across the mesh (fixes alternating AreaMesh winding),
- *  then area-weighted average onto vertices. */
-fn _smoothVertexNormals(mesh, vertMat, selection=nil) {
-  var nv = mesh.count(0)
+/** Per-face signs: flood-fill consistency, then closed-outward (signed volume) or open +Z. */
+fn _faceOrientation(mesh, vertMat, selection=nil) {
   var nf = mesh.count(2)
-  var acc = Matrix(3, nv)
   var faces = mesh.connectivitymatrix(0, 2)
-  if (!issparse(faces)) return acc
-
-  // Raw winding normals + undirected edge → incident faces.
   var fnorm = Matrix(3, nf)
   var edgefaces = Dictionary()
+  var sign[nf]
+  var seen[nf]
+  var comp[nf]
+  for (i in 0...nf) { sign[i] = 1; seen[i] = false; comp[i] = -1 }
+
+  if (!issparse(faces)) return (fnorm, sign)
+
   for (i in 0...nf) {
-    if (isselection(selection) && !selection.isselected(2, i)) continue
+    if (_unselected(selection, 2, i)) continue
     var el = faces.rowindices(i)
     fnorm.setColumn(i, _faceNormal(vertMat.column(el[0]), vertMat.column(el[1]),
                                    vertMat.column(el[2])))
@@ -618,7 +612,6 @@ fn _smoothVertexNormals(mesh, vertMat, selection=nil) {
     }
   }
 
-  // Face adjacency from shared edges.
   var neigh[nf]
   for (i in 0...nf) neigh[i] = []
   for (k in edgefaces) {
@@ -628,17 +621,13 @@ fn _smoothVertexNormals(mesh, vertMat, selection=nil) {
     neigh[fs[1]].append(fs[0])
   }
 
-  // Flood-fill: adjacent faces must traverse a shared edge in opposite directions.
-  var sign[nf]
-  var seen[nf]
-  for (i in 0...nf) { sign[i] = 1; seen[i] = false }
-
+  var ncomp = 0
   for (seed in 0...nf) {
     if (seen[seed]) continue
-    if (isselection(selection) && !selection.isselected(2, seed)) continue
+    if (_unselected(selection, 2, seed)) continue
     seen[seed] = true
-    // Prefer +z for the seed hemisphere (AreaMesh / open surfaces).
     sign[seed] = (fnorm.column(seed)[2] < 0) ? -1 : 1
+    comp[seed] = ncomp
     var queue = [seed]
     var qi = 0
     while (qi < queue.count()) {
@@ -647,9 +636,8 @@ fn _smoothVertexNormals(mesh, vertMat, selection=nil) {
       var elf = faces.rowindices(f)
       for (g in neigh[f]) {
         if (seen[g]) continue
-        if (isselection(selection) && !selection.isselected(2, g)) continue
+        if (_unselected(selection, 2, g)) continue
         var elg = faces.rowindices(g)
-        // Find a shared edge and compare winding direction.
         var flipped = false
         var found = false
         for (j in 0...3) {
@@ -657,21 +645,71 @@ fn _smoothVertexNormals(mesh, vertMat, selection=nil) {
           var dirg = _faceEdgeDir(elg, a, b)
           if (dirg == 0) continue
           found = true
-          // f has a→b; consistent neighbor has b→a (dirg == -1).
           flipped = (dirg == 1)
           break
         }
         if (!found) continue
         sign[g] = flipped ? -sign[f] : sign[f]
         seen[g] = true
+        comp[g] = ncomp
         queue.append(g)
+      }
+    }
+    ncomp += 1
+  }
+
+  for (c in 0...ncomp) {
+    var closed = true
+    for (k in edgefaces) {
+      var fs = edgefaces[k]
+      var nIn = 0
+      for (f in fs) {
+        if (comp[f] == c) nIn += 1
+      }
+      if (nIn == 1) { closed = false; break }
+    }
+    if (!closed) continue
+    var vol = 0
+    for (i in 0...nf) {
+      if (comp[i] != c) continue
+      var el = faces.rowindices(i)
+      var v0 = vertMat.column(el[0])
+      vol += sign[i] * v0.inner(fnorm.column(i))
+    }
+    if (vol < 0) {
+      for (i in 0...nf) {
+        if (comp[i] == c) sign[i] = -sign[i]
       }
     }
   }
 
+  return (fnorm, sign)
+}
+
+/** Oriented face normals (flat shading). */
+fn _orientedFaceNormalMatrix(mesh, vertMat, selection=nil) {
+  var got = _faceOrientation(mesh, vertMat, selection=selection)
+  var fnorm = got[0], sign = got[1]
+  var nf = mesh.count(2)
+  var out = Matrix(3, nf)
+  for (i in 0...nf) out.setColumn(i, sign[i] * fnorm.column(i))
+  return out
+}
+
+/** Orient face normals consistently, then area-weighted average onto vertices. */
+fn _smoothVertexNormals(mesh, vertMat, selection=nil) {
+  var nv = mesh.count(0)
+  var nf = mesh.count(2)
+  var acc = Matrix(3, nv)
+  var faces = mesh.connectivitymatrix(0, 2)
+  if (!issparse(faces)) return acc
+
+  var got = _faceOrientation(mesh, vertMat, selection=selection)
+  var fnorm = got[0], sign = got[1]
+
   for (i in 0...nf) {
-    if (isselection(selection) && !selection.isselected(2, i)) continue
-    var n = sign[i]*fnorm.column(i)
+    if (_unselected(selection, 2, i)) continue
+    var n = sign[i] * fnorm.column(i)
     var el = faces.rowindices(i)
     for (pidx in el) acc.setColumn(pidx, acc.column(pidx) + n)
   }
@@ -723,11 +761,11 @@ class ScaleBar {
     if (tn < 1e-12) {
       if (givenTick) _PltSclBrVctrErr.throw()
       var a = (abs(self.dirn[0]) < 0.9) ? Matrix([1, 0, 0]) : Matrix([0, 1, 0])
-      self.tickdirn = _plotCross3D(self.dirn, a)
+      self.tickdirn = cross3D(self.dirn, a)
       tn = self.tickdirn.norm()
     }
     self.tickdirn /= tn
-    self.perp = _plotCross3D(self.tickdirn, self.dirn)
+    self.perp = cross3D(self.tickdirn, self.dirn)
     self.textdirn = self._asVec(textdirn, self.tickdirn, unit=true)
     self.textvertical = self._asVec(textvertical, self.dirn, unit=true)
     self.textcolor = textcolor
@@ -987,7 +1025,7 @@ class Plot is Scene {
       self.bounds = bb
       var planar = _planarAxis(bb)
       var got = self._facesItem(mesh, sel, col,
-                                vertMat, bb, planar, _boundsCentroid(bb), style=self.style)
+                                vertMat, bb, planar, style=self.style)
       if (isnil(got)) return false
       var id = self.entries["faces"][0]
       return view.morph(id, got[0])
@@ -1141,7 +1179,7 @@ class Plot is Scene {
    *  Default / per-element / selection → unlit (GraphicsEntry.flat).
    *  style="shaded" or "interpolate" → Phong; smooth vertex normals if non-planar.
    *  Returns (TriangleComplex, unlit) or nil. */
-  _facesItem(mesh, selection, color, vertMat, bb, planar, centroid, drawn=nil, style=nil) {
+  _facesItem(mesh, selection, color, vertMat, bb, planar, drawn=nil, style=nil) {
     var faces = mesh.connectivitymatrix(0, 2)
     if (!issparse(faces)) return nil
 
@@ -1171,8 +1209,10 @@ class Plot is Scene {
 
     var nnv = 0
     nnt = 0
+    var fnorms = (isnil(vnorm) && isnil(planar)) ?
+      _orientedFaceNormalMatrix(mesh, vertMat, selection=selection) : nil
     for (i in 0...nf) {
-      if (isselection(selection) && !selection.isselected(2, i)) continue
+      if (_unselected(selection, 2, i)) continue
 
       var el = faces.rowindices(i)
       var v[3]
@@ -1183,7 +1223,7 @@ class Plot is Scene {
         faceNormal = Matrix(3)
         faceNormal[planar] = 1
       } else if (isnil(vnorm)) {
-        faceNormal = _orientedFaceNormal(v[0], v[1], v[2], centroid)
+        faceNormal = fnorms.column(i)
       }
 
       var tcol, a = nnv
@@ -1205,8 +1245,8 @@ class Plot is Scene {
     return (TriangleComplex(nvert, norm, perVertex ? ColorTable(ncol) : fcol, tri), unlit)
   }
 
-  _facesInto(mesh, selection, color, vertMat, bb, planar, centroid, drawn=nil, style=nil) {
-    var got = self._facesItem(mesh, selection, color, vertMat, bb, planar, centroid,
+  _facesInto(mesh, selection, color, vertMat, bb, planar, drawn=nil, style=nil) {
+    var got = self._facesItem(mesh, selection, color, vertMat, bb, planar,
                              drawn=drawn, style=style)
     if (isnil(got)) return
     // Unlit facets unless style="shaded" or interpolate (Phong; smooth normals if curved).
@@ -1221,7 +1261,6 @@ class Plot is Scene {
     var bb = _scientificBounds(mesh)
     self.bounds = bb
     var planar = _planarAxis(bb)
-    var centroid = _boundsCentroid(bb)
 
     if (_wantsGrade(glist, 0)) {
       self._pointsInto(mesh, selection, color, style, vertMat, drawn=drawn)
@@ -1230,7 +1269,7 @@ class Plot is Scene {
       self._linesInto(mesh, selection, color, style, vertMat, drawn=drawn)
     }
     if (_wantsGrade(glist, 2)) {
-      self._facesInto(mesh, selection, color, vertMat, bb, planar, centroid,
+      self._facesInto(mesh, selection, color, vertMat, bb, planar,
                      drawn=drawn, style=style)
     }
   }

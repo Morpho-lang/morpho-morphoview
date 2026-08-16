@@ -48,11 +48,13 @@ static void scene_resetbbox(scene *s) {
     s->bbox_fit_pending=false;
 }
 
-/** Reset lighting to defaults (used by scene_new / scene_clear). */
+/** Reset lighting to Neutral (used by scene_new / scene_clear). */
 static void scene_resetlight(scene *s) {
-    s->light_explicit=false;
-    s->light_pos[0]=2.0f; s->light_pos[1]=1.0f; s->light_pos[2]=5.0f;
-    s->light_color[0]=1.0f; s->light_color[1]=1.0f; s->light_color[2]=1.0f;
+    s->lighting=SCENE_LIGHT_NEUTRAL;
+    s->nlights=0;
+    memset(s->light_pos, 0, sizeof(s->light_pos));
+    memset(s->light_color, 0, sizeof(s->light_color));
+    s->ambient[0]=1.0f; s->ambient[1]=1.0f; s->ambient[2]=1.0f;
 }
 
 /** Reset clear color to the default dark gray (used by scene_new / scene_clear). */
@@ -150,22 +152,34 @@ void scene_setbbox(scene *s, float xmin, float xmax, float ymin, float ymax, flo
     s->bbox_fit_pending=true;
 }
 
-/** Set an explicit model-space light position and color. */
-void scene_setlight(scene *s, float x, float y, float z, float r, float g, float b) {
+/** Select a named camera-relative rig (Neutral / ThreePoint). */
+void scene_setlightmode(scene *s, scene_light_mode mode) {
     if (!s) return;
-    s->light_pos[0]=x; s->light_pos[1]=y; s->light_pos[2]=z;
-    s->light_color[0]=r; s->light_color[1]=g; s->light_color[2]=b;
-    s->light_explicit=true;
+    s->lighting=mode;
+    if (mode!=SCENE_LIGHT_EXPLICIT) s->nlights=0;
 }
 
-/** Set explicit light position; leave color unchanged. */
-void scene_setlightpos(scene *s, float x, float y, float z) {
+/** Replace the light list with n world-space point lights (n==0: ambient only). */
+void scene_setexplicitlights(scene *s, int n, const float pos[][4], const float color[][3]) {
     if (!s) return;
-    s->light_pos[0]=x; s->light_pos[1]=y; s->light_pos[2]=z;
-    s->light_explicit=true;
+    if (n<0) n=0;
+    if (n>SCENE_MAX_LIGHTS) n=SCENE_MAX_LIGHTS;
+    s->lighting=SCENE_LIGHT_EXPLICIT;
+    s->nlights=n;
+    memset(s->light_pos, 0, sizeof(s->light_pos));
+    memset(s->light_color, 0, sizeof(s->light_color));
+    for (int i=0; i<n; i++) {
+        s->light_pos[i][0]=pos[i][0];
+        s->light_pos[i][1]=pos[i][1];
+        s->light_pos[i][2]=pos[i][2];
+        s->light_pos[i][3]=pos[i][3];
+        s->light_color[i][0]=color[i][0];
+        s->light_color[i][1]=color[i][1];
+        s->light_color[i][2]=color[i][2];
+    }
 }
 
-/** Clear explicit light; resume AABB auto placement. */
+/** Reset to Neutral. */
 void scene_clearlight(scene *s) {
     if (!s) return;
     scene_resetlight(s);

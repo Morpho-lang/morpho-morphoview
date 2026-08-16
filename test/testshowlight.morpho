@@ -1,0 +1,114 @@
+// Show emits L from Graphics.light; nil omits (viewer Neutral).
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testshowlight.morpho
+
+import xgraphics
+import xshow
+import xcolor
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn anyExact(lines, want) {
+  for (line in lines) {
+    if (line == want) return true
+  }
+  return false
+}
+
+fn anyStarts(lines, prefix) {
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) return true
+    }
+  }
+  return false
+}
+
+fn anyHasL(lines) {
+  for (line in lines) {
+    if (line.count() >= 2 && line[0] == "L" && line[1] == " ") return true
+    if (line == "L 0") return true
+  }
+  return false
+}
+
+var sph = Sphere([0, 0, 0], 1, color=Red)
+
+var g0 = Graphics()
+g0.display(sph)
+var b0 = Buf()
+Show().write(g0, b0)
+expect(!anyHasL(b0.lines), "nil light omits L")
+
+var gn = Graphics()
+gn.light = "neutral"
+gn.display(sph)
+var bn = Buf()
+Show().write(gn, bn)
+expect(anyExact(bn.lines, "L \"neutral\""), "neutral emits L \"neutral\"")
+
+var ga = Graphics()
+ga.light = "auto"
+ga.display(sph)
+var ba = Buf()
+Show().write(ga, ba)
+expect(anyExact(ba.lines, "L \"neutral\""), "auto aliases neutral")
+
+var gt = Graphics()
+gt.light = "threepoint"
+gt.display(sph)
+var bt = Buf()
+Show().write(gt, bt)
+expect(anyExact(bt.lines, "L \"threepoint\""), "threepoint emits L \"threepoint\"")
+
+var gx = Graphics()
+gx.light = Matrix([-2.5, 0.4, 0.2])
+gx.display(sph)
+var bx = Buf()
+Show().write(gx, bx)
+expect(anyStarts(bx.lines, "L 1 \"x\""), "Matrix emits L 1 \"x\"")
+
+var gxyz = Graphics()
+gxyz.light = [-2.5, 0.4, 0.2]
+gxyz.display(sph)
+var bxyz = Buf()
+Show().write(gxyz, bxyz)
+expect(anyStarts(bxyz.lines, "L 1 \"x\""), "[x,y,z] is one lamp, not three")
+
+var gtup = Graphics()
+gtup.light = (-2.5, 0.4, 0.2)
+gtup.display(sph)
+var btup = Buf()
+Show().write(gtup, btup)
+expect(anyStarts(btup.lines, "L 1 \"x\""), "(x,y,z) is one lamp")
+
+var g2 = Graphics()
+g2.light = [Matrix([10, 10, 10]), Matrix([-10, -10, 10])]
+g2.display(sph)
+var b2 = Buf()
+Show().write(g2, b2)
+expect(anyStarts(b2.lines, "L 2 \"x\""), "two matrices emit L 2 \"x\"")
+
+var gZ = Graphics()
+gZ.light = []
+gZ.display(sph)
+var bz = Buf()
+Show().write(gZ, bz)
+expect(anyExact(bz.lines, "L 0"), "empty list emits L 0")
+
+print "ok"

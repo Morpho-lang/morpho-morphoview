@@ -39,6 +39,34 @@ fn anyHas(lines, needle) {
   return false
 }
 
+fn anyExact(lines, want) {
+  for (line in lines) {
+    if (line == want) return true
+  }
+  return false
+}
+
+fn colorImmediatelyBeforeEachDraw(lines) {
+  for (i in 0...lines.count()) {
+    var line = lines[i]
+    if (line.count() < 1 || line[0] != "d") continue
+    if (line.count() > 1 && line[1] != " ") continue
+    if (i == 0) return false
+    var prev = lines[i-1]
+    if (prev == "C") continue
+    if (prev.count() >= 2 && prev[0] == "C" && prev[1] == " ") continue
+    return false
+  }
+  return true
+}
+
+fn poseHasNoColorOrShade(lines) {
+  for (line in lines) {
+    if (line.count() >= 1 && (line[0] == "C" || line[0] == "M")) return false
+  }
+  return true
+}
+
 fn threwPoly(blk) {
   var ok = false
   try {
@@ -106,10 +134,58 @@ expect(anyHas(buf.lines, "f"), "Show emits facets")
 expect(anyHas(buf.lines, "0 1 2"), "fan triangle 0 1 2")
 expect(anyHas(buf.lines, "0 2 3"), "fan triangle 0 2 3")
 expect(anyHas(buf.lines, "v \"xn\""), "uniform color uses xn")
+expect(anyExact(buf.lines, "M flat"), "flat polygon emits M flat")
+expect(anyExact(buf.lines, "M shaded"), "M shaded after the draw so shade does not leak")
+expect(colorImmediatelyBeforeEachDraw(buf.lines), "C immediately before d")
 
 var sdl = File(POVRaytracer(g).write("/tmp/testpolygon.pov")).readall()
 expect(contains(sdl, "mesh2"), "POV-Ray mesh2 for Polygon")
 expect(contains(sdl, "vertex_vectors { 4,"), "four vertices")
 expect(contains(sdl, "face_indices { 2,"), "two tessellated faces")
+
+/* ---- boing-like: translucent flat xn oval + vertex-colored mesh; pose is C/M-free ---- */
+var oval = Polygon([
+  [1, 0, 0], [0.707, 0, 0.707], [0, 0, 1], [-0.707, 0, 0.707],
+  [-1, 0, 0], [-0.707, 0, -0.707], [0, 0, -1], [0.707, 0, -0.707]
+], color=Color(0.22, 0.22, 0.22).opacity(0.65))
+var checkers = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  ColorTable(Matrix([[1, 0, 0], [1, 1, 1], [1, 0, 0]])),
+  Matrix([[1], [1], [1]])
+)
+var gB = Graphics()
+var sid = gB.display(oval, [0, 0, 0], scale=1.2, flat=true)
+var bid = gB.display(checkers, [0, 1, 0], scale=0.5, flat=true)
+var showB = Show()
+var bufB = Buf()
+showB.write(gB, bufB)
+expect(anyExact(bufB.lines, "v \"xn\""), "oval uniform color → xn")
+expect(anyExact(bufB.lines, "v \"xnc\""), "checkers keep vertex colors")
+expect(anyHas(bufB.lines, "0.22"), "oval grey albedo")
+expect(anyHas(bufB.lines, "0.65"), "oval opacity")
+expect(colorImmediatelyBeforeEachDraw(bufB.lines), "boing-like: C immediately before each d")
+expect(showB.slots[sid].flat && showB.slots[bid].flat, "both slots record flat")
+
+var poseB = Buf()
+expect(showB.pose(gB, sid, poseB), "oval pose")
+expect(poseHasNoColorOrShade(poseB.lines), "pose-only d must not restamp C or M")
+
+var redrawB = Buf()
+showB.emitPoseDraws(gB, redrawB)
+expect(anyExact(redrawB.lines, "M flat"), "D+redraw still emits M flat")
+expect(colorImmediatelyBeforeEachDraw(redrawB.lines), "D+redraw: C immediately before each d")
+
+/* ---- Sphere(flat=true) must sandwich M like TriangleComplex (unit-mesh path) ---- */
+var gS = Graphics()
+gS.display(Sphere([0, 0, 0], 1, color=Color(0.22, 0.22, 0.22).opacity(0.65), maxrefine=1),
+           [0, 0, 0], scale=0.5, flat=true)
+var showS = Show()
+var bufS = Buf()
+showS.write(gS, bufS)
+expect(anyExact(bufS.lines, "M flat"), "flat sphere emits M flat")
+expect(anyExact(bufS.lines, "M shaded"), "flat sphere restores M shaded")
+expect(showS.slots[1].flat, "sphere slot records flat")
+expect(colorImmediatelyBeforeEachDraw(bufS.lines), "flat sphere: C immediately before d")
 
 print "ok"

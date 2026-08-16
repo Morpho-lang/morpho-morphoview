@@ -1,0 +1,70 @@
+// Authored vertex normals match the intended geometry (outward / +Z).
+// Sparse.rowindices sorts vertex ids, so Show relies on viewer orient_facets;
+// Polygon 0 1 2 is already sorted and checks winding directly.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testwinding.morpho
+
+import xgraphics
+import xcolor
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn approx(a, b, eps=1e-6) { return abs(a - b) < eps }
+
+expect(approx(cross3D([1, 0, 0], [0, 1, 0])[2], 1), "cross3D list +Z")
+expect(approx(cross3D(Matrix([1, 0, 0]), Matrix([0, 1, 0]))[2], 1), "cross3D Matrix +Z")
+
+/* ---- Polygon 0 1 2 → +Z (sorted ids; Sparse order is the winding) ---- */
+var poly = Polygon([[0, 0, 0], [1, 0, 0], [0, 1, 0]], color=Red).toTriangleComplex()
+var el = poly.faceIndices(0)
+expect(el[0] == 0 && el[1] == 1 && el[2] == 2, "polygon fan 0 1 2")
+var geom = cross3D(poly.position.column(1) - poly.position.column(0),
+                   poly.position.column(2) - poly.position.column(0))
+expect(geom[2] > 0, "polygon geometric N is +Z")
+expect(approx(poly.normals.column(0)[2], 1), "polygon vertex normals +Z")
+
+/* ---- UV sphere: vertex normals are outward (unit positions) ---- */
+var sph = Sphere([0, 0, 0], 1, maxrefine=0).toTriangleComplex(scale=false)
+var nv = sph.position.dimensions()[1]
+var nbad = 0
+var poleZ = -2
+for (i in 0...nv) {
+  var p = sph.position.column(i)
+  var n = sph.normals.column(i)
+  if (p.inner(n) < 0.9) nbad += 1
+  if (p[2] > poleZ) poleZ = p[2]
+}
+expect(nbad == 0, "sphere normals outward (${nbad} inward)")
+expect(poleZ > 0.99, "sphere north pole at +Z")
+
+/* ---- Cylinder unit shaft: start cap -Z, end +Z, rings radial ---- */
+var cyl = Cylinder([0, 0, 0], [0, 0, 1], n=8, color=Blue).toTriangleComplex(unit=true)
+var cnv = cyl.position.dimensions()[1]
+expect(cyl.normals.column(0).inner(Matrix([0, 0, -1])) > 0.9, "cylinder start cap -Z")
+expect(cyl.normals.column(cnv-1).inner(Matrix([0, 0, 1])) > 0.9, "cylinder end cap +Z")
+var cradial = 0
+for (i in 1...cnv-1) {
+  var n = cyl.normals.column(i)
+  if (abs(n[2]) < 0.2 && n.norm() > 0.9) cradial += 1
+}
+expect(cradial == cnv-2, "cylinder ring normals radial")
+
+/* ---- Arrow unit: start cap -Z, tip +Z ---- */
+var arr = Arrow([0, 0, 0], [0, 0, 1], n=8, color=Green).toTriangleComplex(unit=true)
+var anv = arr.position.dimensions()[1]
+expect(arr.normals.column(0).inner(Matrix([0, 0, -1])) > 0.9, "arrow start cap -Z")
+expect(arr.normals.column(anv-1).inner(Matrix([0, 0, 1])) > 0.9, "arrow tip +Z")
+
+/* ---- Open tube: start/end cap normals along the path ---- */
+var tubeOpen = Tube([[0, 0, 0], [0, 0, 1]], 0.2, n=8, closed=false, color=Orange).toTriangleComplex()
+var tnv = tubeOpen.position.dimensions()[1]
+expect(tubeOpen.normals.column(tnv-2).inner(Matrix([0, 0, -1])) > 0.9, "open tube start cap -Z")
+expect(tubeOpen.normals.column(tnv-1).inner(Matrix([0, 0, 1])) > 0.9, "open tube end cap +Z")
+
+print "ok"

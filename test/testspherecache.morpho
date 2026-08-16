@@ -55,5 +55,9 @@ expect(show.pose(g, 2, poseBuf), "emit pose for id 2")
 expect(countPrefix(poseBuf.lines, "d ") == 1, "one pose draw")
 var dline = poseBuf.lines[poseBuf.lines.count()-1]
 expect(dline == "d 2", "pose is d <graphicsId> only")
+for (line in poseBuf.lines) {
+  expect(!(line.count() >= 1 && (line[0] == "C" || line[0] == "M")),
+         "pose-only must not restamp C or M")
+}
 
 print "ok"

@@ -437,13 +437,10 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             /* Lighting is sampled each frame from the scene; no GL rebuild. */
             mv_cmd_light *c = MVCMD_AS_LIGHT(cmd);
             if (!ctx->scene) return false;
-            if (c->auto_mode) {
-                scene_clearlight(ctx->scene);
-            } else if (c->has_color) {
-                scene_setlight(ctx->scene, c->pos[0], c->pos[1], c->pos[2],
-                               c->color[0], c->color[1], c->color[2]);
+            if (c->mode==SCENE_LIGHT_EXPLICIT) {
+                scene_setexplicitlights(ctx->scene, c->nlights, c->pos, c->color);
             } else {
-                scene_setlightpos(ctx->scene, c->pos[0], c->pos[1], c->pos[2]);
+                scene_setlightmode(ctx->scene, c->mode);
             }
             return true;
         }
@@ -737,7 +734,6 @@ enum {
     MVTOKEN_BOUNDS,
     MVTOKEN_LIGHT,
     MVTOKEN_BACKGROUND,
-    MVTOKEN_AUTO,
     MVTOKEN_FONT,
     MVTOKEN_TEXT,
     MVTOKEN_MATERIAL,
@@ -780,7 +776,6 @@ tokendefn mvtokens[] = {
     { "B",          MVTOKEN_BOUNDS                , NULL },
     { "L",          MVTOKEN_LIGHT                 , NULL },
     { "G",          MVTOKEN_BACKGROUND            , NULL },
-    { "a",          MVTOKEN_AUTO                  , NULL },
     { "M",          MVTOKEN_MATERIAL              , NULL },
     { "shaded",     MVTOKEN_SHADED                , NULL },
     { "flat",       MVTOKEN_FLAT                  , NULL },
@@ -1581,26 +1576,63 @@ bool command_parsebounds(parser *p, void *out) {
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
-/** `L <x> <y> <z> [r g b]` | `L a` — explicit light or AABB auto. */
+/** `L "neutral"|"threepoint"|"auto"` | `L <n> "x"|"xc" ...` | `L 0`. */
 bool command_parselight(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
 
-    bool auto_mode=false;
-    bool has_color=false;
-    float pos[3]={0.0f, 0.0f, 0.0f};
-    float color[3]={1.0f, 1.0f, 1.0f};
+    scene_light_mode mode=SCENE_LIGHT_NEUTRAL;
+    int nlights=0;
+    float pos[SCENE_MAX_LIGHTS][4];
+    float color[SCENE_MAX_LIGHTS][3];
+    memset(pos, 0, sizeof(pos));
+    memset(color, 0, sizeof(color));
 
-    if (parse_checktokenadvance(p, MVTOKEN_AUTO)) {
-        auto_mode=true;
-    } else if (command_isnumerical(p)) {
-        for (int i=0; i<3; i++) {
-            PARSE_CHECK(command_parsefloat(p, &pos[i]));
+    if (parse_checktoken(p, MVTOKEN_STRING)) {
+        char *name=NULL;
+        PARSE_CHECK(command_parsestring(p, &name));
+        if (strcmp(name, "neutral")==0 || strcmp(name, "auto")==0) {
+            mode=SCENE_LIGHT_NEUTRAL;
+        } else if (strcmp(name, "threepoint")==0) {
+            mode=SCENE_LIGHT_THREEPOINT;
+        } else {
+            free(name);
+            parse_error(p, false, COMMAND_INVLDLIGHT);
+            return false;
         }
-        if (command_isnumerical(p)) {
-            for (int i=0; i<3; i++) {
-                PARSE_CHECK(command_parsefloat(p, &color[i]));
+        free(name);
+    } else if (command_isnumerical(p)) {
+        int n=0;
+        PARSE_CHECK(command_parseinteger(p, &n));
+        if (n<0 || n>SCENE_MAX_LIGHTS) {
+            parse_error(p, false, COMMAND_INVLDLIGHT);
+            return false;
+        }
+        mode=SCENE_LIGHT_EXPLICIT;
+        nlights=n;
+        if (n>0) {
+            char *fmt=NULL;
+            PARSE_CHECK(command_parsestring(p, &fmt));
+            bool has_color = strcmp(fmt, "xc")==0;
+            if (!has_color && strcmp(fmt, "x")!=0) {
+                free(fmt);
+                parse_error(p, false, COMMAND_INVLDLIGHT);
+                return false;
             }
-            has_color=true;
+            free(fmt);
+
+            for (int i=0; i<n; i++) {
+                PARSE_CHECK(command_parsefloat(p, &pos[i][0]));
+                PARSE_CHECK(command_parsefloat(p, &pos[i][1]));
+                PARSE_CHECK(command_parsefloat(p, &pos[i][2]));
+                pos[i][3]=1.0f;
+                if (has_color) {
+                    PARSE_CHECK(command_parsefloat(p, &color[i][0]));
+                    PARSE_CHECK(command_parsefloat(p, &color[i][1]));
+                    PARSE_CHECK(command_parsefloat(p, &color[i][2]));
+                } else {
+                    color[i][0]=1.0f; color[i][1]=1.0f; color[i][2]=1.0f;
+                }
+            }
         }
     } else {
         parse_error(p, false, COMMAND_INVLDLIGHT);
@@ -1617,12 +1649,10 @@ bool command_parselight(parser *p, void *out) {
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
         return false;
     }
-    cmd->auto_mode=auto_mode;
-    cmd->has_color=has_color;
-    for (int i=0; i<3; i++) {
-        cmd->pos[i]=pos[i];
-        cmd->color[i]=color[i];
-    }
+    cmd->mode=mode;
+    cmd->nlights=nlights;
+    memcpy(cmd->pos, pos, sizeof(pos));
+    memcpy(cmd->color, color, sizeof(color));
     return command_enqueue_owned(p, &cmd->cmd);
 }
 

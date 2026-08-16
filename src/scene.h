@@ -122,6 +122,15 @@ typedef struct {
 
 DECLARE_VARRAY(gdraw, gdraw);
 
+#define SCENE_MAX_LIGHTS 4
+
+/** Named camera-relative rigs, or an explicit world-space point list. */
+typedef enum {
+    SCENE_LIGHT_NEUTRAL=0,    /**< Default: 3 view-space directionals + white ambient */
+    SCENE_LIGHT_THREEPOINT,   /**< Key / fill / rim, view-space */
+    SCENE_LIGHT_EXPLICIT      /**< nlights world-space point lights (nlights==0: ambient only) */
+} scene_light_mode;
+
 /* ***************************
  * The overall scene structure
  * *************************** */
@@ -137,9 +146,11 @@ typedef struct sscene {
     bool bbox_explicit;
     bool bbox_fit_pending; /** set by B; cleared after display_fit */
 
-    bool light_explicit; /** true if light_pos was set by a command */
-    float light_pos[3];
-    float light_color[3];
+    scene_light_mode lighting;
+    int nlights;              /** explicit count; ignored for named rigs */
+    float light_pos[SCENE_MAX_LIGHTS][4];  /** xyz + w (1 = point) */
+    float light_color[SCENE_MAX_LIGHTS][3];
+    float ambient[3];         /** white scene ambient; independent of lamps */
 
     float background[3]; /** Clear color RGB (glClearColor) */
     
@@ -165,9 +176,9 @@ void scene_markchanged(scene *s);
 void scene_setbbox(scene *s, float xmin, float xmax, float ymin, float ymax, float zmin, float zmax);
 bool scene_computebbox(scene *s);
 
-void scene_setlight(scene *s, float x, float y, float z, float r, float g, float b);
-void scene_setlightpos(scene *s, float x, float y, float z);
-void scene_clearlight(scene *s);
+void scene_setlightmode(scene *s, scene_light_mode mode);
+void scene_setexplicitlights(scene *s, int n, const float pos[][4], const float color[][3]);
+void scene_clearlight(scene *s); /**< Reset to Neutral */
 
 void scene_setbackground(scene *s, float r, float g, float b);
 

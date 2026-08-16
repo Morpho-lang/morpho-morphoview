@@ -28,7 +28,7 @@ DEFINE_VARRAY(rendertdraw, rendertdraw)
  * ------------------------------------------------------- */
 
 /* Geometry: OpenGL/VTK Phong when uFlat==0 (Lambert when ks=0); unlit albedo when uFlat!=0.
- * Lighting and normals in model space; normalMatrix supplied from CPU. */
+ * Lighting and normals in view space; normalMatrix = inverseTranspose(view*model). */
 
 const char *vertexshader =
     "#version 330 core\n"
@@ -46,9 +46,10 @@ const char *vertexshader =
     "uniform mat3 normalMatrix;\n"
     "\n"
     "void main() {\n"
-    "   gl_Position = proj * view * model * vec4(vPos, 1.0);\n"
+    "   vec4 viewPos4 = view * model * vec4(vPos, 1.0);\n"
+    "   gl_Position = proj * viewPos4;\n"
     "   fragColor = vColor;\n"
-    "   fragPos = vec3(model * vec4(vPos, 1.0));\n"
+    "   fragPos = viewPos4.xyz;\n"
     "   normal = normalMatrix * vNormal;\n"
     "   fragAlpha = vAlpha;\n"
     "}\n";
@@ -60,9 +61,10 @@ const char *fragmentshader =
     "in vec3 fragPos;\n"
     "in vec3 normal;\n"
     "in float fragAlpha;\n"
-    "uniform vec3 lightColor;\n"
-    "uniform vec3 lightPos;\n"
-    "uniform vec3 viewPos;\n"
+    "uniform int nLights;\n"
+    "uniform vec4 lightPos[4];\n"
+    "uniform vec4 lightColor[4];\n"
+    "uniform vec3 ambientColor;\n"
     "uniform vec4 uColor;\n"
     "uniform int uUseUniform;\n"
     "uniform int uFlat;\n"
@@ -80,16 +82,26 @@ const char *fragmentshader =
     "   }\n"
     "   vec3 norm = normalize(normal);\n"
     "   if (!gl_FrontFacing) norm = -norm;\n"
-    "   vec3 lightDir = normalize(lightPos - fragPos);\n"
-    "   float NdotL = max(dot(norm, lightDir), 0.0);\n"
-    "   vec3 ambient = ka * lightColor;\n"
-    "   vec3 diffuse = kd * NdotL * lightColor;\n"
-    "   vec3 viewDir = normalize(viewPos - fragPos);\n"
-    "   vec3 reflectDir = reflect(-lightDir, norm);\n"
-    "   float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);\n"
-    "   vec3 specular = ks * spec * lightColor;\n"
-    "   vec3 result = (ambient + diffuse + specular) * albedo;\n"
-    "   FragColor = vec4(result, alpha);\n"
+    "   vec3 viewDir = vec3(0.0, 0.0, 1.0);\n"
+    "   vec3 lit = ka * ambientColor;\n"
+    "   int n = nLights;\n"
+    "   if (n > 4) n = 4;\n"
+    "   for (int i = 0; i < 4; i++) {\n"
+    "       if (i >= n) break;\n"
+    "       vec4 lp = lightPos[i];\n"
+    "       vec3 Lvec = (lp.w < 0.5) ? lp.xyz : (lp.xyz - fragPos);\n"
+    "       float llen = length(Lvec);\n"
+    "       if (llen < 1e-8) continue;\n"
+    "       vec3 lightDir = Lvec / llen;\n"
+    "       float NdotL = max(dot(norm, lightDir), 0.0);\n"
+    "       vec3 C = lightColor[i].rgb;\n"
+    "       vec3 diffuse = kd * NdotL * C;\n"
+    "       vec3 reflectDir = reflect(-lightDir, norm);\n"
+    "       float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);\n"
+    "       vec3 specular = ks * spec * C;\n"
+    "       lit += diffuse + specular;\n"
+    "   }\n"
+    "   FragColor = vec4(lit * albedo, alpha);\n"
     "}\n";
 
 /* Text shader */
@@ -191,9 +203,10 @@ static void render_cacheuniforms(renderer *r) {
     r->uniforms.view = glGetUniformLocation(p, "view");
     r->uniforms.proj = glGetUniformLocation(p, "proj");
     r->uniforms.normalMatrix = glGetUniformLocation(p, "normalMatrix");
-    r->uniforms.lightColor = glGetUniformLocation(p, "lightColor");
+    r->uniforms.nLights = glGetUniformLocation(p, "nLights");
     r->uniforms.lightPos = glGetUniformLocation(p, "lightPos");
-    r->uniforms.viewPos = glGetUniformLocation(p, "viewPos");
+    r->uniforms.lightColor = glGetUniformLocation(p, "lightColor");
+    r->uniforms.ambientColor = glGetUniformLocation(p, "ambientColor");
     r->uniforms.uColor = glGetUniformLocation(p, "uColor");
     r->uniforms.uUseUniform = glGetUniformLocation(p, "uUseUniform");
     r->uniforms.uFlat = glGetUniformLocation(p, "uFlat");
@@ -201,15 +214,111 @@ static void render_cacheuniforms(renderer *r) {
     r->uniforms.kd = glGetUniformLocation(p, "kd");
     r->uniforms.ks = glGetUniformLocation(p, "ks");
     r->uniforms.shininess = glGetUniformLocation(p, "shininess");
+    if (r->uniforms.uColor<0 || r->uniforms.uUseUniform<0 || r->uniforms.uFlat<0 ||
+        r->uniforms.nLights<0 || r->uniforms.lightPos<0 || r->uniforms.lightColor<0) {
+        fprintf(stderr, "morphoview: geometry shader is missing a lighting/color uniform\n");
+    }
 }
 
-/** normalMatrix = transpose(inverse(upper 3x3 of model)), column-major. */
-static void render_normalmatrix(mat4x4 model, mat3x3 out) {
+/** normalMatrix = transpose(inverse(upper 3x3 of M)), column-major. */
+static void render_normalmatrix(mat4x4 m, mat3x3 out) {
     mat4x4 inv;
-    mat3d_invert4x4(model, inv);
+    mat3d_invert4x4(m, inv);
     out[0]=inv[0]; out[1]=inv[4]; out[2]=inv[8];
     out[3]=inv[1]; out[4]=inv[5]; out[5]=inv[9];
     out[6]=inv[2]; out[7]=inv[6]; out[8]=inv[10];
+}
+
+/** ImageScaled Neutral dirs (view space; +Z toward the viewer). */
+static const float render_neutral_dir[3][3] = {
+    { 1.5f, -0.5f, 1.5f },
+    { 1.5f,  1.5f, 1.5f },
+    {-0.5f,  1.5f, 1.5f }
+};
+
+/** ThreePoint key / fill / rim (view space). */
+static const float render_threepoint_dir[3][3] = {
+    { 0.5f,  0.5f,  1.5f },
+    {-1.5f, -2.5f,  1.5f },
+    { 0.0f,  1.5f, -1.5f }
+};
+static const float render_threepoint_color[3][3] = {
+    { 0.85f, 0.85f, 0.85f },
+    { 0.40f, 0.40f, 0.40f },
+    { 0.10f, 0.10f, 0.10f }
+};
+
+#define RENDER_NEUTRAL_INTENSITY 0.40f
+static const float render_neutral_color[3][3] = {
+    { RENDER_NEUTRAL_INTENSITY, RENDER_NEUTRAL_INTENSITY, RENDER_NEUTRAL_INTENSITY },
+    { RENDER_NEUTRAL_INTENSITY, RENDER_NEUTRAL_INTENSITY, RENDER_NEUTRAL_INTENSITY },
+    { RENDER_NEUTRAL_INTENSITY, RENDER_NEUTRAL_INTENSITY, RENDER_NEUTRAL_INTENSITY }
+};
+
+/** Copy a view-space directional rig (`w=0`) into the upload buffers. */
+static void render_copy_dir_rig(const float dir[][3], const float col[][3], int n,
+                                float pos[SCENE_MAX_LIGHTS][4],
+                                float color[SCENE_MAX_LIGHTS][4]) {
+    for (int i=0; i<n; i++) {
+        pos[i][0]=dir[i][0];
+        pos[i][1]=dir[i][1];
+        pos[i][2]=dir[i][2];
+        pos[i][3]=0.0f;
+        color[i][0]=col[i][0];
+        color[i][1]=col[i][1];
+        color[i][2]=col[i][2];
+        color[i][3]=0.0f;
+    }
+}
+
+/** Transform world xyz by view (column-major); w=1. */
+static void render_view_transform_point(mat4x4 view, const float world[3], float out[3]) {
+    out[0]=view[0]*world[0] + view[4]*world[1] + view[8]*world[2]  + view[12];
+    out[1]=view[1]*world[0] + view[5]*world[1] + view[9]*world[2]  + view[13];
+    out[2]=view[2]*world[0] + view[6]*world[1] + view[10]*world[2] + view[14];
+}
+
+/** Upload nLights / lightPos / lightColor / ambientColor for this frame. */
+static void render_uploadlights(renderer *r, scene *s, mat4x4 view) {
+    float pos[SCENE_MAX_LIGHTS][4];
+    float color[SCENE_MAX_LIGHTS][4];
+    float ambient[3]={1.0f, 1.0f, 1.0f};
+    int n=0;
+    memset(pos, 0, sizeof(pos));
+    memset(color, 0, sizeof(color));
+
+    scene_light_mode mode = s ? s->lighting : SCENE_LIGHT_NEUTRAL;
+    if (s) {
+        ambient[0]=s->ambient[0];
+        ambient[1]=s->ambient[1];
+        ambient[2]=s->ambient[2];
+    }
+
+    if (mode==SCENE_LIGHT_THREEPOINT) {
+        n=3;
+        render_copy_dir_rig(render_threepoint_dir, render_threepoint_color, n, pos, color);
+    } else if (mode==SCENE_LIGHT_EXPLICIT && s) {
+        n=s->nlights;
+        if (n>SCENE_MAX_LIGHTS) n=SCENE_MAX_LIGHTS;
+        for (int i=0; i<n; i++) {
+            render_view_transform_point(view, s->light_pos[i], pos[i]);
+            pos[i][3]=1.0f;
+            color[i][0]=s->light_color[i][0];
+            color[i][1]=s->light_color[i][1];
+            color[i][2]=s->light_color[i][2];
+            color[i][3]=0.0f;
+        }
+    } else {
+        /* Neutral (default, including missing scene). */
+        n=3;
+        render_copy_dir_rig(render_neutral_dir, render_neutral_color, n, pos, color);
+    }
+
+    glUseProgram(r->shader);
+    glUniform1i(r->uniforms.nLights, n);
+    glUniform4fv(r->uniforms.lightPos, SCENE_MAX_LIGHTS, (const GLfloat *) pos);
+    glUniform4fv(r->uniforms.lightColor, SCENE_MAX_LIGHTS, (const GLfloat *) color);
+    glUniform3fv(r->uniforms.ambientColor, 1, ambient);
 }
 
 /* -------------------------------------------------------
@@ -238,6 +347,7 @@ bool render_init(renderer *r) {
     varray_rendertdrawinit(&r->tdraws);
     r->fontvao=0;
     r->fontvbo=0;
+    mat3d_identity4x4(r->frameview);
 
     return true;
 }
@@ -702,6 +812,7 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
     }
     
     unsigned int offset = 0;
+    bool have_c=false, have_n=false, have_a=false;
     for (unsigned int j=0; b->format[j]!='\0'; j++) {
         if (b->format[j]=='x') {
             glVertexAttribPointer(0, s->dim, GL_FLOAT, GL_FALSE, sizeof(GLfloat)*entrysize, (void*) (sizeof(GLfloat)*offset));
@@ -710,16 +821,33 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
         } else if (b->format[j]=='c') {
             glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(GLfloat)*entrysize, (void*) (sizeof(GLfloat)*offset));
             glEnableVertexAttribArray(1);
+            have_c=true;
             offset += 3;
         } else if (b->format[j]=='n') {
             glVertexAttribPointer(2, s->dim, GL_FLOAT, GL_FALSE, sizeof(GLfloat)*entrysize, (void*) (sizeof(GLfloat)*offset));
             glEnableVertexAttribArray(2);
+            have_n=true;
             offset += s->dim;
         } else if (b->format[j]=='a') {
             glVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(GLfloat)*entrysize, (void*) (sizeof(GLfloat)*offset));
             glEnableVertexAttribArray(3);
+            have_a=true;
             offset += 1;
         }
+    }
+    /* xn meshes must not inherit a stale color/alpha array (generic attrib is white).
+     * Set generics while this VAO is bound — some drivers store current attribs per-VAO. */
+    if (!have_c) {
+        glDisableVertexAttribArray(1);
+        glVertexAttrib3f(1, 1.0f, 1.0f, 1.0f);
+    }
+    if (!have_n) {
+        glDisableVertexAttribArray(2);
+        glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
+    }
+    if (!have_a) {
+        glDisableVertexAttribArray(3);
+        glVertexAttrib1f(3, 1.0f);
     }
     
     /* Unbind vertex array buffer */
@@ -907,18 +1035,26 @@ void render_preparescene(renderer *r, scene *s) {
  * Render the scene
  * ------------------------------------------------------- */
 
-/** Upload model + derived normalMatrix via cached locations. */
+/** Upload model + derived normalMatrix = inverseTranspose(view*model). */
 static void render_setmodel(renderer *r, mat4x4 model) {
+    mat4x4 vm;
     mat3x3 nmat;
-    render_normalmatrix(model, nmat);
+    mat3d_mul4x4(r->frameview, model, vm);
+    render_normalmatrix(vm, nmat);
     glUniformMatrix4fv(r->uniforms.model, 1, GL_FALSE, model);
     glUniformMatrix3fv(r->uniforms.normalMatrix, 1, GL_FALSE, nmat);
 }
 
-/** Upload uniforms for the geometry program. */
+/** Upload view/proj only — do not install a dummy white/shaded material. */
+static void render_bind_viewproj(renderer *r, mat4x4 view, mat4x4 proj) {
+    glUseProgram(r->shader);
+    glUniformMatrix4fv(r->uniforms.view, 1, GL_FALSE, view);
+    glUniformMatrix4fv(r->uniforms.proj, 1, GL_FALSE, proj);
+}
+
+/** Upload uniforms for the geometry program (lights already bound for the frame). */
 static void render_setgeometryuniforms(renderer *r, mat4x4 view, mat4x4 proj,
-                                       mat4x4 model, vec3 lightcolor, vec3 lightposn, vec3 viewposn,
-                                       float *ucolor, int use_uniform, int uflat,
+                                       mat4x4 model, float *ucolor, int use_uniform, int uflat,
                                        float ka, float kd, float ks, float shininess) {
     renderuniforms *u = &r->uniforms;
     glUseProgram(r->shader);
@@ -928,9 +1064,6 @@ static void render_setgeometryuniforms(renderer *r, mat4x4 view, mat4x4 proj,
     glUniform4fv(u->uColor, 1, ucolor);
     glUniform1i(u->uUseUniform, use_uniform);
     glUniform1i(u->uFlat, uflat);
-    glUniform3fv(u->lightColor, 1, lightcolor);
-    glUniform3fv(u->lightPos, 1, lightposn);
-    glUniform3fv(u->viewPos, 1, viewposn);
     glUniform1f(u->ka, ka);
     glUniform1f(u->kd, kd);
     glUniform1f(u->ks, ks);
@@ -1040,6 +1173,7 @@ static int render_tdraw_cmp(const void *a, const void *b) {
 /** Apply baked packet state and issue the draw.
  *  Closed translucent meshes: back faces then front (avoids mesh-order striping). */
 static void render_draw_tdraw(renderer *r, rendertdraw *d) {
+    glUseProgram(r->shader);
     render_setmodel(r, d->model);
     glUniform4fv(r->uniforms.uColor, 1, d->rgba);
     glUniform1i(r->uniforms.uUseUniform, d->use_uniform);
@@ -1048,7 +1182,11 @@ static void render_draw_tdraw(renderer *r, rendertdraw *d) {
     glUniform1f(r->uniforms.kd, d->kd);
     glUniform1f(r->uniforms.ks, d->ks);
     glUniform1f(r->uniforms.shininess, d->shininess);
+    if (!d->vao) return;
     glBindVertexArray(d->vao);
+    glVertexAttrib3f(1, 1.0f, 1.0f, 1.0f);
+    glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
+    glVertexAttrib1f(3, 1.0f);
     if (d->mode==GL_TRIANGLES) {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_FRONT);
@@ -1065,6 +1203,7 @@ static void render_draw_tdraw(renderer *r, rendertdraw *d) {
 static bool render_collect_tdraw(renderer *r, scene *s, mat4x4 view, rendergeostate *st,
                                  renderinstruction *ins) {
     rendertdraw d;
+    memset(&d, 0, sizeof(d));
     d.mode=(ins->instruction==RTRIANGLES) ? GL_TRIANGLES :
            (ins->instruction==RLINES) ? GL_LINES : GL_POINTS;
     d.length=ins->data.triangles.length;
@@ -1091,13 +1230,12 @@ typedef enum {
 
 /** Walk the geometry render list once, applying state and either drawing or collecting. */
 static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj,
-                                 vec3 lightcolor, vec3 lightposn, vec3 viewposn,
                                  rendergeopass pass) {
     rendergeostate st;
     render_geostate_reset(&st);
 
     if (pass==RENDER_PASS_OPAQUE) {
-        render_setgeometryuniforms(r, view, proj, st.model, lightcolor, lightposn, viewposn,
+        render_setgeometryuniforms(r, view, proj, st.model,
                                    st.ucolor, st.use_uniform, st.uflat,
                                    st.ka, st.kd, st.ks, st.shininess);
     } else {
@@ -1117,7 +1255,7 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
                 st.shininess=ins->data.shade.shininess;
                 st.uflat=(ins->data.shade.mode==SCENE_SHADE_FLAT) ? 1 : 0;
                 if (pass==RENDER_PASS_OPAQUE)
-                    render_setgeometryuniforms(r, view, proj, st.model, lightcolor, lightposn, viewposn,
+                    render_setgeometryuniforms(r, view, proj, st.model,
                                                st.ucolor, st.use_uniform, st.uflat,
                                                st.ka, st.kd, st.ks, st.shininess);
                 break;
@@ -1138,7 +1276,13 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
                 break;
             case RARRAY:
                 st.curvao=ins->data.array.handle;
-                if (pass==RENDER_PASS_OPAQUE) glBindVertexArray(st.curvao);
+                if (pass==RENDER_PASS_OPAQUE) {
+                    glBindVertexArray(st.curvao);
+                    /* Re-assert generics after bind; skipped arrays read this, not a leftover VBO. */
+                    glVertexAttrib3f(1, 1.0f, 1.0f, 1.0f);
+                    glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
+                    glVertexAttrib1f(3, 1.0f);
+                }
                 break;
             case RTRIANGLES:
             case RLINES:
@@ -1152,6 +1296,7 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
                 bool trans=render_is_transparent(use_uniform, alpha, fmt);
                 if (pass==RENDER_PASS_OPAQUE && !trans) {
                     /* Force GPU state even if a prior uniform `C` left uUseUniform set. */
+                    glUniform1i(r->uniforms.uFlat, st.uflat);
                     glUniform1i(r->uniforms.uUseUniform, use_uniform);
                     if (use_uniform==0) {
                         float one[4]={1.0f,1.0f,1.0f,1.0f};
@@ -1193,46 +1338,9 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     }
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    /* Default vertex color/normal/alpha when format lacks those attributes */
-    glVertexAttrib3f(1, 1.0f, 1.0f, 1.0f);
-    glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
-    glVertexAttrib1f(3, 1.0f);
-    
-    vec3 lightcolor = {1.0f, 1.0f, 1.0f};
-    vec3 lightposn = {2.0f, 1.0f, 5.0f};
-    vec3 viewposn = {0.0f, 0.0f, 1.0f};
+    mat3d_copy4x4(view, r->frameview);
+    render_uploadlights(r, s, view);
 
-    /* Eye position in model/world space from inverse view */
-    {
-        mat4x4 invview;
-        mat3d_invert4x4(view, invview);
-        viewposn[0]=invview[12];
-        viewposn[1]=invview[13];
-        viewposn[2]=invview[14];
-    }
-
-    if (s && s->light_explicit) {
-        lightposn[0]=s->light_pos[0];
-        lightposn[1]=s->light_pos[1];
-        lightposn[2]=s->light_pos[2];
-        lightcolor[0]=s->light_color[0];
-        lightcolor[1]=s->light_color[1];
-        lightcolor[2]=s->light_color[2];
-    } else if (s && s->bbox_valid) {
-        float cx=0.5f*(s->bbox[0]+s->bbox[1]);
-        float cy=0.5f*(s->bbox[2]+s->bbox[3]);
-        float cz=0.5f*(s->bbox[4]+s->bbox[5]);
-        float hx=0.5f*(s->bbox[1]-s->bbox[0]);
-        float hy=0.5f*(s->bbox[3]-s->bbox[2]);
-        float hz=0.5f*(s->bbox[5]-s->bbox[4]);
-        float radius = sqrtf(hx*hx + hy*hy + hz*hz);
-        if (radius < 1e-6f) radius = 1.0f;
-
-        lightposn[0] = cx + 0.7f * radius;
-        lightposn[1] = cy + 1.0f * radius;
-        lightposn[2] = cz + 1.5f * radius;
-    }
-    
     mat4x4 proj;
     mat3d_ortho(NULL, proj, -1.0*aspectratio, 1.0*aspectratio, -1.0, 1.0, near, far);
 
@@ -1245,20 +1353,15 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     /* --- Opaque pass: display-list order, depth write on, no blending --- */
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
-    render_walk_geometry(r, s, view, proj, lightcolor, lightposn, viewposn, RENDER_PASS_OPAQUE);
+    render_walk_geometry(r, s, view, proj, RENDER_PASS_OPAQUE);
 
     /* --- Transparent pass: collect, sort far→near by centroid view-z, draw --- */
     glEnable(GL_BLEND);
     glDepthMask(GL_FALSE);
-    if (render_walk_geometry(r, s, view, proj, lightcolor, lightposn, viewposn,
-                             RENDER_PASS_COLLECT_TRANSPARENT) &&
+    if (render_walk_geometry(r, s, view, proj, RENDER_PASS_COLLECT_TRANSPARENT) &&
         r->tdraws.count>0) {
-        float defaults[4]={1.0f, 1.0f, 1.0f, 1.0f};
         qsort(r->tdraws.data, r->tdraws.count, sizeof(rendertdraw), render_tdraw_cmp);
-        render_setgeometryuniforms(r, view, proj, model, lightcolor, lightposn, viewposn,
-                                   defaults, 0, 0,
-                                   SCENE_MATERIAL_KA_DEFAULT, SCENE_MATERIAL_KD_DEFAULT,
-                                   SCENE_MATERIAL_KS_DEFAULT, SCENE_MATERIAL_SHININESS_DEFAULT);
+        render_bind_viewproj(r, view, proj);
         for (unsigned i=0; i<r->tdraws.count; i++) render_draw_tdraw(r, &r->tdraws.data[i]);
     }
 

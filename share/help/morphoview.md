@@ -90,6 +90,10 @@ Combine two Graphics objects with `+` / `add` (left-hand ids kept; right-hand id
 
 Optional constructor args: `title=`, `background=` (a `Color`).
 
+Lighting (`g.light`) is camera-relative **Neutral** when `nil` (Show omits `L`). Set `g.light = "threepoint"` for a studio rig, or a 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) / list of those for world-space point lights. `"neutral"` / `"auto"` emit the Neutral rig explicitly.
+
+`import xgraphics` also provides `cross3D(a, b)` (3-vector cross product).
+
 ## Scene
 [tagScene]: # (Scene)
 

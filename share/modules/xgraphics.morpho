@@ -57,8 +57,8 @@ fn _normalVector(vec) {
   return out
 }
 
-/* 3d cross product */
-fn _cross3D(a, b) {
+/** 3-vector cross product. `a` and `b` need `[0],[1],[2]` (Matrix, List, or Tuple). */
+fn cross3D(a, b) {
   return Matrix([ a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0] ])
 }
 
@@ -103,6 +103,25 @@ fn _effectiveRadius(scale) { return isnil(scale) ? 1 : scale }
 
 // Public aliases — Morpho `_` helpers are not imported across modules.
 fn effectiveRadius(scale) { return _effectiveRadius(scale) }
+
+/** `"auto"` → `"neutral"`; other strings unchanged. */
+fn asLightName(String s) { return (s == "auto") ? "neutral" : s }
+
+/** World-space point lights: one 3-vector, or a sequence of those. Empty → none.
+ *  `[x,y,z]` / `(x,y,z)` is one lamp, not three. */
+fn asLightPositions(Matrix p) { return [p.clone()] }
+fn asLightPositions(List L) {
+  if (L.count() == 0) return []
+  if (isnumber(L[0])) return [_asPosition(L)]
+  var out = []
+  for (p in L) out.append(_asPosition(p))
+  return out
+}
+fn asLightPositions(Tuple t) {
+  var L = []
+  for (x in t) L.append(x)
+  return asLightPositions(L)
+}
 
 /** Ones + winding for a Sparse triangle column. */
 fn _tri(conn, i, a, b, c) {
@@ -149,7 +168,7 @@ fn _axisAngleFromTo(from, to) {
     else ax = ax/n
     return (Pi, ax[0], ax[1], ax[2])
   }
-  var axis = _cross3D(from, to)
+  var axis = cross3D(from, to)
   axis = axis/axis.norm()
   var phi = acos(d)
   return (phi, axis[0], axis[1], axis[2])
@@ -313,9 +332,9 @@ class Cylinder is GraphicsPrimitive {
     var conn = Sparse(np, nt)
     for (i in 0...n) {
       var i2 = (i < n-1) ? i+2 : 1, ni2 = (i < n-1) ? n+i+2 : n+1
-      _tri(conn, i, 0, i+1, i2)                 // 0-A cap
+      _tri(conn, i, 0, i2, i+1)                 // 0-A cap (outward -Z)
       _tri(conn, n+i, np-1, n+i+1, ni2)         // B-1 cap
-      _tri(conn, 2*n+i, i+1, n+i+1, i2)         // A-B sidewall
+      _tri(conn, 2*n+i, i+1, i2, n+i+1)         // A-B sidewall
       _tri(conn, 3*n+i, i2, ni2, n+i+1)
     }
 
@@ -463,11 +482,11 @@ class Arrow is GraphicsPrimitive {
     for (i in 0...n) {
       var i2 = (i < n-1) ? i+2 : 1, ni2 = (i < n-1) ? n+i+2 : n+1
       var ci2 = (i < n-1) ? 2*n+i+2 : 2*n+1
-      _tri(conn, i, 0, i+1, i2)                       // 0-A
+      _tri(conn, i, 0, i2, i+1)                       // 0-A
       _tri(conn, n+i, np-1, 2*n+i+1, ci2)             // C-1 tip
-      _tri(conn, 2*n+i, i+1, n+i+1, i2)               // A-B
+      _tri(conn, 2*n+i, i+1, i2, n+i+1)               // A-B
       _tri(conn, 3*n+i, i2, ni2, n+i+1)
-      _tri(conn, 4*n+i, n+i+1, ni2, 2*n+i+1)          // B-C
+      _tri(conn, 4*n+i, n+i+1, 2*n+i+1, ni2)          // B-C
       _tri(conn, 5*n+i, ni2, ci2, 2*n+i+1)
     }
 
@@ -576,7 +595,7 @@ class Tube is GraphicsPrimitive {
       for (i in 0...n) {
         var b = (i == n-1) ? 0 : i+1
         var d = (i == n-1) ? (np-1)*n : (np-1)*n+i+1
-        _tri(conn, m, i, b, nv-2); m += 1
+        _tri(conn, m, i, nv-2, b); m += 1
         _tri(conn, m, (np-1)*n+i, d, nv-1); m += 1
       }
     }
@@ -610,7 +629,7 @@ class Text is GraphicsPrimitive {
     if (!isnil(self.vertical)) for (i in 0..2) m[i,1]=self.vertical[i]
 
     // Now set the final direction to the cross product of the two 
-    var zp = _cross3D(m.column(1),m.column(0)) 
+    var zp = cross3D(m.column(1), m.column(0)) 
     for (i in 0..2) m[i,2]=zp[i]
 
     _orthogonalize(m)
@@ -718,8 +737,7 @@ class Polygon is GraphicsPrimitive {
   /** Unit geometric normal from winding of the first triangle. */
   normal() {
     var p = self.position
-    var n = _cross3D(p.column(1)-p.column(0),
-                     p.column(2)-p.column(0))
+    var n = cross3D(p.column(1)-p.column(0), p.column(2)-p.column(0))
     var nn = n.norm()
     if (nn < _eps) _GfxPoly.throw()
     return n/nn
@@ -743,7 +761,7 @@ class Polygon is GraphicsPrimitive {
       var a = p.column(i)
       var b = p.column(mod(i+1, nv))
       var c = p.column(mod(i+2, nv))
-      if (_cross3D(b-a, c-b).inner(n) < -eps)
+      if (cross3D(b-a, c-b).inner(n) < -eps)
         _GfxPoly.throw()
     }
   }
@@ -871,6 +889,7 @@ class Graphics {
     if (!self.title) self.title="Morpho" // Title to show
     self.background = isnil(background) ? Black : _asColoring(background)
     if (isnil(self.background)) self.background = Black
+    self.light = nil
   }
 
   /** Look up an entry by Graphics-owned id; nil if missing. */
@@ -990,12 +1009,18 @@ class Graphics {
                         color=color, flat=isnil(flat) ? true : flat)
   }
 
+  /** Copy title / background / light (not entries). */
+  _copyMetaInto(g) {
+    g.title = self.title
+    g.background = self.background
+    g.light = self.light
+  }
+
   /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
    *  Entry records are copied (item refs shared); no Defined notifications. */
   add(Graphics right) {
     var g = Graphics()
-    g.title = self.title
-    g.background = self.background
+    self._copyMetaInto(g)
     g._nextId = self._nextId
     self._copyEntriesInto(g)
     for (el in right.displaylist) {
@@ -1140,8 +1165,7 @@ class Scene is Graphics with Broadcaster {
   /** Union as Scene. Entry copies; no Defined notifications. */
   add(Graphics right) {
     var g = Scene()
-    g.title = self.title
-    g.background = self.background
+    self._copyMetaInto(g)
     g._nextId = self._nextId
     self._copyEntriesInto(g)
     for (el in right.displaylist) {

@@ -185,7 +185,32 @@ class Show {
     }
     var bg = graphic.background.rgb(0)
     out.write("G ${self.fmt(bg[0])} ${self.fmt(bg[1])} ${self.fmt(bg[2])}")
+    self._writeL(graphic.light, out)
   }
+
+  /** Emit `L` after `G` when Graphics.light is set. Nil → omit (viewer Neutral). */
+  _writeL(String name, out) {
+    name = asLightName(name)
+    if (name == "neutral" || name == "threepoint") out.write("L \"${name}\"")
+  }
+  _writeL(Matrix p, out) { self._writeL(asLightPositions(p), out) }
+  _writeL(Tuple t, out) { self._writeL(asLightPositions(t), out) }
+  _writeL(List L, out) {
+    var pts = asLightPositions(L)
+    var n = pts.count()
+    if (n > 4) n = 4
+    if (n == 0) {
+      out.write("L 0")
+      return
+    }
+    var line = "L ${n} \"x\""
+    for (i in 0...n) {
+      var p = pts[i]
+      line += " ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}"
+    }
+    out.write(line)
+  }
+  _writeL(val, out) { }
 
   // 3 significant figures — enough for display; keeps ASCII small vs full doubles.
   // Morpho requires a width field (`%.3g` is rejected); use 0 to avoid padding spaces.
@@ -712,8 +737,11 @@ class Show {
       self.meshCache[key] = vid
     }
     var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
-    self._recordObject(entry, vid, colorid=cid)
+    var flat = entry.flat
+    if (flat) out.write("M flat")
+    self._recordObject(entry, vid, colorid=cid, flat=flat)
     self._emitColoredDraw(entry, out, viewerid=vid)
+    if (flat) out.write("M shaded")
   }
 
   visit(entry, Sphere item, out) { self._visitUnitMesh(entry, item, out) }

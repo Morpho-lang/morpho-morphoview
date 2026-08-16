@@ -1,5 +1,5 @@
 S 0 3
-W "Light: AUTO (AABB default)"
+W "Light: Neutral (default)"
 B -0.7 0.7 -0.7 0.7 -0.7 0.7
 M shaded 0.2 0.45 0.55 48
 c 0 0.85 0.85 0.88
@@ -366,7 +366,7 @@ d 1
 
 S 1 3
 W "Light: L from left, red tint"
-L -2.5 0.4 0.2  1.0 0.15 0.08
+L 1 "xc" -2.5 0.4 0.2  1.0 0.15 0.08
 B -0.7 0.7 -0.7 0.7 -0.7 0.7
 M shaded 0.2 0.45 0.55 48
 c 0 0.85 0.85 0.88

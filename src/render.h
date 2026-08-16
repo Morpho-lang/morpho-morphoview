@@ -114,9 +114,10 @@ typedef struct {
     GLint view;
     GLint proj;
     GLint normalMatrix;
-    GLint lightColor;
+    GLint nLights;
     GLint lightPos;
-    GLint viewPos;
+    GLint lightColor;
+    GLint ambientColor;
     GLint uColor;
     GLint uUseUniform;
     GLint uFlat;
@@ -157,6 +158,7 @@ typedef struct {
     varray_rendertdraw tdraws; /* scratch: transparent draws (capacity retained) */
     GLuint fontvao;
     GLuint fontvbo;
+    mat4x4 frameview; /* view matrix for the current frame (normalMatrix) */
 } renderer;
 
 bool render_init(renderer *r);

@@ -169,4 +169,31 @@ var sdlL = File(POVRaytracer(gl).write("/tmp/testxpovray.pov")).readall()
 expect(contains(sdlL, "camera {"), "write succeeds with leftover .filter")
 expect(!contains(sdlL, "filter 0.2"), "no POV filter keyword")
 
+/* ---- named lighting (no silent [-5,-5,8]) ---- */
+var gDef = Graphics()
+gDef.display(Sphere([0, 0, 0], 1, color=Red))
+var sDef = scene(gDef)
+expect(contains(sDef, "color rgb <0.4"), "default Neutral directional-equivalent")
+expect(!contains(sDef, "<-5, -5, 8>"), "no silent old default lamp")
+
+var gTP = Graphics()
+gTP.light = "threepoint"
+gTP.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gTP), "color rgb <0.85"), "threepoint key in camera frame")
+
+var gWL = Graphics()
+gWL.light = Matrix([3, 4, 5])
+gWL.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gWL), "light_source { <3, 4, 5>"), "Graphics.light world point")
+
+var gList = Graphics()
+gList.light = [3, 4, 5]
+gList.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gList), "light_source { <3, 4, 5>"), "[x,y,z] is one lamp")
+
+var gTup = Graphics()
+gTup.light = (3, 4, 5)
+gTup.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gTup), "light_source { <3, 4, 5>"), "(x,y,z) is one lamp")
+
 print "ok"
