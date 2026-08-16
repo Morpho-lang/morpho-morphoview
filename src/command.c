@@ -5,6 +5,7 @@
  */
 #include <string.h>
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "morpho.h"
@@ -835,7 +836,7 @@ bool command_lexnumber(lexer *l, token *tok, error *err) {
     tokentype type = l->inttype;
 
     if (!lex_isdigit(lex_peek(l))) {
-        morpho_writeerrorwithid(err, COMMAND_INVLDNMBR, NULL, tok->line, tok->posn);
+        morpho_writeerrorwithid(err, COMMAND_INVLDNMBR, NULL, l->line, l->posn);
         return false;
     }
 
@@ -855,7 +856,7 @@ bool command_lexnumber(lexer *l, token *tok, error *err) {
         lex_advance(l);
         if (lex_peek(l)=='+' || lex_peek(l)=='-') lex_advance(l);
         if (!lex_isdigit(lex_peek(l))) {
-            morpho_writeerrorwithid(err, COMMAND_INVLDNMBR, NULL, tok->line, tok->posn);
+            morpho_writeerrorwithid(err, COMMAND_INVLDNMBR, NULL, l->line, l->posn);
             return false;
         }
         while (lex_isdigit(lex_peek(l))) lex_advance(l);
@@ -1714,13 +1715,43 @@ bool command_parsetext(parser *p, void *out) {
  * Parser driver
  * ********************************************************************** */
 
+/** Null-terminated copy of [start, start+len) into @p out (caller clears). */
+static void command_token_cstring(const char *start, int len, varray_char *out) {
+    varray_charinit(out);
+    if (start && len > 0) varray_charadd(out, (char *) start, len);
+    varray_charwrite(out, '\0');
+}
+
+/** Morpho's UnrgnzdTkn has no token arg; rewrite via the shared '%s' template. */
+static void command_enrich_lexerror(error *err, lexer *l) {
+    if (!err || !l || !morpho_matcherror(err, LEXER_UNRECOGNIZEDTOKEN)) return;
+
+    const char *s = l->start;
+    int len = 0;
+    if (s) {
+        while (s[len] && !lex_isspace(s[len])) len++;
+    }
+
+    varray_char tok;
+    command_token_cstring(s, len, &tok);
+    morpho_writeerrorwithid(err, COMMAND_UNRCGNZDCMND, NULL,
+                            err->line, err->posn, tok.data ? tok.data : "");
+    varray_charclear(&tok);
+}
+
 bool command_parseelements(parser *p, void *out) {
     while (!parse_checktoken(p, MVTOKEN_EOF)) {
         PARSE_CHECK(parse_advance(p));
 
         parserule *rule = parse_getrule(p, p->previous.type);
         if (!rule || !rule->prefix) {
-            parse_error(p, true, COMMAND_UNRCGNZDCMND);
+            varray_char tok;
+            command_token_cstring(p->previous.start, p->previous.length, &tok);
+            /* Use morpho_writeerrorwithid (not parse_error) so '%s' is filled. */
+            morpho_writeerrorwithid(p->err, COMMAND_UNRCGNZDCMND, NULL,
+                                    p->previous.line, p->previous.posn,
+                                    tok.data ? tok.data : "");
+            varray_charclear(&tok);
             return false;
         }
 
@@ -1765,14 +1796,46 @@ void command_initializeparser(parser *p, lexer *l, error *err, void *out) {
     parse_setskipnewline(p, false, TOKEN_NONE);
 }
 
+/** Format a user-reportable parse error into @p out (no protocol prefix).
+ *  Caller inits/clears @p out; result is null-terminated in out->data. */
+void command_formaterror(const error *err, varray_char *out) {
+    if (!out) return;
+    if (!err) {
+        varray_charwrite(out, '\0');
+        return;
+    }
+
+    const char *id = (err->id && err->id[0]) ? err->id : ERROR_ERROR;
+    const char *msg = err->msg;
+    bool have_line = (err->line != ERROR_POSNUNIDENTIFIABLE);
+    bool have_char = (err->posn != ERROR_POSNUNIDENTIFIABLE);
+    char buf[MORPHO_ERRORSTRINGSIZE + 96];
+    int n;
+
+    if (have_line && have_char) {
+        n = snprintf(buf, sizeof(buf), "Error [%s] at line %i char %i: %s",
+                     id, err->line, err->posn, msg);
+    } else if (have_line) {
+        n = snprintf(buf, sizeof(buf), "Error [%s] at line %i: %s",
+                     id, err->line, msg);
+    } else {
+        n = snprintf(buf, sizeof(buf), "Error [%s]: %s", id, msg);
+    }
+
+    if (n > 0 && (size_t) n < sizeof(buf)) varray_charadd(out, buf, n);
+    varray_charwrite(out, '\0');
+}
+
 /** @brief Parses a command sequence into the shared queue (does not apply).
- *  Failed parses discard only this chunk's IR — prior enqueued batches stay. */
-bool command_parse(char *in) {
+ *  Failed parses discard only this chunk's IR — prior enqueued batches stay.
+ *  Fills @p err on failure; does not print. */
+bool command_parse(char *in, error *err) {
+    if (!err) return false;
+    error_init(err);
+    if (!in) return false;
+
     command_parsectx ctx;
     command_parsectx_init(&ctx);
-
-    error err;
-    error_init(&err);
 
     varray_mv_commandptr staging;
     varray_mv_commandptrinit(&staging);
@@ -1782,32 +1845,38 @@ bool command_parse(char *in) {
     command_initializelexer(&l, in);
 
     parser p;
-    command_initializeparser(&p, &l, &err, &ctx);
+    command_initializeparser(&p, &l, err, &ctx);
 
     bool success=parse(&p);
+
+    if (!success || ERROR_FAILED(*err)) {
+        command_enrich_lexerror(err, &l);
+        parse_clear(&p);
+        lex_clear(&l);
+        command_parse_staging = NULL;
+        command_free_list(&staging);
+        return false;
+    }
 
     parse_clear(&p);
     lex_clear(&l);
 
     command_parse_staging = NULL;
 
-    if (!success || ERROR_FAILED(err)) {
-        fprintf(stderr, "morphoview: Error [%s] at line %i: %s\n",
-                err.id, err.line, err.msg);
-        command_free_list(&staging);
-        return false;
-    }
-
     mv_command *prep = command_new(MVCMD_PREPARE, sizeof(mv_command));
     if (!prep || !varray_mv_commandptradd(&staging, &prep, 1)) {
         command_free(prep);
         command_free_list(&staging);
+        morpho_writeerrorwithid(err, ERROR_ALLOCATIONFAILED, NULL,
+                                ERROR_POSNUNIDENTIFIABLE, ERROR_POSNUNIDENTIFIABLE);
         return false;
     }
 
     if (!command_commit_staging(&staging)) {
         /* Ownership transferred only on success; on failure free what we hold. */
         command_free_list(&staging);
+        morpho_writeerrorwithid(err, ERROR_ALLOCATIONFAILED, NULL,
+                                ERROR_POSNUNIDENTIFIABLE, ERROR_POSNUNIDENTIFIABLE);
         return false;
     }
 

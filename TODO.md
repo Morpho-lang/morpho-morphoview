@@ -25,6 +25,7 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 
 ### This package
 
+- [ ] Improve and consolidate error reporting beyond parse errors — `command_apply` (and similar) still mix prefixed `morphoview:` messages, generic `return false`, and unprefixed lines like `Font id … not found`. Funnel those through one diagnostic path; CLI → stderr, live session → `err …` on ZMQ (`ok` is already sent before apply).
 - [ ] Binary vertex transport — viewer IR already takes float/index blobs; Morpho still needs a way to serialize those buffers and send them over ZMQ. Biggest win on fat `v` / `U V` paths; redraw often avoids blobs entirely.
 - [x] Transparent centroid cache — recompute object AABB centroid only when geometry changes, not every frame
 - [x] Draw-list hygiene — merge adjacent draws that share VAO/material when packing the renderlist (matters at larger object counts)

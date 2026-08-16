@@ -16,6 +16,7 @@
 
 #include "listener.h"
 #include "command.h"
+#include "error.h"
 
 /* -------------------------------------------------------
  * Reply queue (main/GLFW → I/O thread)
@@ -139,16 +140,26 @@ static MorphoThreadFnReturnType listener_thread_main(void *arg) {
             continue;
         }
 
-        bool ok = command_parse(msg);
-        zstr_free(&msg);
+        bool ok;
+        error err;
+        error_init(&err);
+        ok = command_parse(msg, &err);
 
         if (ok) {
             zstr_send(sock, LISTENER_OK);
         } else {
-            zstr_sendf(sock, "%sparse failed", LISTENER_ERR_PREFIX);
-            /* Failed parse cleared the queue; still wake in case UI should refresh */
+            varray_char buf;
+            varray_charinit(&buf);
+            command_formaterror(&err, &buf);
+            zstr_sendf(sock, "%s%s", LISTENER_ERR_PREFIX, buf.data ? buf.data : "");
+            varray_charclear(&buf);
+            /* View kills the session on err; stop the I/O loop so display_loop can
+             * exit without waiting for SIGTERM (GLFW often ignores it). */
+            listener_stop_requested = true;
             command_wake();
         }
+        error_clear(&err);
+        zstr_free(&msg);
     }
 
     listener_process_replies(sock);

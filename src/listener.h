@@ -11,7 +11,7 @@
 
 /** Reply / event strings sent to Morpho */
 #define LISTENER_OK              "ok"
-#define LISTENER_ERR_PREFIX      "err "
+#define LISTENER_ERR_PREFIX      "err " /* + user-reportable string */
 #define LISTENER_WINDOW_CLOSED   "window.closed"
 
 /** Bind a PAIR socket and start the I/O thread. */

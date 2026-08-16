@@ -11,6 +11,7 @@
 #include <stdbool.h>
 
 #include "parse.h"
+#include "varray.h"
 #include "scene.h"
 
 /* -------------------------------------------------------
@@ -18,7 +19,7 @@
  * ------------------------------------------------------- */
 
 #define COMMAND_UNRCGNZDCMND              "UnrcgnzdCmnd"
-#define COMMAND_UNRCGNZDCMND_MSG          "Unrecognized morphoview command."
+#define COMMAND_UNRCGNZDCMND_MSG          "Unrecognized token: '%s'."
 
 #define COMMAND_INVLDNMBR                 "InvldNmbr"
 #define COMMAND_INVLDNMBR_MSG             "Improperly formatted number."
@@ -355,7 +356,12 @@ bool command_getfilesize(FILE *f, size_t *s);
 bool command_loadinput(const char *in, char **out);
 void command_removefile(const char *in);
 
-bool command_parse(char *in);
+/** Format a user-reportable parse error into @p out (no protocol prefix).
+ *  Caller inits/clears @p out; result is null-terminated in out->data. */
+void command_formaterror(const error *err, varray_char *out);
+
+/** Parse ASCII into the shared queue. Fills @p err on failure; does not print. */
+bool command_parse(char *in, error *err);
 
 void command_initialize(void);
 void command_finalize(void);

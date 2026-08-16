@@ -168,8 +168,10 @@ An I/O thread owns the socket. Each received string is an ASCII command chunk (`
 | Message | Meaning |
 |---------|---------|
 | `ok` | Chunk parsed and enqueued successfully |
-| `err …` | Parse failed |
+| `err …` | Parse failed; remainder is a user-reportable string (`Error [id] at line N char M: …`) |
 | `window.closed` | Last display window closed (also after `Q` with no windows) |
+
+Command-line file parse (`morphoview file.cmd`) writes that same reportable string to stderr and does not use ZMQ. A live `-b`/`-c` session sends `err …` on the PAIR socket instead of printing.
 
 `import morphoview` then `View` / `Show` — see `help morphoview`. Summary:
 

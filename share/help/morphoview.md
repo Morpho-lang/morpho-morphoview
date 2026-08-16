@@ -57,7 +57,7 @@ View makes use of the `Listener` protocol to track changes in a `Scene`.
 
 ### Methods
 
-* `open(commands)` / `open(Graphics)` / `open(Scene)` — bind, spawn viewer, send first chunk, wait for `ok`
+* `open(commands)` / `open(Graphics)` / `open(Scene)` — bind, spawn viewer, send first chunk, wait for `ok`. Parse failures come back as `err` plus a line/char message; `lastErr` holds the reportable string. The `View(g)` constructor throws `VwOpnFl` with that detail.
 * `update(commands)` / `update(Graphics)` / `update(Scene)` — send another chunk (`Graphics` uses full `U S` replace)
 * `morph(id, item)` — same-layout vertex push (`U V` for `xn`/`xnc`/`xnca`); a layout change falls back to a full replace
 * `refreshMesh(id)` — push `U V` for an existing TriangleComplex entry

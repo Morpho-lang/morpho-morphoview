@@ -60,9 +60,20 @@ int main(int argc, const char * argv[]) {
     if (file) {
         char *buffer = NULL;
         printf("Loading %s\n", file);
+        fflush(stdout);
 
         if (command_loadinput(file, &buffer)) {
-            parsed=command_parse(buffer);
+            error err;
+            error_init(&err);
+            parsed=command_parse(buffer, &err);
+            if (!parsed) {
+                varray_char msg;
+                varray_charinit(&msg);
+                command_formaterror(&err, &msg);
+                fprintf(stderr, "morphoview: %s\n", msg.data ? msg.data : "");
+                varray_charclear(&msg);
+            }
+            error_clear(&err);
         }
 
         if (buffer) MORPHO_FREE(buffer);

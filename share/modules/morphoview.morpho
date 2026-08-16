@@ -52,6 +52,7 @@ class View with Listener {
     self.poller = nil
     self.closed = true
     self.gotOk = false
+    self.lastErr = nil
     self.cmdLines = []
     self.graphics = nil
     self.show = nil
@@ -60,7 +61,10 @@ class View with Listener {
   /** Open immediately; throws if the session cannot start. */
   init(Graphics g, connecttimeout=5000, pollms=100) {
     self.init(connecttimeout=connecttimeout, pollms=pollms)
-    if (!self.open(g)) _vwopnfl.throw()
+    if (!self.open(g)) {
+      if (!isnil(self.lastErr)) _vwopnfl.throw(self.lastErr)
+      else _vwopnfl.throw()
+    }
   }
 
   /** Show.write sink — buffers lines; joined once at send. */
@@ -96,6 +100,7 @@ class View with Listener {
       print "morphoview: View already open"
       return false
     }
+    self.lastErr = nil
     self._bind()
     self._spawn()
     self.poller = ZMQPoller(self.sock)
@@ -357,21 +362,23 @@ class View with Listener {
       self.gotOk = true
     } else if (msg == "window.closed") {
       self._resetTransport()
-    } else if (msg.count() >= 3 && msg.substring(0, 3) == "err") {
-      print "morphoview: ${msg}"
+    } else if (msg.count() >= 4 && msg.substring(0, 4) == "err ") {
+      self.lastErr = msg.substring(4, msg.count())
+      print "morphoview: ${self.lastErr}"
       self._kill()
       self._resetTransport()
     }
     return msg
   }
 
-  /** Best-effort kill of the morphoview peer for this endpoint. */
+  /** Best-effort kill of the morphoview peer for this endpoint.
+   *  Uses SIGKILL: SIGTERM is often ignored while glfwWaitEvents is blocked. */
   _kill() {
     if (isnil(self.ep)) return
     if (System.platform()=="windows") {
       system("powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'morphoview' -and $_.CommandLine -like '*-c*${self.ep}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"")
     } else {
-      system("pkill -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
+      system("pkill -9 -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
     }
   }
 }

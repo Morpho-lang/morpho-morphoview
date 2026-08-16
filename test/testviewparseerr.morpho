@@ -1,0 +1,33 @@
+// Parse errors over ZMQ: `err` + line/char stored as View.lastErr.
+// Expect: prints "ok" then exits.
+// Requires: morphoview on PATH, morpho-zeromq package, display available.
+//
+//   cd test && morpho6 testviewparseerr.morpho
+
+import morphoview
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn contains(s, needle) {
+  if (isnil(s)) return false
+  var n = needle.count(), m = s.count()
+  if (n > m) return false
+  for (i in 0..(m-n)) {
+    if (s.substring(i, i+n) == needle) return true
+  }
+  return false
+}
+
+var v = View()
+expect(!v.open("S 0 3\nzzz\n"), "invalid command fails open")
+expect(!isnil(v.lastErr), "lastErr is set")
+expect(!contains(v.lastErr, "err "), "lastErr has no protocol prefix")
+expect(contains(v.lastErr, "line"), "reports line")
+expect(contains(v.lastErr, "char"), "reports char")
+expect(contains(v.lastErr, "'zzz'"), "includes the bad token")
+print "ok"
