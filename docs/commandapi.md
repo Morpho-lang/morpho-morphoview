@@ -111,10 +111,12 @@ These update a parse-local model matrix and are **not** enqueued. On the next `d
 | Letter | Arguments | Effect |
 |--------|-----------|--------|
 | `i` | — | Identity |
-| `m` | 16 floats | Left-multiply by 4×4 |
-| `r` | `<phi> <ax ay az>` | Rotate about axis |
-| `s` | `<scale>` or `<sx sy sz>` | Uniform or non-uniform scale |
-| `t` | `<tx ty tz>` | Translate |
+| `m` | 16 floats | Right-multiply by 4×4 (`model = model * X`) |
+| `r` | `<phi> <ax ay az>` | Rotate about axis (left-multiply) |
+| `s` | `<scale>` or `<sx sy sz>` | Uniform or non-uniform scale (left-multiply) |
+| `t` | `<tx ty tz>` | Translate (left-multiply) |
+
+`s` / `r` / `t` left-multiply so commands written in application order compose as usual (`t` after `s` → scale then translate). `m` right-multiplies so a matrix emitted between basis and translation (e.g. text `dirn`/`vertical`) stays in local space: `i`/`s`/`r`, then `m`, then `t` yields `T·R·S·X`.
 
 ## Example
 
