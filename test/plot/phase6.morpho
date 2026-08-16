@@ -1,7 +1,7 @@
 // xplot Phase 6: Plot + Graphics (qtensor-style overlay).
 // Expect: prints "ok" then exits.
 //
-//   morpho6 tests/plot/phase6.morpho
+//   morpho6 test/plot/phase6.morpho
 
 import meshtools
 import xplot

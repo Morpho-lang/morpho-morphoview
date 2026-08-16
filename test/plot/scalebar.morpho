@@ -1,7 +1,7 @@
 // ScaleBar / ScaleBarStrip without meshtools.
 // Expect: prints "ok" then exits.
 //
-//   morpho6 tests/plot/scalebar.morpho
+//   morpho6 test/plot/scalebar.morpho
 
 import xplot
 import xcolor

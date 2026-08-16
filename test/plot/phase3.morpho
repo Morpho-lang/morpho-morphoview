@@ -1,7 +1,7 @@
 // xplot Phase 3: bounds, axes chrome, ScaleBar / scalebar=true.
 // Expect: prints "ok" then exits.
 //
-//   morpho6 tests/plot/phase3.morpho
+//   morpho6 test/plot/phase3.morpho
 
 import meshtools
 import xplot

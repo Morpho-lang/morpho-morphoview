@@ -1,7 +1,7 @@
 // xplot Phase 2: PointCloud / LineSet defaults (+ optional thick style).
 // Expect: prints "ok" then exits.
 //
-//   morpho6 tests/plot/phase2.morpho
+//   morpho6 test/plot/phase2.morpho
 
 import meshtools
 import xplot

@@ -1,7 +1,7 @@
 // xplot Phase 5: semantic Scene mutations (axes / colormap / range / center).
 // Expect: prints "ok" then exits.
 //
-//   morpho6 tests/plot/phase5.morpho
+//   morpho6 test/plot/phase5.morpho
 
 import meshtools
 import xplot
