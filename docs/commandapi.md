@@ -110,7 +110,7 @@ World space is right-handed: **+X right, +Y up, +Z toward the home viewer**. Hom
 - **`L <n> "xc" <posn> <color>…`** — same, with RGB per lamp. Package `Show` always emits `"xc"`.
 - **`L "off"`** / **`L 0`** — ambient only.
 
-One `L` replaces the whole list. Package `Show` writes no `L` line when `Graphics.light` is empty (`[]`, Neutral). `g.light = "neutral"` / `"auto"` emit `L "neutral"`; `"threepoint"` and `"off"` emit those names. Set `g.light` to a 3-vector / `Light` / list of those, or call `g.addLight(...)`. Morpho accepts at most 4 lamps; unknown names error. Live `View` sends `L "neutral"` on `resetLights()` so the viewer drops prior lamps.
+One `L` replaces the whole list. Package `Show` writes no `L` line when `Graphics.light` is empty (`[]`, Neutral). `g.light = "neutral"` / `"auto"` emit `L "neutral"`; `"threepoint"` and `"off"` emit those names. Set `g.light` to a 3-vector / `Light` / list of those, or call `g.setLights(...)` / `g.addLight(...)`. Morpho accepts at most 4 lamps; unknown names error. Live `View` sends `L "neutral"` on `resetLights()` so the viewer drops prior lamps.
 
 `G <r> <g> <b>` sets the clear color (default dark bluish gray). Package `Show` emits `G` from `Graphics.background` (default `Black`).
 

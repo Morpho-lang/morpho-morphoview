@@ -926,7 +926,7 @@ class GraphicsEventRemoved is GraphicsEvent {}
 /** Entry item replaced (no coalesce — each id flushed). */
 class GraphicsEventReplaced is GraphicsEvent {}
 
-/** Scene lighting changed (`addLight` / `resetLights`). Last-write-wins in a batch. */
+/** Scene lighting changed (`setLights` / `addLight` / `resetLights`). Last-write-wins in a batch. */
 class GraphicsEventLights is GraphicsEvent {
   init() { super.init(0) }
   batchKey() { return GraphicsEventLights }
@@ -1081,6 +1081,12 @@ class Graphics {
                         color=color, flat=isnil(flat) ? true : flat)
   }
 
+  /** Replace the whole lighting (same values as `Graphics.light` / `asLighting`). */
+  setLights(lights) {
+    self.light = asLighting(lights)
+    return true
+  }
+
   /** Append a world-space point lamp. Named Neutral/`"threepoint"`/`"off"` become a new list. */
   addLight(Light l) {
     var lights = asLighting(self.light)
@@ -1097,8 +1103,7 @@ class Graphics {
 
   /** Restore Neutral (`g.light = []`). */
   resetLights() {
-    self.light = []
-    return true
+    return self.setLights([])
   }
 
   /** Copy title / background / light (not entries). */
@@ -1140,14 +1145,14 @@ class Scene is Graphics with Broadcaster {
     self._broadcasterInit()
   }
 
-  addLight(Light l) {
-    super.addLight(l)
+  setLights(lights) {
+    super.setLights(lights)
     self.notify(GraphicsEventLights())
     return true
   }
 
-  resetLights() {
-    super.resetLights()
+  addLight(Light l) {
+    super.addLight(l)
     self.notify(GraphicsEventLights())
     return true
   }

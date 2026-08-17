@@ -157,7 +157,7 @@ var ridx = sp.rowindices(0)
 expect(sidx.count() == ridx.count() && sidx.count() == 3, "sparse face has 3 vertices")
 expect(sidx[0] == ridx[0] && sidx[1] == ridx[1] && sidx[2] == ridx[2], "sparse faceIndices is rowindices")
 
-/* ---- Scene.addLight / resetLights notify ---- */
+/* ---- Scene.setLights / addLight / resetLights notify ---- */
 class LightSink with Listener {
   init() { self.n = 0 }
   receive(g, GraphicsEventLights ev) { self.n += 1 }
@@ -165,9 +165,13 @@ class LightSink with Listener {
 var sc = Scene()
 var sink = LightSink()
 sink.listen(sc)
+sc.setLights([[1, 2, 3], [4, 5, 6]])
+expect(sink.n == 1, "Scene.setLights notifies")
+expect(sc.light.count() == 2, "setLights replaces the list")
 sc.addLight([1, 2, 3])
-expect(sink.n == 1, "Scene.addLight notifies")
+expect(sink.n == 2, "Scene.addLight notifies")
 sc.resetLights()
-expect(sink.n == 2, "resetLights notifies")
+expect(sink.n == 3, "resetLights notifies once via setLights")
+expect(sc.light.count() == 0, "resetLights clears to Neutral")
 
 print "ok"

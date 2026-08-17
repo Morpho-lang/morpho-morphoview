@@ -93,13 +93,13 @@ Optional constructor args: `title=`, `background=` (a `Color`), `light=`.
 Lighting is a list of `Light` on `Graphics` / `Scene`. An empty list (`nil`, `[]`, or `resetLights()`) is camera-relative **Neutral** — Show writes no `L` line (a bare `L` is not valid). Named values: `"neutral"` / `"auto"` (same Neutral rig, emitted as `L "neutral"`), `"threepoint"` (studio key/fill/rim), `"off"` (ambient only, `L "off"`).
 
     var g = Graphics()
-    g.addLight([10, 10, 10])
-    g.addLight(Light([-10, 5, 8], color=Red, intensity=0.4))
+    g.setLights([[10, 10, 10], Light([-10, 5, 8], color=Red, intensity=0.4)])
+    g.addLight([0, 5, 10])
     g.resetLights()
 
-A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (or of `Light`) is several (at most 4). `Light` has `position`, `color` (default `White`), and `intensity` (default `1`); the viewer RGB is `color * intensity`. The first `addLight` leaves Neutral because the list is no longer empty; `"threepoint"` / `"off"` are replaced by a new list. Unknown names and over-long lists error rather than silently falling back.
+A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (or of `Light`) is several (at most 4). `Light` has `position`, `color` (default `White`), and `intensity` (default `1`); the viewer RGB is `color * intensity`. `setLights` replaces the whole list (same values as `Graphics.light`). The first `addLight` leaves Neutral because the list is no longer empty; `"threepoint"` / `"off"` are replaced by a new list. Unknown names and over-long lists error rather than silently falling back.
 
-`import xgraphics` also provides `Light`, `addLight` / `resetLights` (on `Graphics`), and `cross3D(a, b)` (3-vector cross product).
+`import xgraphics` also provides `Light`, `setLights` / `addLight` / `resetLights` (on `Graphics`), and `cross3D(a, b)` (3-vector cross product).
 
 ## Scene
 [tagScene]: # (Scene)
@@ -119,7 +119,7 @@ A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (
 * `remove(id)` — remove the entry
 * `replace(id, item)` — swap item (full redefine in the viewer)
 * `morph(id, item)` — same-length mesh swap; `View.morph` uses `U V` when the vertex layout matches
-* `addLight(...)` / `resetLights()` — append a world-space `Light` (or position/`color=`/`intensity=`), or restore Neutral; live `View` sends `L`
+* `setLights(...)` / `addLight(...)` / `resetLights()` — replace the whole lighting, append a world-space `Light` (or position/`color=`/`intensity=`), or restore Neutral; live `View` sends `L`
 * `beginBatch()` / `endBatch()` — coalesce Moved/Recolored/Lights notifies (via Broadcaster)
 
 Mutators return `true`/`false`. Prefer `View(Scene)` for live sessions.

@@ -137,6 +137,10 @@ expect(anyExact(bCol.lines, "L 1 \"xc\" -10 5 8 0.4 0 0"), "xc includes scaled R
 
 gAdd.addLight([1, 2, 3])
 expect(gAdd.light.count() == 2, "second addLight appends")
+gAdd.setLights([Matrix([10, 10, 10]), Matrix([-10, -10, 10])])
+expect(gAdd.light.count() == 2, "setLights replaces with two lamps")
+gAdd.setLights("threepoint")
+expect(gAdd.light == "threepoint", "setLights stores named rig")
 gAdd.resetLights()
 expect(gAdd.light.count() == 0, "resetLights clears to Neutral")
 var bRst = Buf()
