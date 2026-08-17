@@ -104,6 +104,15 @@ acc.display(PointCloud(Matrix([[0], [0], [0]])))
 acc.addr(b)
 expect(acc.displaylist.count() == 3, "addr appends in place")
 
+/* ---- add copies lighting metadata (no shared mutable list) ---- */
+var lit = Graphics(light=[Matrix([1, 2, 3])])
+var other = Graphics()
+other.display(PointCloud(Matrix([[0], [0], [0]])))
+var union = lit.add(other)
+expect(islist(union.light) && union.light.count() == 1, "add copies explicit lights")
+union.light.append(Matrix([4, 5, 6]))
+expect(lit.light.count() == 1, "source light list is not shared")
+
 /* ---- Show still works from entries ---- */
 var buf = Buf()
 Show().write(gs, buf)

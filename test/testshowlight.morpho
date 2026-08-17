@@ -111,4 +111,40 @@ var bz = Buf()
 Show().write(gZ, bz)
 expect(anyExact(bz.lines, "L 0"), "empty list emits L 0")
 
+var gInit = Graphics(light="auto")
+expect(gInit.light == "neutral", "Graphics(light=) canonicalizes auto")
+var bi = Buf()
+Show().write(gInit, bi)
+expect(anyExact(bi.lines, "L \"neutral\""), "init light=auto emits L \"neutral\"")
+
+var badName = false
+try {
+  var gBad = Graphics()
+  gBad.light = "studio"
+  Show().write(gBad, Buf())
+} catch {
+  "GfxLightName" : badName = true
+}
+expect(badName, "unknown light name throws")
+
+var badPos = false
+try {
+  var g2v = Graphics()
+  g2v.light = [1, 2]
+  Show().write(g2v, Buf())
+} catch {
+  "GfxLightPos" : badPos = true
+}
+expect(badPos, "2-vector lamp throws")
+
+var badN = false
+try {
+  var g5 = Graphics()
+  g5.light = [Matrix([0,0,0]), Matrix([1,0,0]), Matrix([2,0,0]), Matrix([3,0,0]), Matrix([4,0,0])]
+  Show().write(g5, Buf())
+} catch {
+  "GfxLightN" : badN = true
+}
+expect(badN, "five lamps throw")
+
 print "ok"

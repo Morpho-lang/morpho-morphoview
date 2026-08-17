@@ -66,7 +66,9 @@ fn _pngPath(path) {
   return path + ".png"
 }
 
-/** View-space axes matching MorphoView: +X right, +Y up, +Z toward the camera. */
+/** View-space axes matching MorphoView: +X right, +Y up, +Z toward the camera.
+ *  `_writeCamera` uses a negative POV `right`; do not flip this cross from theory
+ *  — verify left/right with an asymmetric ThreePoint render vs morphoview. */
 fn _povCameraAxes(cam) {
   var z = cam.viewpoint - cam.look_at
   var zn = z.norm()
@@ -79,7 +81,9 @@ fn _povCameraAxes(cam) {
   return (cross3D(y, z), y, z)
 }
 
-/** Named rig as distant point lights in the POV camera frame. Empty if the frame fails. */
+/** Named rig as distant point lights in the POV camera frame. Empty if the frame fails.
+ *  Directions/intensities: keep in sync with `render_neutral_*` / `render_threepoint_*`
+ *  in src/render.c. */
 fn _povNamedRig(cam, name) {
   var axes = _povCameraAxes(cam)
   if (isnil(axes)) {
@@ -397,17 +401,21 @@ class POVRaytracer {
     }
   }
 
-  _writeLightVal(String name, out, sl) {
-    self._writeNamedRig(out, sl, (asLightName(name) == "threepoint") ? "threepoint" : "neutral")
-  }
-  _writeLightVal(List L, out, sl) {
-    for (p in asLightPositions(L)) {
+  /** Nil → Neutral rig (POV always writes lights). Empty list → ambient only. White lamps. */
+  _writeLightVal(val, out, sl) {
+    var lights = asLighting(val)
+    if (isnil(lights)) {
+      self._writeNamedRig(out, sl, "neutral")
+      return
+    }
+    if (isstring(lights)) {
+      self._writeNamedRig(out, sl, lights)
+      return
+    }
+    for (p in lights) {
       out.write("light_source { ${_povVector(p)} color White${sl} }")
     }
   }
-  _writeLightVal(Matrix p, out, sl) { self._writeLightVal(asLightPositions(p), out, sl) }
-  _writeLightVal(Tuple t, out, sl) { self._writeLightVal(asLightPositions(t), out, sl) }
-  _writeLightVal(val, out, sl) { self._writeNamedRig(out, sl, "neutral") }
 
   _writeLights(out, shadowless) {
     var sl = shadowless ? " shadowless" : ""

@@ -1,12 +1,13 @@
 // Authored vertex normals match the intended geometry (outward / +Z).
-// Sparse.rowindices sorts vertex ids, so Show relies on viewer orient_facets;
-// Polygon 0 1 2 is already sorted and checks winding directly.
+// Plot duplicates face vertices and flips 0,2,1 when orientation requires it.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testwinding.morpho
 
 import xgraphics
 import xcolor
+import meshtools
+import xplot
 
 fn expect(cond, msg) {
   if (!cond) {
@@ -66,5 +67,24 @@ var tubeOpen = Tube([[0, 0, 0], [0, 0, 1]], 0.2, n=8, closed=false, color=Orange
 var tnv = tubeOpen.position.dimensions()[1]
 expect(tubeOpen.normals.column(tnv-2).inner(Matrix([0, 0, -1])) > 0.9, "open tube start cap -Z")
 expect(tubeOpen.normals.column(tnv-1).inner(Matrix([0, 0, 1])) > 0.9, "open tube end cap +Z")
+
+/* ---- Plot faces: duplicated-vertex winding matches oriented normals ---- */
+var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:1, 0..1:1)
+var pFaces = Plot(am, color=Red)
+expect(pFaces.entries.contains("faces"), "AreaMesh draws faces")
+var tcPlot = pFaces.findEntry(pFaces.entries["faces"][0]).item
+var nfp = tcPlot.connectivity.dimensions()[1]
+var nflip = 0
+for (i in 0...nfp) {
+  var fel = tcPlot.faceIndices(i)
+  var q0 = tcPlot.position.column(fel[0])
+  var q1 = tcPlot.position.column(fel[1])
+  var q2 = tcPlot.position.column(fel[2])
+  var gN = cross3D(q1 - q0, q2 - q0)
+  var nsum = tcPlot.normals.column(fel[0]) + tcPlot.normals.column(fel[1]) +
+             tcPlot.normals.column(fel[2])
+  if (gN.inner(nsum) < 0) nflip += 1
+}
+expect(nflip == 0, "plot face winding matches authored normals (${nflip} flipped)")
 
 print "ok"

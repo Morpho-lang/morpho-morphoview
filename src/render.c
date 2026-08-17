@@ -30,6 +30,9 @@ DEFINE_VARRAY(rendertdraw, rendertdraw)
 /* Geometry: OpenGL/VTK Phong when uFlat==0 (Lambert when ks=0); unlit albedo when uFlat!=0.
  * Lighting and normals in view space; normalMatrix = inverseTranspose(view*model). */
 
+#define MV_STR(x) MV_XSTR(x)
+#define MV_XSTR(x) #x
+
 const char *vertexshader =
     "#version 330 core\n"
     "layout (location = 0) in vec3 vPos;\n"
@@ -56,14 +59,15 @@ const char *vertexshader =
 
 const char *fragmentshader =
     "#version 330 core\n"
+    "#define MAX_LIGHTS " MV_STR(SCENE_MAX_LIGHTS) "\n"
     "out vec4 FragColor;\n"
     "in vec3 fragColor;\n"
     "in vec3 fragPos;\n"
     "in vec3 normal;\n"
     "in float fragAlpha;\n"
     "uniform int nLights;\n"
-    "uniform vec4 lightPos[4];\n"
-    "uniform vec4 lightColor[4];\n"
+    "uniform vec4 lightPos[MAX_LIGHTS];\n"
+    "uniform vec4 lightColor[MAX_LIGHTS];\n"
     "uniform vec3 ambientColor;\n"
     "uniform vec4 uColor;\n"
     "uniform int uUseUniform;\n"
@@ -85,8 +89,8 @@ const char *fragmentshader =
     "   vec3 viewDir = vec3(0.0, 0.0, 1.0);\n"
     "   vec3 lit = ka * ambientColor;\n"
     "   int n = nLights;\n"
-    "   if (n > 4) n = 4;\n"
-    "   for (int i = 0; i < 4; i++) {\n"
+    "   if (n > MAX_LIGHTS) n = MAX_LIGHTS;\n"
+    "   for (int i = 0; i < MAX_LIGHTS; i++) {\n"
     "       if (i >= n) break;\n"
     "       vec4 lp = lightPos[i];\n"
     "       vec3 Lvec = (lp.w < 0.5) ? lp.xyz : (lp.xyz - fragPos);\n"
@@ -97,7 +101,7 @@ const char *fragmentshader =
     "       vec3 C = lightColor[i].rgb;\n"
     "       vec3 diffuse = kd * NdotL * C;\n"
     "       vec3 reflectDir = reflect(-lightDir, norm);\n"
-    "       float spec = pow(max(dot(viewDir, reflectDir), 0.0), shininess);\n"
+    "       float spec = pow(max(dot(viewDir, reflectDir), 0.0), max(shininess, 1e-4));\n"
     "       vec3 specular = ks * spec * C;\n"
     "       lit += diffuse + specular;\n"
     "   }\n"
@@ -144,60 +148,52 @@ const char *textfragmentshader =
  * @returns true on success, false if compilation failed */
 bool render_compileprogram(const char *vertexshadersource, const char *fragmentshadersource, GLuint *program) {
     int success;
-    
-    /* Create and compile vertex shader */
-    unsigned int vertexshader;
-    vertexshader = glCreateShader(GL_VERTEX_SHADER);
+    char infoLog[512];
+
+    GLuint vertexshader = glCreateShader(GL_VERTEX_SHADER);
     glShaderSource(vertexshader, 1, &vertexshadersource, NULL);
     glCompileShader(vertexshader);
-    
-    /* Check shader compilation was successful */
-    char infoLog[512];
     glGetShaderiv(vertexshader, GL_COMPILE_STATUS, &success);
     if(!success) {
         glGetShaderInfoLog(vertexshader, 512, NULL, infoLog);
         fprintf(stderr, "morphoview: Vertex shader failed to compile with error '%s'\n", infoLog);
+        glDeleteShader(vertexshader);
         return false;
     }
-    
-    /* Create and compile fragment shader */
-    unsigned int fragmentshader;
-    fragmentshader = glCreateShader(GL_FRAGMENT_SHADER);
+
+    GLuint fragmentshader = glCreateShader(GL_FRAGMENT_SHADER);
     glShaderSource(fragmentshader, 1, &fragmentshadersource, NULL);
     glCompileShader(fragmentshader);
     glGetShaderiv(fragmentshader, GL_COMPILE_STATUS, &success);
     if(!success) {
         glGetShaderInfoLog(fragmentshader, 512, NULL, infoLog);
         fprintf(stderr,"Fragment shader failed to compile with error '%s'\n", infoLog);
+        glDeleteShader(vertexshader);
+        glDeleteShader(fragmentshader);
         return false;
     }
-    
-    /* Link shader program */
-    unsigned int shaderProgram;
-    shaderProgram = glCreateProgram();
-    
+
+    GLuint shaderProgram = glCreateProgram();
     glAttachShader(shaderProgram, vertexshader);
     glAttachShader(shaderProgram, fragmentshader);
     glLinkProgram(shaderProgram);
-    
+    glDeleteShader(vertexshader);
+    glDeleteShader(fragmentshader);
+
     glGetProgramiv(shaderProgram, GL_LINK_STATUS, &success);
     if(!success) {
         glGetProgramInfoLog(shaderProgram, 512, NULL, infoLog);
         fprintf(stderr, "Shader link failure with error '%s'\n", infoLog);
+        glDeleteProgram(shaderProgram);
         return false;
     }
-    
+
     if (program) *program = shaderProgram;
-    
-    /* Delete the compiled vertex and fragment shaders */
-    glDeleteShader(vertexshader);
-    glDeleteShader(fragmentshader);
-    
     return true;
 }
 
 /** Cache geometry-program uniform locations after a successful link. */
-static void render_cacheuniforms(renderer *r) {
+static bool render_cacheuniforms(renderer *r) {
     GLuint p = r->shader;
     r->uniforms.model = glGetUniformLocation(p, "model");
     r->uniforms.view = glGetUniformLocation(p, "view");
@@ -214,10 +210,30 @@ static void render_cacheuniforms(renderer *r) {
     r->uniforms.kd = glGetUniformLocation(p, "kd");
     r->uniforms.ks = glGetUniformLocation(p, "ks");
     r->uniforms.shininess = glGetUniformLocation(p, "shininess");
-    if (r->uniforms.uColor<0 || r->uniforms.uUseUniform<0 || r->uniforms.uFlat<0 ||
-        r->uniforms.nLights<0 || r->uniforms.lightPos<0 || r->uniforms.lightColor<0) {
+    if (r->uniforms.model<0 || r->uniforms.view<0 || r->uniforms.proj<0 ||
+        r->uniforms.normalMatrix<0 || r->uniforms.ambientColor<0 ||
+        r->uniforms.uColor<0 || r->uniforms.uUseUniform<0 || r->uniforms.uFlat<0 ||
+        r->uniforms.nLights<0 || r->uniforms.lightPos<0 || r->uniforms.lightColor<0 ||
+        r->uniforms.ka<0 || r->uniforms.kd<0 || r->uniforms.ks<0 || r->uniforms.shininess<0) {
         fprintf(stderr, "morphoview: geometry shader is missing a lighting/color uniform\n");
+        return false;
     }
+    return true;
+}
+
+/** Cache text-program uniform locations after a successful link. */
+static bool render_cachetextuniforms(renderer *r) {
+    GLuint p = r->textshader;
+    r->textuniforms.model = glGetUniformLocation(p, "model");
+    r->textuniforms.view = glGetUniformLocation(p, "view");
+    r->textuniforms.proj = glGetUniformLocation(p, "proj");
+    r->textuniforms.textColor = glGetUniformLocation(p, "textColor");
+    if (r->textuniforms.model<0 || r->textuniforms.view<0 ||
+        r->textuniforms.proj<0 || r->textuniforms.textColor<0) {
+        fprintf(stderr, "morphoview: text shader is missing a uniform\n");
+        return false;
+    }
+    return true;
 }
 
 /** normalMatrix = transpose(inverse(upper 3x3 of M)), column-major. */
@@ -229,7 +245,7 @@ static void render_normalmatrix(mat4x4 m, mat3x3 out) {
     out[6]=inv[2]; out[7]=inv[6]; out[8]=inv[10];
 }
 
-/** ImageScaled Neutral dirs (view space; +Z toward the viewer). */
+/** Neutral / ThreePoint view-space dirs: keep in sync with `_povNamedRig` in xpovray.morpho. */
 static const float render_neutral_dir[3][3] = {
     { 1.5f, -0.5f, 1.5f },
     { 1.5f,  1.5f, 1.5f },
@@ -330,10 +346,26 @@ bool render_init(renderer *r) {
     r->shader=0;
     r->textshader=0;
     memset(&r->uniforms, 0, sizeof(r->uniforms));
+    memset(&r->textuniforms, 0, sizeof(r->textuniforms));
 
     if (!render_compileprogram(vertexshader, fragmentshader, &r->shader)) return false;
-    render_cacheuniforms(r);
-    if (!render_compileprogram(textvertexshader, textfragmentshader, &r->textshader)) return false;
+    if (!render_cacheuniforms(r)) {
+        glDeleteProgram(r->shader);
+        r->shader=0;
+        return false;
+    }
+    if (!render_compileprogram(textvertexshader, textfragmentshader, &r->textshader)) {
+        glDeleteProgram(r->shader);
+        r->shader=0;
+        return false;
+    }
+    if (!render_cachetextuniforms(r)) {
+        glDeleteProgram(r->shader);
+        glDeleteProgram(r->textshader);
+        r->shader=0;
+        r->textshader=0;
+        return false;
+    }
     
     /* Enable OpenGL features */
     glEnable(GL_DEPTH_TEST);
@@ -1370,20 +1402,14 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     
     /* Text rendering pass */
     glUseProgram(r->textshader);
-    
-    GLint textcoloruniform = glGetUniformLocation(r->textshader, "textColor");
+
     float textcolor[4] = {1.0f, 1.0f, 1.0f, 1.0f};
-    glUniform4fv(textcoloruniform, 1, textcolor);
-    
-    GLint modeluniform = glGetUniformLocation(r->textshader, "model");
-    GLint viewuniform = glGetUniformLocation(r->textshader, "view");
-    GLint projuniform = glGetUniformLocation(r->textshader, "proj");
-    
-    glUniformMatrix4fv(viewuniform, 1, GL_FALSE, view);
-    glUniformMatrix4fv(projuniform, 1, GL_FALSE, proj);
-    
+    glUniform4fv(r->textuniforms.textColor, 1, textcolor);
+    glUniformMatrix4fv(r->textuniforms.view, 1, GL_FALSE, view);
+    glUniformMatrix4fv(r->textuniforms.proj, 1, GL_FALSE, proj);
+
     mat3d_identity4x4(model);
-    glUniformMatrix4fv(modeluniform, 1, GL_FALSE, model);
+    glUniformMatrix4fv(r->textuniforms.model, 1, GL_FALSE, model);
     
     glActiveTexture(GL_TEXTURE0);
     glBindVertexArray(r->fontvao);
@@ -1392,13 +1418,13 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
         renderinstruction *ins=&r->renderlist.data[i];
         switch (ins->instruction) {
             case RMODEL:
-                glUniformMatrix4fv(modeluniform, 1, GL_FALSE, ins->data.model.model);
+                glUniformMatrix4fv(r->textuniforms.model, 1, GL_FALSE, ins->data.model.model);
                 break;
             case RTEXT:
                 render_rendertext(r, ins->data.text.rfontid, ins->data.text.txt);
                 break;
             case RCOLOR:
-                glUniform4fv(textcoloruniform, 1, ins->data.color.rgba);
+                glUniform4fv(r->textuniforms.textColor, 1, ins->data.color.rgba);
                 break;
             default:
                 break;

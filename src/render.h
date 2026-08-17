@@ -127,6 +127,14 @@ typedef struct {
     GLint shininess;
 } renderuniforms;
 
+/** Cached uniform locations for the text program. */
+typedef struct {
+    GLint model;
+    GLint view;
+    GLint proj;
+    GLint textColor;
+} rendertextuniforms;
+
 /** Baked transparent draw with state needed to replay out of list order. */
 typedef struct {
     GLenum mode;
@@ -151,6 +159,7 @@ typedef struct {
     GLuint shader;
     GLuint textshader;
     renderuniforms uniforms;
+    rendertextuniforms textuniforms;
     varray_renderobject objects;
     varray_renderfont fonts;
     varray_renderglbuffers glbuffers;

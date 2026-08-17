@@ -18,15 +18,23 @@ import broadcast
 var _eps = 1e-15
 var _txtdrnvrtprll = Error("TxtDrnVrtPrll", "Direction and vertical must not be parallel or zero.")
 // [Compatibility shim]
-var _GfxLegacyTransp = Error("GfxLegacyTransp",
+var _GfxLegacyTranspErr = Error("GfxLegacyTransp",
   "filter=/transmit= map to Color.a. Prefer Color(..., a) or Coloring.opacity(a).")
 var _warnedLegacyTransp = false
-var _GfxEntryClr = Error("GfxEntryClr",
+var _GfxEntryClrErr = Error("GfxEntryClr",
   "GraphicsEntry.color is a uniform presentation override; ColorTable belongs on the primitive.")
-var _GfxClrTblLen = Error("GfxClrTblLen",
+var _GfxClrTblLenErr = Error("GfxClrTblLen",
   "ColorTable must have one color per vertex.")
-var _GfxPoly = Error("GfxPoly",
+var _GfxPolyErr = Error("GfxPoly",
   "Polygon must be a convex planar n-gon (n>=3); winding defines the normal.")
+var _GfxLightNameErr = Error("GfxLightName",
+  "Graphics.light name must be \"neutral\", \"threepoint\", or \"auto\".")
+var _GfxLightPosErr = Error("GfxLightPos",
+  "Each lamp must be a 3-vector (Matrix, [x,y,z], or (x,y,z)).")
+var _GfxLightNErr = Error("GfxLightN",
+  "At most 4 world-space point lights.")
+var _GfxLightValErr = Error("GfxLightVal",
+  "Graphics.light must be nil, a named rig, a 3-vector, or a list of 3-vectors.")
 
 /* **************************************
  * Utility functions
@@ -104,23 +112,51 @@ fn _effectiveRadius(scale) { return isnil(scale) ? 1 : scale }
 // Public aliases — Morpho `_` helpers are not imported across modules.
 fn effectiveRadius(scale) { return _effectiveRadius(scale) }
 
-/** `"auto"` → `"neutral"`; other strings unchanged. */
-fn asLightName(String s) { return (s == "auto") ? "neutral" : s }
+/** Keep in sync with `SCENE_MAX_LIGHTS` in scene.h. */
+var _LIGHT_MAX = 4
+
+fn _asLightPosition(p) {
+  var m = _asPosition(p)
+  if (m.count() != 3) _GfxLightPosErr.throw()
+  return m
+}
+
+/** `"auto"` → `"neutral"`; `"threepoint"` unchanged; anything else errors. */
+fn _asLightName(String s) {
+  if (s == "auto" || s == "neutral") return "neutral"
+  if (s == "threepoint") return "threepoint"
+  _GfxLightNameErr.throw()
+}
 
 /** World-space point lights: one 3-vector, or a sequence of those. Empty → none.
- *  `[x,y,z]` / `(x,y,z)` is one lamp, not three. */
-fn asLightPositions(Matrix p) { return [p.clone()] }
-fn asLightPositions(List L) {
+ *  `[x,y,z]` / `(x,y,z)` is one lamp, not three. At most `_LIGHT_MAX` lamps. */
+fn _asLightPositions(Matrix p) { return [_asLightPosition(p)] }
+fn _asLightPositions(List L) {
   if (L.count() == 0) return []
-  if (isnumber(L[0])) return [_asPosition(L)]
+  if (isnumber(L[0])) {
+    if (L.count() != 3) _GfxLightPosErr.throw()
+    return [_asLightPosition(L)]
+  }
+  if (L.count() > _LIGHT_MAX) _GfxLightNErr.throw()
   var out = []
-  for (p in L) out.append(_asPosition(p))
+  for (p in L) out.append(_asLightPosition(p))
   return out
 }
-fn asLightPositions(Tuple t) {
+fn _asLightPositions(Tuple t) {
   var L = []
   for (x in t) L.append(x)
-  return asLightPositions(L)
+  return _asLightPositions(L)
+}
+
+/** Canonical Graphics.light: `nil` (Neutral default), `"neutral"`/`"threepoint"`,
+ *  or a list of world-space 3-vectors (empty → ambient only). */
+fn asLighting(String s) { return _asLightName(s) }
+fn asLighting(Matrix p) { return _asLightPositions(p) }
+fn asLighting(List L) { return _asLightPositions(L) }
+fn asLighting(Tuple t) { return _asLightPositions(t) }
+fn asLighting(val) {
+  if (isnil(val)) return nil
+  _GfxLightValErr.throw()
 }
 
 /** Ones + winding for a Sparse triangle column. */
@@ -192,7 +228,7 @@ fn _asColoring(c) { return asColoring(c) }
 
 /** Entry color is a uniform presentation override, never a ColorTable. */
 fn _asEntryColor(ColorTable c) {
-  _GfxEntryClr.throw()
+  _GfxEntryClrErr.throw()
   return nil
 }
 fn _asEntryColor(Coloring c) { return c }
@@ -203,7 +239,7 @@ fn _asEntryColor(c) {
 
 /** ColorTable on a vertex-bearing primitive is one color per vertex. */
 fn _requireVertexColors(ColorTable col, nv) {
-  if (col.count() != nv) _GfxClrTblLen.throw()
+  if (col.count() != nv) _GfxClrTblLenErr.throw()
 }
 fn _requireVertexColors(col, nv) { }
 
@@ -218,7 +254,7 @@ fn _legacyAlpha(filter, transmit) {
 fn _warnLegacyTransp() {
   if (_warnedLegacyTransp) return
   _warnedLegacyTransp = true
-  _GfxLegacyTransp.warning("Deprecated filter=/transmit=. Use Color(..., a) or Coloring.opacity(a).")
+  _GfxLegacyTranspErr.warning("Deprecated filter=/transmit=. Use Color(..., a) or Coloring.opacity(a).")
 }
 
 fn _legacyOpacity(ColorTable color, a) { return color.opacity(a) }
@@ -294,7 +330,8 @@ class Cylinder is GraphicsPrimitive {
     if (!unit) dim = x1.count()
     var vertices = Matrix(dim, np), normals = Matrix(dim, np)
 
-    // Cap centers + outward unit normals
+    // Cap centers + outward unit normals. Ring verts are shared with the sidewall
+    // and carry radial normals — caps can look slightly rounded under Neutral.
     vertices.setcolumn(0, x1)
     vertices.setcolumn(np-1, x2)
     normals.setcolumn(0, -ndx)
@@ -739,14 +776,14 @@ class Polygon is GraphicsPrimitive {
     var p = self.position
     var n = cross3D(p.column(1)-p.column(0), p.column(2)-p.column(0))
     var nn = n.norm()
-    if (nn < _eps) _GfxPoly.throw()
+    if (nn < _eps) _GfxPolyErr.throw()
     return n/nn
   }
 
   _validate() {
     var p = self.position, d = p.dimensions()
     var nv = d[1]
-    if (d[0] != 3 || nv < 3) _GfxPoly.throw()
+    if (d[0] != 3 || nv < 3) _GfxPolyErr.throw()
 
     var n = self.normal()
     var scale = (p.column(1)-p.column(0)).norm()
@@ -754,7 +791,7 @@ class Polygon is GraphicsPrimitive {
 
     for (i in 3...nv) {
       if (abs((p.column(i)-p.column(0)).inner(n)) > eps)
-        _GfxPoly.throw()
+        _GfxPolyErr.throw()
     }
 
     for (i in 0...nv) {
@@ -762,7 +799,7 @@ class Polygon is GraphicsPrimitive {
       var b = p.column(mod(i+1, nv))
       var c = p.column(mod(i+2, nv))
       if (cross3D(b-a, c-b).inner(n) < -eps)
-        _GfxPoly.throw()
+        _GfxPolyErr.throw()
     }
   }
 
@@ -881,7 +918,7 @@ fn _unitArrow(Arrow item) {
 /** Static displaylist container. Accepted by Show / View.open / View.update.
  *  For live mutation (move / recolor / batch) use Scene. */
 class Graphics {
-  init(title = nil, background = nil) {
+  init(title = nil, background = nil, light = nil) {
     self.displaylist = [] // GraphicsEntry list
     self._entryById = Dictionary()
     self._nextId = 1
@@ -889,7 +926,7 @@ class Graphics {
     if (!self.title) self.title="Morpho" // Title to show
     self.background = isnil(background) ? Black : _asColoring(background)
     if (isnil(self.background)) self.background = Black
-    self.light = nil
+    self.light = asLighting(light)
   }
 
   /** Look up an entry by Graphics-owned id; nil if missing. */
@@ -1013,7 +1050,7 @@ class Graphics {
   _copyMetaInto(g) {
     g.title = self.title
     g.background = self.background
-    g.light = self.light
+    g.light = asLighting(self.light)
   }
 
   /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
@@ -1043,8 +1080,8 @@ class Graphics {
 /** Live Graphics: Broadcaster + move / recolor / remove / replace / morph / batch.
  *  Call _broadcasterInit from Scene.init (mixins do not auto-init state). */
 class Scene is Graphics with Broadcaster {
-  init(title = nil, background = nil) {
-    super.init(title=title, background=background)
+  init(title = nil, background = nil, light = nil) {
+    super.init(title=title, background=background, light=light)
     self._broadcasterInit()
   }
 

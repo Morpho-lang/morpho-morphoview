@@ -160,7 +160,7 @@ void scene_setlightmode(scene *s, scene_light_mode mode) {
 }
 
 /** Replace the light list with n world-space point lights (n==0: ambient only). */
-void scene_setexplicitlights(scene *s, int n, const float pos[][4], const float color[][3]) {
+void scene_setexplicitlights(scene *s, int n, const float pos[][3], const float color[][3]) {
     if (!s) return;
     if (n<0) n=0;
     if (n>SCENE_MAX_LIGHTS) n=SCENE_MAX_LIGHTS;
@@ -172,17 +172,10 @@ void scene_setexplicitlights(scene *s, int n, const float pos[][4], const float 
         s->light_pos[i][0]=pos[i][0];
         s->light_pos[i][1]=pos[i][1];
         s->light_pos[i][2]=pos[i][2];
-        s->light_pos[i][3]=pos[i][3];
         s->light_color[i][0]=color[i][0];
         s->light_color[i][1]=color[i][1];
         s->light_color[i][2]=color[i][2];
     }
-}
-
-/** Reset to Neutral. */
-void scene_clearlight(scene *s) {
-    if (!s) return;
-    scene_resetlight(s);
 }
 
 /** Set the scene clear / background color. */

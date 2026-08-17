@@ -148,7 +148,7 @@ typedef struct sscene {
 
     scene_light_mode lighting;
     int nlights;              /** explicit count; ignored for named rigs */
-    float light_pos[SCENE_MAX_LIGHTS][4];  /** xyz + w (1 = point) */
+    float light_pos[SCENE_MAX_LIGHTS][3];  /** world-space xyz (explicit point lights) */
     float light_color[SCENE_MAX_LIGHTS][3];
     float ambient[3];         /** white scene ambient; independent of lamps */
 
@@ -177,8 +177,7 @@ void scene_setbbox(scene *s, float xmin, float xmax, float ymin, float ymax, flo
 bool scene_computebbox(scene *s);
 
 void scene_setlightmode(scene *s, scene_light_mode mode);
-void scene_setexplicitlights(scene *s, int n, const float pos[][4], const float color[][3]);
-void scene_clearlight(scene *s); /**< Reset to Neutral */
+void scene_setexplicitlights(scene *s, int n, const float pos[][3], const float color[][3]);
 
 void scene_setbackground(scene *s, float r, float g, float b);
 

@@ -7,6 +7,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
 #include "morpho.h"
 #include "platform.h"
@@ -221,9 +222,28 @@ static bool command_commit_staging(varray_mv_commandptr *staging) {
  * Apply
  * ********************************************************************** */
 
-/* **********************************************************************
- * Apply
- * ********************************************************************** */
+static char command_apply_msg[256];
+
+/** Record an apply failure on stderr (CLI). Live sessions already sent `ok` after parse. */
+static bool command_apply_error(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(command_apply_msg, sizeof(command_apply_msg), fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "morphoview: %s\n", command_apply_msg);
+    return false;
+}
+
+static bool command_needscene(command_applyctx *ctx) {
+    if (ctx->scene) return true;
+    return command_apply_error("%s", COMMAND_NOSCENE_MSG);
+}
+
+static bool command_needobject(command_applyctx *ctx) {
+    if (!ctx->scene) return command_apply_error("%s", COMMAND_NOSCENE_MSG);
+    if (ctx->cobject) return true;
+    return command_apply_error("%s", COMMAND_NOOBJECT_MSG);
+}
 
 /** Scene content / bounds changed — needs GL upload or camera fit. */
 static void command_touchscene(command_applyctx *ctx) {
@@ -239,7 +259,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
             if (!s) {
                 s = scene_new(c->id, c->dim);
-                if (!s) return false;
+                if (!s) return command_apply_error("Could not create scene '%i'.", c->id);
                 created = true;
             }
 
@@ -248,7 +268,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 ctx->display = display_open(s);
                 if (!ctx->display) {
                     if (created) scene_free(s);
-                    return false;
+                    return command_apply_error("Could not open a window for scene '%i'.", c->id);
                 }
             }
 
@@ -262,8 +282,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             mv_cmd_update_scene *c = MVCMD_AS_UPDATE_SCENE(cmd);
             scene *s = scene_find(c->id);
             if (!s) {
-                fprintf(stderr, "morphoview: No scene with id '%i'.\n", c->id);
-                return false;
+                return command_apply_error("No scene with id '%i'.", c->id);
             }
 
             scene_clear(s);
@@ -283,13 +302,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_UPDATE_OBJECT: {
             mv_cmd_update_object *c = MVCMD_AS_UPDATE_OBJECT(cmd);
-            if (!ctx->scene) {
-                fprintf(stderr, "morphoview: No current scene for U O.\n");
-                return false;
-            }
+            if (!command_needscene(ctx)) return false;
             if (!scene_clearobject(ctx->scene, c->id)) {
-                fprintf(stderr, "morphoview: No object with id '%i'.\n", c->id);
-                return false;
+                return command_apply_error("No object with id '%i'.", c->id);
             }
             ctx->cobject = scene_getgobjectfromid(ctx->scene, c->id);
             scene_markchanged(ctx->scene);
@@ -302,18 +317,13 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_UPDATE_VERTICES: {
             mv_cmd_update_vertices *c = MVCMD_AS_UPDATE_VERTICES(cmd);
-            if (!ctx->scene) {
-                fprintf(stderr, "morphoview: No current scene for U V.\n");
-                return false;
-            }
+            if (!command_needscene(ctx)) return false;
             gobject *obj = scene_getgobjectfromid(ctx->scene, c->id);
             if (!obj) {
-                fprintf(stderr, "morphoview: No object with id '%i'.\n", c->id);
-                return false;
+                return command_apply_error("No object with id '%i'.", c->id);
             }
             if (!scene_replacevertices(ctx->scene, c->id, c->data, c->length)) {
-                fprintf(stderr, "morphoview: U V length mismatch for object '%i'.\n", c->id);
-                return false;
+                return command_apply_error("U V length mismatch for object '%i'.", c->id);
             }
             if (c->format) {
                 if (obj->vertexdata.format) free(obj->vertexdata.format);
@@ -336,8 +346,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             mv_cmd_close_scene *c = MVCMD_AS_CLOSE_SCENE(cmd);
             scene *s = scene_find(c->id);
             if (!s) {
-                fprintf(stderr, "morphoview: No scene with id '%i'.\n", c->id);
-                return false;
+                return command_apply_error("No scene with id '%i'.", c->id);
             }
 
             display *d = display_findforscene(s);
@@ -353,14 +362,10 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_DELETE_OBJECT: {
             mv_cmd_delete_object *c = MVCMD_AS_DELETE_OBJECT(cmd);
-            if (!ctx->scene) {
-                fprintf(stderr, "morphoview: No current scene for X O.\n");
-                return false;
-            }
+            if (!command_needscene(ctx)) return false;
             int curid = (ctx->cobject) ? ctx->cobject->id : SCENE_EMPTY;
             if (!scene_deleteobject(ctx->scene, c->id)) {
-                fprintf(stderr, "morphoview: No object with id '%i'.\n", c->id);
-                return false;
+                return command_apply_error("No object with id '%i'.", c->id);
             }
             /* objectlist may have shifted — re-resolve or clear. */
             ctx->cobject = (curid != SCENE_EMPTY && curid != c->id)
@@ -375,13 +380,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_DELETE_DRAW: {
             mv_cmd_delete_draw *c = MVCMD_AS_DELETE_DRAW(cmd);
-            if (!ctx->scene) {
-                fprintf(stderr, "morphoview: No current scene for X D.\n");
-                return false;
-            }
+            if (!command_needscene(ctx)) return false;
             if (!scene_deletedraw(ctx->scene, c->id)) {
-                fprintf(stderr, "morphoview: No draw with id '%i'.\n", c->id);
-                return false;
+                return command_apply_error("No draw with id '%i'.", c->id);
             }
             scene_markchanged(ctx->scene);
             if (ctx->display && ctx->display->window) {
@@ -402,10 +403,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_CLEAR_DISPLAY: {
             /* Apply-time scene only — parse must not require has_scene (ok-before-apply). */
-            if (!ctx->scene) {
-                fprintf(stderr, "morphoview: No current scene for D.\n");
-                return false;
-            }
+            if (!command_needscene(ctx)) return false;
             scene_cleardisplaylist(ctx->scene);
             scene_markchanged(ctx->scene);
             command_reset_colorstamp(ctx);
@@ -426,7 +424,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_BOUNDS: {
             mv_cmd_bounds *c = MVCMD_AS_BOUNDS(cmd);
-            if (!ctx->scene) return false;
+            if (!command_needscene(ctx)) return false;
             scene_setbbox(ctx->scene, c->bbox[0], c->bbox[1], c->bbox[2],
                           c->bbox[3], c->bbox[4], c->bbox[5]);
             command_touchscene(ctx);
@@ -436,7 +434,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
         case MVCMD_LIGHT: {
             /* Lighting is sampled each frame from the scene; no GL rebuild. */
             mv_cmd_light *c = MVCMD_AS_LIGHT(cmd);
-            if (!ctx->scene) return false;
+            if (!command_needscene(ctx)) return false;
             if (c->mode==SCENE_LIGHT_EXPLICIT) {
                 scene_setexplicitlights(ctx->scene, c->nlights, c->pos, c->color);
             } else {
@@ -448,21 +446,22 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
         case MVCMD_BACKGROUND: {
             /* Background is sampled each frame from the scene; no GL rebuild. */
             mv_cmd_background *c = MVCMD_AS_BACKGROUND(cmd);
-            if (!ctx->scene) return false;
+            if (!command_needscene(ctx)) return false;
             scene_setbackground(ctx->scene, c->rgb[0], c->rgb[1], c->rgb[2]);
             return true;
         }
 
         case MVCMD_OBJECT:
-            if (!ctx->scene) return false;
+            if (!command_needscene(ctx)) return false;
             ctx->cobject=scene_addobject(ctx->scene, MVCMD_AS_OBJECT(cmd)->id);
-            if (!ctx->cobject) return false;
+            if (!ctx->cobject) return command_apply_error("Could not create object '%i'.",
+                                                         MVCMD_AS_OBJECT(cmd)->id);
             command_touchscene(ctx);
             return true;
 
         case MVCMD_VERTICES: {
             mv_cmd_vertices *c = MVCMD_AS_VERTICES(cmd);
-            if (!ctx->scene || !ctx->cobject) return false;
+            if (!command_needobject(ctx)) return false;
 
             if (c->format) {
                 if (ctx->cobject->vertexdata.format)
@@ -474,7 +473,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
             if (c->length>0 && c->data) {
                 int ret=scene_adddata_take(ctx->scene, &c->data, c->length);
-                if (ret<0) return false;
+                if (ret<0) return command_apply_error("Could not store vertex data.");
                 if (ctx->cobject->vertexdata.indx==SCENE_EMPTY) {
                     ctx->cobject->vertexdata.indx=ret;
                     ctx->cobject->vertexdata.length=0;
@@ -488,7 +487,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_ELEMENT: {
             mv_cmd_element *c = MVCMD_AS_ELEMENT(cmd);
-            if (!ctx->scene || !ctx->cobject) return false;
+            if (!command_needobject(ctx)) return false;
 
             gelement el = {
                 .type = c->type,
@@ -498,7 +497,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
             if (c->length>0 && c->indices) {
                 int ret=scene_addindex_take(ctx->scene, &c->indices, c->length);
-                if (ret<0) return false;
+                if (ret<0) return command_apply_error("Could not store index data.");
                 el.indx=ret;
                 el.length=c->length;
             }
@@ -510,13 +509,13 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_COLOR: {
             mv_cmd_color *c = MVCMD_AS_COLOR(cmd);
-            if (!ctx->scene) return false;
+            if (!command_needscene(ctx)) return false;
 
             if (c->length>0 && c->rgb) {
                 int ncomp = (c->components==4) ? 4 : 3;
                 int nfloats = c->length*ncomp;
                 int indx=scene_adddata_take(ctx->scene, &c->rgb, nfloats);
-                if (indx<0) return false;
+                if (indx<0) return command_apply_error("Could not store color data.");
                 scene_addcolor(ctx->scene, c->id, c->length, ncomp, indx);
             }
             command_touchscene(ctx);
@@ -525,7 +524,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_SELECT_COLOR: {
             mv_cmd_select_color *c = MVCMD_AS_SELECT_COLOR(cmd);
-            if (!ctx->scene) return false;
+            if (!command_needscene(ctx)) return false;
             /* Context only: stamp onto subsequent `d` / `T`.
              * Do not append COLOR displaylist entries (unbounded on live recolor)
              * or mark the scene changed — draw-slot color lives on the OBJECT/TEXT. */
@@ -541,7 +540,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_MATERIAL: {
             mv_cmd_material *c = MVCMD_AS_MATERIAL(cmd);
-            if (!ctx->scene) return false;
+            if (!command_needscene(ctx)) return false;
             float coeffs[4] = { c->ka, c->kd, c->ks, c->shininess };
             int matindx=scene_adddata(ctx->scene, coeffs, 4);
             scene_adddraw(ctx->scene, SHADE, c->mode, matindx);
@@ -551,7 +550,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_DRAW: {
             mv_cmd_draw *c = MVCMD_AS_DRAW(cmd);
-            if (!ctx->scene) return false;
+            if (!command_needscene(ctx)) return false;
 
             int objectid = c->has_objectid ? c->objectid : c->drawid;
             bool stamp_color;
@@ -600,18 +599,18 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
         case MVCMD_FONT: {
             mv_cmd_font *c = MVCMD_AS_FONT(cmd);
-            if (!ctx->scene) return false;
-            if (!scene_addfont(ctx->scene, c->id, c->path, c->size, NULL)) return false;
+            if (!command_needscene(ctx)) return false;
+            if (!scene_addfont(ctx->scene, c->id, c->path, c->size, NULL))
+                return command_apply_error("Could not load font '%i'.", c->id);
             command_touchscene(ctx);
             return true;
         }
 
         case MVCMD_TEXT: {
             mv_cmd_text *c = MVCMD_AS_TEXT(cmd);
-            if (!ctx->scene) return false;
+            if (!command_needscene(ctx)) return false;
             if (!scene_getfontfromid(ctx->scene, c->fontid)) {
-                fprintf(stderr, "Font id '%i' not found.\n", c->fontid);
-                return false;
+                return command_apply_error("Font id '%i' not found.", c->fontid);
             }
 
             bool stamp_color;
@@ -667,7 +666,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             return true;
     }
 
-    return false;
+    return command_apply_error("Unrecognized command.");
 }
 
 int command_process(void) {
@@ -1582,7 +1581,7 @@ bool command_parselight(parser *p, void *out) {
 
     scene_light_mode mode=SCENE_LIGHT_NEUTRAL;
     int nlights=0;
-    float pos[SCENE_MAX_LIGHTS][4];
+    float pos[SCENE_MAX_LIGHTS][3];
     float color[SCENE_MAX_LIGHTS][3];
     memset(pos, 0, sizeof(pos));
     memset(color, 0, sizeof(color));
@@ -1624,7 +1623,6 @@ bool command_parselight(parser *p, void *out) {
                 PARSE_CHECK(command_parsefloat(p, &pos[i][0]));
                 PARSE_CHECK(command_parsefloat(p, &pos[i][1]));
                 PARSE_CHECK(command_parsefloat(p, &pos[i][2]));
-                pos[i][3]=1.0f;
                 if (has_color) {
                     PARSE_CHECK(command_parsefloat(p, &color[i][0]));
                     PARSE_CHECK(command_parsefloat(p, &color[i][1]));

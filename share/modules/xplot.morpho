@@ -666,7 +666,7 @@ fn _faceOrientation(mesh, vertMat, selection=nil) {
       for (f in fs) {
         if (comp[f] == c) nIn += 1
       }
-      if (nIn == 1) { closed = false; break }
+      if (nIn != 0 && nIn != 2) { closed = false; break }
     }
     if (!closed) continue
     var vol = 0
@@ -1207,10 +1207,11 @@ class Plot is Scene {
     var ncol = perVertex ? Matrix(nch, 3*nnt) : nil
     var tri = Sparse(3*nnt, nnt)
 
+    var orient = _faceOrientation(mesh, vertMat, selection=selection)
+    var fnorms = orient[0]
+    var signs = orient[1]
     var nnv = 0
     nnt = 0
-    var fnorms = (isnil(vnorm) && isnil(planar)) ?
-      _orientedFaceNormalMatrix(mesh, vertMat, selection=selection) : nil
     for (i in 0...nf) {
       if (_unselected(selection, 2, i)) continue
 
@@ -1218,22 +1219,25 @@ class Plot is Scene {
       var v[3]
       for (pidx, j in el) v[j] = vertMat.column(pidx)
 
+      var sgn = signs[i]
       var faceNormal
       if (!isnil(planar)) {
         faceNormal = Matrix(3)
         faceNormal[planar] = 1
       } else if (isnil(vnorm)) {
-        faceNormal = fnorms.column(i)
+        faceNormal = sgn * fnorms.column(i)
       }
 
+      var srcj = (sgn < 0) ? [0, 2, 1] : [0, 1, 2]
       var tcol, a = nnv
       if (perVertex && !interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, i), nch)
       for (j in 0...3) {
-        nvert.setColumn(nnv, v[j])
-        if (!isnil(vnorm)) norm.setColumn(nnv, vnorm.column(el[j]))
+        var src = srcj[j]
+        nvert.setColumn(nnv, v[src])
+        if (!isnil(vnorm)) norm.setColumn(nnv, vnorm.column(el[src]))
         else norm.setColumn(nnv, faceNormal)
         if (perVertex) {
-          if (interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, el[j]), nch)
+          if (interpolate) tcol = _plotColorColumn(_plotColorForElement(fcol, el[src]), nch)
           ncol.setColumn(nnv, tcol)
         }
         nnv += 1

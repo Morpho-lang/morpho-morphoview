@@ -196,4 +196,14 @@ gTup.light = (3, 4, 5)
 gTup.display(Sphere([0, 0, 0], 1, color=Red))
 expect(contains(scene(gTup), "light_source { <3, 4, 5>"), "(x,y,z) is one lamp")
 
+var badPov = false
+try {
+  var gBad = Graphics()
+  gBad.light = "studio"
+  scene(gBad)
+} catch {
+  "GfxLightName" : badPov = true
+}
+expect(badPov, "unknown light name throws in POV")
+
 print "ok"

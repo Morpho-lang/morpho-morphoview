@@ -21,7 +21,7 @@ producer → command_parse / command_enqueue → queue
 3. **Wake** (`command_wake`) — `glfwPostEmptyEvent()`, so a blocked `glfwWaitEvents` can run.
 4. **Process** (`command_process`) — apply every queued command in order on the **caller** thread, then free them. Returns the number applied. On apply failure, frees the remainder and stops.
 
-`main` processes once after loading a file (bootstrap), starts `-b`/`-c` listening after that parse, then `display_loop` processes again after each `glfwWaitEvents`. With `-b`/`-c`, an I/O thread enqueues via ZMQ while the loop runs.
+`main` processes once after loading a file (bootstrap), starts `-b`/`-c` listening after that parse, then `display_loop` processes again after each `glfwWaitEvents`. With `-b`/`-c`, an I/O thread enqueues via ZMQ while the loop runs. Live parse replies `ok`/`err …` immediately; apply runs later on the GLFW thread.
 
 **Invariant:** only the main/GLFW thread calls `command_process` and touches GL. The queue is mutex-protected so the I/O thread can `command_enqueue` safely.
 
@@ -98,7 +98,7 @@ I = \text{albedo}\,\Bigl(k_a\,\text{ambient}
 - **Vertex format:** `v` / `U V` take a format string whose letters name fields in order: `x` position (`dim` floats), `n` normal (`dim`), `c` RGB (3), `a` alpha (1). Missing `c`/`n`/`a` use defaults (white, +z, alpha 1). Typical Show layouts: `xn`, `xnc`, `xnca`, `x`, `xc`, `xca`.
 - **Vertex color:** `v "xnc"` / `v "xc"` with a draw-slot in empty color mode — per-vertex RGB is the albedo (opaque unless `a` is also present). `C <id>` on the same draw-slot is a uniform RGB override that hides vertex colors without redefining geometry; vertex `a` is unchanged. Bare `C` then `d` clears that override. `d` without a preceding `C` preserves the current mode. Package `Show` emits `C` or `C <id>` immediately before each `d` so the color mode is self-contained (bare `C` for an intrinsic ColorTable).
 - **Opacity:** `c <id> <r g b a>` — opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off. A format that includes `a` is treated as transparent. Transparent objects sorted **far → near** by object centroid. Closed translucent meshes draw back faces then front. Not triangle-level / OIT — intersecting translucents can still artifact.
-- **Facet winding:** Package `Show` emits sparse face indices via `rowindices`. At upload, the viewer reorients triangles so geometric normals agree with averaged vertex normals (needed for the transparent back/front pass).
+- **Facet winding:** Package `Show` emits sparse face indices via `rowindices`. Plot duplicates face vertices and emits `0,2,1` when orientation requires a flip, so geometric winding already matches authored normals. At upload, the viewer still reorients triangles if they disagree (safety net for the transparent back/front pass).
 - **Graphics alpha:** Package `Show` maps uniform `Color.a` (and `Coloring.opacity`) to `c`/`C` + colorless geometry (`v "xn"` / `v "x"`). `Color(r,g,b)` is opaque with `a=1`; `Color(r,g,b,a)` sets alpha. A `ColorTable` on a vertex-bearing primitive is one color per vertex; RGB tables emit `v "xnc"` / `v "xc"`, RGBA tables emit `v "xnca"` / `v "xca"`. Draw-slot `C` is a uniform `GraphicsEntry.color` override (not a `ColorTable`).
 
 World space is right-handed: **+X right, +Y up, +Z toward the home viewer**. Home view is `Scale * Translate(-center)` (no extra rotation). Lighting is evaluated in **view space**; ortho `V = (0,0,1)` (toward the camera). Scene ambient is white in every mode; lamps contribute diffuse and specular only.
@@ -107,10 +107,10 @@ World space is right-handed: **+X right, +Y up, +Z toward the home viewer**. Hom
 - **`L "neutral"`** / **`L "auto"`** — same Neutral rig (`"auto"` is an alias).
 - **`L "threepoint"`** — key / fill / rim, also view-relative.
 - **`L <n> "x" <posn>…`** — n world-space point lights, white. Cap 4.
-- **`L <n> "xc" <posn> <color>…`** — same, with RGB per lamp.
+- **`L <n> "xc" <posn> <color>…`** — same, with RGB per lamp (viewer/fixture language; package `Show` emits white `"x"` only).
 - **`L 0`** — ambient only.
 
-One `L` replaces the whole list. Package `Show` omits `L` when `Graphics.light` is `nil`; set `g.light = "threepoint"` or a 3-vector / list of those to emit `L`.
+One `L` replaces the whole list. Package `Show` omits `L` when `Graphics.light` is `nil`; set `g.light = "threepoint"` or a 3-vector / list of those to emit `L`. Morpho accepts at most 4 lamps, each a 3-vector; unknown names error.
 
 `G <r> <g> <b>` sets the clear color (default dark bluish gray). Package `Show` emits `G` from `Graphics.background` (default `Black`).
 

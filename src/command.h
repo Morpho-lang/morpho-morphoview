@@ -176,13 +176,13 @@ typedef struct {
  *  Language: `L "neutral"|"threepoint"|"auto"` | `L <n> "x"|"xc" ...` | `L 0`
  *  @param mode     Neutral / ThreePoint / Explicit
  *  @param nlights  Explicit count (0 = ambient only); ignored for named rigs
- *  @param pos      World-space xyz + w (1 = point) per light
+ *  @param pos      World-space xyz per light
  *  @param color    RGB per light */
 typedef struct {
     mv_command cmd;
     scene_light_mode mode;
     int nlights;
-    float pos[SCENE_MAX_LIGHTS][4];
+    float pos[SCENE_MAX_LIGHTS][3];
     float color[SCENE_MAX_LIGHTS][3];
 } mv_cmd_light;
 
