@@ -58,9 +58,41 @@ expect(cradial == cnv-2, "cylinder ring normals radial")
 
 /* ---- Arrow unit: start cap -Z, tip +Z ---- */
 var arr = Arrow([0, 0, 0], [0, 0, 1], n=8, color=Green).toTriangleComplex(unit=true)
-var anv = arr.position.dimensions()[1]
+var nCore = 3*8+2
 expect(arr.normals.column(0).inner(Matrix([0, 0, -1])) > 0.9, "arrow start cap -Z")
-expect(arr.normals.column(anv-1).inner(Matrix([0, 0, 1])) > 0.9, "arrow tip +Z")
+expect(arr.normals.column(nCore-1).inner(Matrix([0, 0, 1])) > 0.9, "arrow tip +Z")
+
+/* B-C annulus (underside of the cone) must all face -Z. Sparse rowindices
+   sorts ids, so shared B/C rings used to emit alternating windings. */
+var nAnnulus = 0, nAnnulusFlip = 0, nAnnulusNrm = 0
+var nfArr = arr.connectivity.dimensions()[1]
+for (i in 0...nfArr) {
+  var fel = arr.faceIndices(i)
+  var q0 = arr.position.column(fel[0])
+  var q1 = arr.position.column(fel[1])
+  var q2 = arr.position.column(fel[2])
+  var zmin = q0[2], zmax = q0[2]
+  if (q1[2] < zmin) zmin = q1[2]
+  if (q2[2] < zmin) zmin = q2[2]
+  if (q1[2] > zmax) zmax = q1[2]
+  if (q2[2] > zmax) zmax = q2[2]
+  var r0 = sqrt(q0[0]*q0[0] + q0[1]*q0[1])
+  var r1 = sqrt(q1[0]*q1[0] + q1[1]*q1[1])
+  var r2 = sqrt(q2[0]*q2[0] + q2[1]*q2[1])
+  var rmax = r0
+  if (r1 > rmax) rmax = r1
+  if (r2 > rmax) rmax = r2
+  if (zmax - zmin < 1e-9 && zmin > 0.5 && rmax > 1.2) {
+    nAnnulus += 1
+    var gN = cross3D(q1 - q0, q2 - q0)
+    if (gN[2] >= 0) nAnnulusFlip += 1
+    var n0 = arr.normals.column(fel[0])
+    if (n0.inner(Matrix([0, 0, -1])) > 0.9) nAnnulusNrm += 1
+  }
+}
+expect(nAnnulus == 16, "arrow B-C annulus has 2n triangles")
+expect(nAnnulusFlip == 0, "arrow B-C annulus winding is -Z (${nAnnulusFlip} flipped)")
+expect(nAnnulusNrm == 16, "arrow B-C annulus normals are -Z")
 
 /* ---- Open tube: start/end cap normals along the path ---- */
 var tubeOpen = Tube([[0, 0, 0], [0, 0, 1]], 0.2, n=8, closed=false, color=Orange).toTriangleComplex()

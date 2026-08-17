@@ -497,7 +497,11 @@ class Arrow is GraphicsPrimitive {
   /** @param unit if true, shaft along +z height 1 radius 1; tip fraction = aspectratio. */
   toTriangleComplex(unit=false) {
     var aspectratio = self.aspectratio, n = self.n, col = self.color
-    var np = 3*n+2, nt = 6*n, dim = 3
+    // Core 3n+2 (start, A, B, C, tip) plus 6n B-C annulus copies. Sparse
+    // rowindices is sorted, so shared B/C ids make one triangle of each
+    // annulus quad wind +Z; those verts are radial, so the viewer cannot
+    // repair. Consecutive copies with -shaft normals emit -Z winding.
+    var nCore = 3*n+2, np = nCore + 6*n, nt = 6*n, dim = 3
     var frame = _shaftFrame(unit, self.start, self.end, aspectratio)
     if (isnil(frame)) return nil
     var x1 = frame[0], x2 = frame[1], dx = frame[2], length = frame[3]
@@ -506,9 +510,9 @@ class Arrow is GraphicsPrimitive {
     var vertices = Matrix(dim, np), normals = Matrix(dim, np)
 
     vertices.setcolumn(0, x1)
-    vertices.setcolumn(np-1, x2)
+    vertices.setcolumn(nCore-1, x2)
     normals.setcolumn(0, -ndx)
-    normals.setcolumn(np-1, ndx)
+    normals.setcolumn(nCore-1, ndx)
 
     /* The arrow is structured like so:
 
@@ -543,16 +547,26 @@ class Arrow is GraphicsPrimitive {
       }
     }
 
+    var nAnn = -ndx
     var conn = Sparse(np, nt)
     for (i in 0...n) {
       var i2 = (i < n-1) ? i+2 : 1, ni2 = (i < n-1) ? n+i+2 : n+1
       var ci2 = (i < n-1) ? 2*n+i+2 : 2*n+1
-      _tri(conn, i, 0, i2, i+1)                       // 0-A
-      _tri(conn, n+i, np-1, 2*n+i+1, ci2)             // C-1 tip
-      _tri(conn, 2*n+i, i+1, i2, n+i+1)               // A-B
+      _tri(conn, i, 0, i2, i+1)                       // 0-A cap (outward -Z)
+      _tri(conn, n+i, nCore-1, 2*n+i+1, ci2)          // C-1 tip
+      _tri(conn, 2*n+i, i+1, i2, n+i+1)               // A-B sidewall
       _tri(conn, 3*n+i, i2, ni2, n+i+1)
-      _tri(conn, 4*n+i, n+i+1, 2*n+i+1, ni2)          // B-C
-      _tri(conn, 5*n+i, ni2, ci2, 2*n+i+1)
+      // B-C annulus: 3 consecutive ids per tri so sorted order is -shaft.
+      var b = nCore + 6*i
+      vertices.setcolumn(b, vertices.column(n+i+1))
+      vertices.setcolumn(b+1, vertices.column(ni2))
+      vertices.setcolumn(b+2, vertices.column(2*n+i+1))
+      vertices.setcolumn(b+3, vertices.column(ni2))
+      vertices.setcolumn(b+4, vertices.column(ci2))
+      vertices.setcolumn(b+5, vertices.column(2*n+i+1))
+      for (k in 0...6) normals.setcolumn(b+k, nAnn)
+      _tri(conn, 4*n+i, b, b+1, b+2)
+      _tri(conn, 5*n+i, b+3, b+4, b+5)
     }
 
     return TriangleComplex(vertices, normals, col, conn)
