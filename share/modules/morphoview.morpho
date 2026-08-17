@@ -190,6 +190,11 @@ class View with Listener {
     })
   }
 
+  receive(Graphics g, GraphicsEventLights ev) {
+    if (!self._live()) return
+    self._tryEmit("lights", fn () { self.show.writeLights(g.light, self) })
+  }
+
   receive(Graphics g, GraphicsEventRemoved ev) {
     if (!self._live()) return
     self._tryEmit("removed id ${ev.id}", fn () { self.show.remove(ev.id, self) })

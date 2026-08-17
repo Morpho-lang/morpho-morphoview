@@ -1,4 +1,4 @@
-// Show emits L from Graphics.light; nil omits (viewer Neutral).
+// Show emits L from Graphics.light; empty list is Neutral (no L line).
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testshowlight.morpho
@@ -81,35 +81,76 @@ gx.light = Matrix([-2.5, 0.4, 0.2])
 gx.display(sph)
 var bx = Buf()
 Show().write(gx, bx)
-expect(anyStarts(bx.lines, "L 1 \"x\""), "Matrix emits L 1 \"x\"")
+expect(anyStarts(bx.lines, "L 1 \"xc\""), "Matrix emits L 1 \"xc\"")
 
 var gxyz = Graphics()
 gxyz.light = [-2.5, 0.4, 0.2]
 gxyz.display(sph)
 var bxyz = Buf()
 Show().write(gxyz, bxyz)
-expect(anyStarts(bxyz.lines, "L 1 \"x\""), "[x,y,z] is one lamp, not three")
+expect(anyStarts(bxyz.lines, "L 1 \"xc\""), "[x,y,z] is one lamp, not three")
 
 var gtup = Graphics()
 gtup.light = (-2.5, 0.4, 0.2)
 gtup.display(sph)
 var btup = Buf()
 Show().write(gtup, btup)
-expect(anyStarts(btup.lines, "L 1 \"x\""), "(x,y,z) is one lamp")
+expect(anyStarts(btup.lines, "L 1 \"xc\""), "(x,y,z) is one lamp")
 
 var g2 = Graphics()
 g2.light = [Matrix([10, 10, 10]), Matrix([-10, -10, 10])]
 g2.display(sph)
 var b2 = Buf()
 Show().write(g2, b2)
-expect(anyStarts(b2.lines, "L 2 \"x\""), "two matrices emit L 2 \"x\"")
+expect(anyStarts(b2.lines, "L 2 \"xc\""), "two matrices emit L 2 \"xc\"")
 
 var gZ = Graphics()
 gZ.light = []
 gZ.display(sph)
 var bz = Buf()
 Show().write(gZ, bz)
-expect(anyExact(bz.lines, "L 0"), "empty list emits L 0")
+expect(!anyHasL(bz.lines), "empty list is Neutral (no L line)")
+expect(islist(g0.light) && g0.light.count() == 0, "Graphics() stores empty light list")
+
+var gOff = Graphics()
+gOff.light = "off"
+gOff.display(sph)
+var bOff = Buf()
+Show().write(gOff, bOff)
+expect(anyExact(bOff.lines, "L \"off\""), "off emits L \"off\"")
+
+var gAdd = Graphics()
+gAdd.display(sph)
+gAdd.addLight([-2.5, 0.4, 0.2])
+var bAdd = Buf()
+Show().write(gAdd, bAdd)
+expect(anyStarts(bAdd.lines, "L 1 \"xc\""), "addLight white lamp emits L 1 \"xc\"")
+expect(gAdd.light.count() == 1, "addLight stores one Light")
+
+var gCol = Graphics()
+gCol.display(sph)
+gCol.addLight(Light([-10, 5, 8], color=Red, intensity=0.4))
+var bCol = Buf()
+Show().write(gCol, bCol)
+expect(anyStarts(bCol.lines, "L 1 \"xc\""), "colored Light emits xc")
+expect(anyExact(bCol.lines, "L 1 \"xc\" -10 5 8 0.4 0 0"), "xc includes scaled RGB")
+
+gAdd.addLight([1, 2, 3])
+expect(gAdd.light.count() == 2, "second addLight appends")
+gAdd.resetLights()
+expect(gAdd.light.count() == 0, "resetLights clears to Neutral")
+var bRst = Buf()
+Show().write(gAdd, bRst)
+expect(!anyHasL(bRst.lines), "resetLights Show omits L")
+
+var bLive = Buf()
+Show().writeLights([], bLive)
+expect(anyExact(bLive.lines, "L \"neutral\""), "live writeLights empty emits L \"neutral\"")
+
+var gTPAdd = Graphics()
+gTPAdd.light = "threepoint"
+gTPAdd.addLight([1, 0, 0])
+expect(islist(gTPAdd.light) && gTPAdd.light.count() == 1, "addLight replaces threepoint")
 
 var gInit = Graphics(light="auto")
 expect(gInit.light == "neutral", "Graphics(light=) canonicalizes auto")
@@ -146,5 +187,15 @@ try {
   "GfxLightN" : badN = true
 }
 expect(badN, "five lamps throw")
+
+var badAdd = false
+try {
+  var g4 = Graphics()
+  for (i in 0...4) g4.addLight([i, 0, 0])
+  g4.addLight([4, 0, 0])
+} catch {
+  "GfxLightN" : badAdd = true
+}
+expect(badAdd, "fifth addLight throws")
 
 print "ok"

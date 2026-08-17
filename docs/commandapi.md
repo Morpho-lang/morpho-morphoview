@@ -41,7 +41,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `Q` | `MVCMD_QUIT` | — | Close all windows / quit viewer |
 | `W` | `MVCMD_WINDOW_TITLE` | `"<title>"` | Set current window title |
 | `B` | `MVCMD_BOUNDS` | `<xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; next prepare refits unless user moved camera |
-| `L` | `MVCMD_LIGHT` | `"neutral"` \| `"threepoint"` \| `"auto"` \| `<n> "x"` \| `<n> "xc"` \| `0` | Named camera-relative rig, or n world-space point lights (cap 4). Omit `L` for Neutral. `L 0` is ambient only |
+| `L` | `MVCMD_LIGHT` | `"neutral"` \| `"threepoint"` \| `"auto"` \| `"off"` \| `<n> "x"` \| `<n> "xc"` \| `0` | Named camera-relative rig, or n world-space point lights (cap 4). Omit `L` for Neutral (a bare `L` is invalid). `L "off"` / `L 0` is ambient only |
 | `G` | `MVCMD_BACKGROUND` | `<r> <g> <b>` | Scene clear / background color |
 | `o` | `MVCMD_OBJECT` | `<id>` | Current object (requires a scene) |
 | `v` | `MVCMD_VERTICES` | `["format"] <floats…>` | Vertex data for current object |
@@ -107,10 +107,10 @@ World space is right-handed: **+X right, +Y up, +Z toward the home viewer**. Hom
 - **`L "neutral"`** / **`L "auto"`** — same Neutral rig (`"auto"` is an alias).
 - **`L "threepoint"`** — key / fill / rim, also view-relative.
 - **`L <n> "x" <posn>…`** — n world-space point lights, white. Cap 4.
-- **`L <n> "xc" <posn> <color>…`** — same, with RGB per lamp (viewer/fixture language; package `Show` emits white `"x"` only).
-- **`L 0`** — ambient only.
+- **`L <n> "xc" <posn> <color>…`** — same, with RGB per lamp. Package `Show` always emits `"xc"`.
+- **`L "off"`** / **`L 0`** — ambient only.
 
-One `L` replaces the whole list. Package `Show` omits `L` when `Graphics.light` is `nil`; set `g.light = "threepoint"` or a 3-vector / list of those to emit `L`. Morpho accepts at most 4 lamps, each a 3-vector; unknown names error.
+One `L` replaces the whole list. Package `Show` writes no `L` line when `Graphics.light` is empty (`[]`, Neutral). `g.light = "neutral"` / `"auto"` emit `L "neutral"`; `"threepoint"` and `"off"` emit those names. Set `g.light` to a 3-vector / `Light` / list of those, or call `g.addLight(...)`. Morpho accepts at most 4 lamps; unknown names error. Live `View` sends `L "neutral"` on `resetLights()` so the viewer drops prior lamps.
 
 `G <r> <g> <b>` sets the clear color (default dark bluish gray). Package `Show` emits `G` from `Graphics.background` (default `Black`).
 

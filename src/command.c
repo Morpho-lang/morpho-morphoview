@@ -1575,7 +1575,7 @@ bool command_parsebounds(parser *p, void *out) {
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
-/** `L "neutral"|"threepoint"|"auto"` | `L <n> "x"|"xc" ...` | `L 0`. */
+/** `L "neutral"|"threepoint"|"auto"|"off"` | `L <n> "x"|"xc" ...` | `L 0`. */
 bool command_parselight(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
 
@@ -1593,6 +1593,9 @@ bool command_parselight(parser *p, void *out) {
             mode=SCENE_LIGHT_NEUTRAL;
         } else if (strcmp(name, "threepoint")==0) {
             mode=SCENE_LIGHT_THREEPOINT;
+        } else if (strcmp(name, "off")==0) {
+            mode=SCENE_LIGHT_EXPLICIT;
+            nlights=0;
         } else {
             free(name);
             parse_error(p, false, COMMAND_INVLDLIGHT);

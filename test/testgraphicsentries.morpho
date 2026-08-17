@@ -6,6 +6,7 @@
 import morphoview
 import xgraphics
 import xcolor
+import broadcast
 
 class Buf {
   init() { self.lines = [] }
@@ -110,7 +111,7 @@ var other = Graphics()
 other.display(PointCloud(Matrix([[0], [0], [0]])))
 var union = lit.add(other)
 expect(islist(union.light) && union.light.count() == 1, "add copies explicit lights")
-union.light.append(Matrix([4, 5, 6]))
+union.light.append(Light([4, 5, 6]))
 expect(lit.light.count() == 1, "source light list is not shared")
 
 /* ---- Show still works from entries ---- */
@@ -155,5 +156,18 @@ var sidx = sparse.faceIndices(0)
 var ridx = sp.rowindices(0)
 expect(sidx.count() == ridx.count() && sidx.count() == 3, "sparse face has 3 vertices")
 expect(sidx[0] == ridx[0] && sidx[1] == ridx[1] && sidx[2] == ridx[2], "sparse faceIndices is rowindices")
+
+/* ---- Scene.addLight / resetLights notify ---- */
+class LightSink with Listener {
+  init() { self.n = 0 }
+  receive(g, GraphicsEventLights ev) { self.n += 1 }
+}
+var sc = Scene()
+var sink = LightSink()
+sink.listen(sc)
+sc.addLight([1, 2, 3])
+expect(sink.n == 1, "Scene.addLight notifies")
+sc.resetLights()
+expect(sink.n == 2, "resetLights notifies")
 
 print "ok"

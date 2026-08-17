@@ -28,13 +28,15 @@ var _GfxClrTblLenErr = Error("GfxClrTblLen",
 var _GfxPolyErr = Error("GfxPoly",
   "Polygon must be a convex planar n-gon (n>=3); winding defines the normal.")
 var _GfxLightNameErr = Error("GfxLightName",
-  "Graphics.light name must be \"neutral\", \"threepoint\", or \"auto\".")
+  "Graphics.light name must be \"neutral\", \"threepoint\", \"auto\", or \"off\".")
 var _GfxLightPosErr = Error("GfxLightPos",
   "Each lamp must be a 3-vector (Matrix, [x,y,z], or (x,y,z)).")
 var _GfxLightNErr = Error("GfxLightN",
   "At most 4 world-space point lights.")
 var _GfxLightValErr = Error("GfxLightVal",
-  "Graphics.light must be nil, a named rig, a 3-vector, or a list of 3-vectors.")
+  "Graphics.light must be nil, a named rig, a Light, a 3-vector, or a list of those.")
+var _GfxLightColorErr = Error("GfxLightColor",
+  "Light.color must be a Color (RGB); alpha is unused.")
 
 /* **************************************
  * Utility functions
@@ -121,25 +123,50 @@ fn _asLightPosition(p) {
   return m
 }
 
-/** `"auto"` → `"neutral"`; `"threepoint"` unchanged; anything else errors. */
+/** Lamp tint: always a Color, RGB only (`a=1`). Lists/tuples become Color via asColoring. */
+fn _asLightColor(Color c) { return Color(c.r, c.g, c.b) }
+fn _asLightColor(Coloring c) { _GfxLightColorErr.throw() }
+fn _asLightColor(c) {
+  if (isnil(c)) return White
+  return _asLightColor(asColoring(c))
+}
+
+/** World-space point lamp. Viewer RGB is `intensity * color` (`xc` has no alpha). */
+class Light {
+  init(position, color=nil, intensity=1) {
+    self.position = _asLightPosition(position)
+    self.color = _asLightColor(color)
+    self.intensity = intensity
+  }
+
+  clone() {
+    return Light(self.position.clone(), color=self.color, intensity=self.intensity)
+  }
+}
+
+/** `"auto"` → `"neutral"`; `"threepoint"` / `"off"` unchanged. */
 fn _asLightName(String s) {
   if (s == "auto" || s == "neutral") return "neutral"
   if (s == "threepoint") return "threepoint"
+  if (s == "off") return "off"
   _GfxLightNameErr.throw()
 }
 
-/** World-space point lights: one 3-vector, or a sequence of those. Empty → none.
- *  `[x,y,z]` / `(x,y,z)` is one lamp, not three. At most `_LIGHT_MAX` lamps. */
-fn _asLightPositions(Matrix p) { return [_asLightPosition(p)] }
+fn _asLightItem(Light l) { return l.clone() }
+fn _asLightItem(p) { return Light(_asLightPosition(p)) }
+
+/** World-space point lights: one 3-vector/`Light`, or a sequence of those.
+ *  `[x,y,z]` / `(x,y,z)` is one lamp, not three. Empty → Neutral. Cap `_LIGHT_MAX`. */
+fn _asLightPositions(Matrix p) { return [Light(_asLightPosition(p))] }
 fn _asLightPositions(List L) {
   if (L.count() == 0) return []
   if (isnumber(L[0])) {
     if (L.count() != 3) _GfxLightPosErr.throw()
-    return [_asLightPosition(L)]
+    return [Light(_asLightPosition(L))]
   }
   if (L.count() > _LIGHT_MAX) _GfxLightNErr.throw()
   var out = []
-  for (p in L) out.append(_asLightPosition(p))
+  for (p in L) out.append(_asLightItem(p))
   return out
 }
 fn _asLightPositions(Tuple t) {
@@ -148,14 +175,15 @@ fn _asLightPositions(Tuple t) {
   return _asLightPositions(L)
 }
 
-/** Canonical Graphics.light: `nil` (Neutral default), `"neutral"`/`"threepoint"`,
- *  or a list of world-space 3-vectors (empty → ambient only). */
+/** Canonical Graphics.light: `[]` (Neutral), `"neutral"`/`"threepoint"`/`"off"`,
+ *  or a list of `Light`. `nil` → `[]`. */
 fn asLighting(String s) { return _asLightName(s) }
+fn asLighting(Light l) { return [l.clone()] }
 fn asLighting(Matrix p) { return _asLightPositions(p) }
 fn asLighting(List L) { return _asLightPositions(L) }
 fn asLighting(Tuple t) { return _asLightPositions(t) }
 fn asLighting(val) {
-  if (isnil(val)) return nil
+  if (isnil(val)) return []
   _GfxLightValErr.throw()
 }
 
@@ -898,6 +926,13 @@ class GraphicsEventRemoved is GraphicsEvent {}
 /** Entry item replaced (no coalesce — each id flushed). */
 class GraphicsEventReplaced is GraphicsEvent {}
 
+/** Scene lighting changed (`addLight` / `resetLights`). Last-write-wins in a batch. */
+class GraphicsEventLights is GraphicsEvent {
+  init() { super.init(0) }
+  batchKey() { return GraphicsEventLights }
+  coalesce(prev) { }
+}
+
 /** Unit Sphere for entry storage (pose lives on the GraphicsEntry). */
 fn _unitSphere(Sphere item) {
   return Sphere([0, 0, 0], 1, color=item.color, maxrefine=item.maxrefine)
@@ -1046,6 +1081,26 @@ class Graphics {
                         color=color, flat=isnil(flat) ? true : flat)
   }
 
+  /** Append a world-space point lamp. Named Neutral/`"threepoint"`/`"off"` become a new list. */
+  addLight(Light l) {
+    var lights = asLighting(self.light)
+    var out = islist(lights) ? lights : []
+    if (out.count() >= _LIGHT_MAX) _GfxLightNErr.throw()
+    out.append(l.clone())
+    self.light = out
+    return true
+  }
+
+  addLight(position, color=nil, intensity=1) {
+    return self.addLight(Light(position, color=color, intensity=intensity))
+  }
+
+  /** Restore Neutral (`g.light = []`). */
+  resetLights() {
+    self.light = []
+    return true
+  }
+
   /** Copy title / background / light (not entries). */
   _copyMetaInto(g) {
     g.title = self.title
@@ -1083,6 +1138,18 @@ class Scene is Graphics with Broadcaster {
   init(title = nil, background = nil, light = nil) {
     super.init(title=title, background=background, light=light)
     self._broadcasterInit()
+  }
+
+  addLight(Light l) {
+    super.addLight(l)
+    self.notify(GraphicsEventLights())
+    return true
+  }
+
+  resetLights() {
+    super.resetLights()
+    self.notify(GraphicsEventLights())
+    return true
   }
 
   /** Allocate id, append entry, optionally notify Defined. */

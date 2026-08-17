@@ -188,25 +188,33 @@ class Show {
     self._writeL(graphic.light, out)
   }
 
-  /** Emit `L` after `G`. Nil → omit (viewer Neutral). White lamps only (`"x"`). */
+  /** Emit `L` after `G`. Empty → no line (viewer Neutral). Never a bare `L`. */
   _writeL(val, out) {
     var lights = asLighting(val)
-    if (isnil(lights)) return
+    if (islist(lights) && lights.count() == 0) return
     if (isstring(lights)) {
       out.write("L \"${lights}\"")
       return
     }
     var n = lights.count()
-    if (n == 0) {
-      out.write("L 0")
-      return
-    }
-    var line = "L ${n} \"x\""
+    var line = "L ${n} \"xc\""
     for (i in 0...n) {
-      var p = lights[i]
+      var p = lights[i].position
+      var rgb = (lights[i].intensity*lights[i].color).rgb(0)
       line += " ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}"
+      line += " ${self.fmt(rgb[0])} ${self.fmt(rgb[1])} ${self.fmt(rgb[2])}"
     }
     out.write(line)
+  }
+
+  /** Live `L` replace. Empty list emits `L "neutral"` so the viewer drops prior lamps. */
+  writeLights(val, out) {
+    var lights = asLighting(val)
+    if (islist(lights) && lights.count() == 0) {
+      out.write("L \"neutral\"")
+      return
+    }
+    self._writeL(val, out)
   }
 
   // 3 significant figures — enough for display; keeps ASCII small vs full doubles.

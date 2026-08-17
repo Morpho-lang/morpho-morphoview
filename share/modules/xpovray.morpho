@@ -401,19 +401,22 @@ class POVRaytracer {
     }
   }
 
-  /** Nil → Neutral rig (POV always writes lights). Empty list → ambient only. White lamps. */
+  /** Empty → Neutral rig. `"off"` → no lamps. Explicit lamps use `intensity * color`. */
   _writeLightVal(val, out, sl) {
     var lights = asLighting(val)
-    if (isnil(lights)) {
+    if (islist(lights) && lights.count() == 0) {
       self._writeNamedRig(out, sl, "neutral")
       return
     }
     if (isstring(lights)) {
+      if (lights == "off") return
       self._writeNamedRig(out, sl, lights)
       return
     }
-    for (p in lights) {
-      out.write("light_source { ${_povVector(p)} color White${sl} }")
+    for (lamp in lights) {
+      var p = lamp.position
+      var c = (lamp.intensity*lamp.color).rgb(0)
+      out.write("light_source { ${_povVector(p)} color rgb <${_num(c[0])}, ${_num(c[1])}, ${_num(c[2])}>${sl} }")
     }
   }
 

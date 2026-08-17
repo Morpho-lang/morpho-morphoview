@@ -196,6 +196,18 @@ gTup.light = (3, 4, 5)
 gTup.display(Sphere([0, 0, 0], 1, color=Red))
 expect(contains(scene(gTup), "light_source { <3, 4, 5>"), "(x,y,z) is one lamp")
 
+var gOff = Graphics()
+gOff.light = "off"
+gOff.display(Sphere([0, 0, 0], 1, color=Red))
+var sOff = scene(gOff)
+expect(!contains(sOff, "light_source"), "off emits no POV lamps")
+
+var gCol = Graphics()
+gCol.addLight(Light([1, 2, 3], color=Red, intensity=0.5))
+gCol.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gCol), "light_source { <1, 2, 3> color rgb <0.5, 0, 0>"),
+       "Light color*intensity in POV")
+
 var badPov = false
 try {
   var gBad = Graphics()

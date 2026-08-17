@@ -55,7 +55,7 @@
 #define COMMAND_INVLDCOLOR_MSG            "Color data length must be RGB triples or RGBA quads."
 
 #define COMMAND_INVLDLIGHT                "InvldLght"
-#define COMMAND_INVLDLIGHT_MSG            "Unrecognized light (expected \"neutral\", \"threepoint\", \"auto\", or <n> \"x\"|\"xc\" ...)."
+#define COMMAND_INVLDLIGHT_MSG            "Unrecognized light (expected \"neutral\", \"threepoint\", \"auto\", \"off\", or <n> \"x\"|\"xc\" ...)."
 
 /* -------------------------------------------------------
  * Command IR — header + typed payloads
@@ -173,7 +173,7 @@ typedef struct {
 } mv_cmd_bounds;
 
 /** Set scene lighting: a named camera-relative rig, or n world-space point lights.
- *  Language: `L "neutral"|"threepoint"|"auto"` | `L <n> "x"|"xc" ...` | `L 0`
+ *  Language: `L "neutral"|"threepoint"|"auto"|"off"` | `L <n> "x"|"xc" ...` | `L 0`
  *  @param mode     Neutral / ThreePoint / Explicit
  *  @param nlights  Explicit count (0 = ambient only); ignored for named rigs
  *  @param pos      World-space xyz per light
