@@ -22,6 +22,7 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 - [ ] Push [`xplot.morpho`](share/modules/xplot.morpho) to morpho `plot` (dogfood this package first)
 - [X] Keep core `graphics.morpho` free of `meshtools` (already true here: UV sphere in xgraphics; examples like soapbubble may still `import meshtools`)
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
+- [ ] Faster String.join(list, sep) (or List.join) so Show/View stop pairwise-merging and += loops.
 
 ### This package
 
