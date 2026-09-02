@@ -1,0 +1,93 @@
+// xplot Phase 7: Plot a Functional integrand Field with no copy.
+// MeanCurvatureSq is a vertex Field → interpolate. Area is CG0 (grade 2) →
+// default style colors faces; interpolate throws PltFldInt.
+// Expect: prints "ok" then exits.
+//
+//   morpho6 test/plot/phase7.morpho
+
+import implicitmesh
+import xplot
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn threwPltFldInt(blk) {
+  var ok = false
+  try {
+    blk()
+  } catch {
+    "PltFldInt" : ok = true
+  }
+  return ok
+}
+
+fn approx(a, b) { return abs(a - b) < 1e-12 }
+
+fn faceEntry(plot) {
+  return plot.findEntry(plot.entries["faces"][0])
+}
+
+/* ---- closed surface: implicit ellipsoid (in-tree plotfield twin) ---- */
+var impl = ImplicitMeshBuilder(fn (x, y, z) x^2 + (y/2)^2 + z^2 - 1)
+var mesh = impl.build(stepsize=0.4)
+
+var msq = MeanCurvatureSq().integrand(mesh)
+expect(isfield(msq), "integrand returns a Field")
+expect(msq.mesh() == mesh, "integrand Field is on the source mesh")
+expect(msq.shape()[0] != 0, "MeanCurvatureSq has vertex dofs")
+expect(msq.count() == mesh.count(0), "vertex integrand count matches verts")
+
+var pMsq = Plot(msq, style="interpolate", scalebar=true)
+expect(pMsq.source == msq, "Plot holds the integrand Field (no copy)")
+expect(pMsq.entries.contains("faces"), "interpolate curvature → faces")
+expect(pMsq.entries.contains("scalebar"), "scalebar=true")
+expect(!isnil(pMsq.cmin) && !isnil(pMsq.cmax), "field range from integrand")
+expect(faceEntry(pMsq).flat == false, "interpolated faces are lit")
+
+var pVeneer = plotfield(msq, style="interpolate", scalebar=true)
+expect(pVeneer.source == msq, "plotfield veneer holds the same Field")
+expect(pVeneer.displaylist.count() == pMsq.displaylist.count(),
+       "plotfield matches Plot displaylist count")
+expect(pVeneer.entries.contains("faces") && pVeneer.entries.contains("scalebar"),
+       "plotfield interpolate has faces+scalebar")
+expect(approx(pVeneer.cmin, pMsq.cmin) && approx(pVeneer.cmax, pMsq.cmax),
+       "plotfield range matches Plot")
+expect(faceEntry(pVeneer).flat == false, "plotfield interpolate not flat")
+
+/* ---- CG0 face energy: Area integrand ---- */
+var area = Area().integrand(mesh)
+expect(isfield(area), "Area integrand is a Field")
+expect(area.shape()[0] == 0, "Area has no vertex dofs")
+expect(area.count() == mesh.count(2), "Area integrand count matches faces")
+
+var pArea = Plot(area)
+expect(pArea.source == area, "Plot holds the Area integrand")
+expect(pArea.entries.contains("faces"), "default style colors faces")
+expect(!pArea.entries.contains("points"), "CG0 Area is not a vertex Field")
+expect(faceEntry(pArea).flat == true, "per-face CG0 colors stay flat")
+expect(faceEntry(pArea).item.color.clss() == ColorTable, "per-face ColorTable")
+
+var pAreaVeneer = plotfield(area)
+expect(pAreaVeneer.entries.contains("faces"), "plotfield(Area) default colors faces")
+expect(faceEntry(pAreaVeneer).flat == true, "plotfield CG0 faces stay flat")
+
+expect(threwPltFldInt(fn () Plot(area, style="interpolate")),
+       "Plot(Area, interpolate) throws PltFldInt")
+expect(threwPltFldInt(fn () plotfield(area, style="interpolate")),
+       "plotfield(Area, interpolate) throws PltFldInt")
+
+/* ---- threshold by energy: hoist mean, map Selection over the Field ---- */
+var en = area
+var mean = en.sum()/en.count()
+var s = Selection(mesh, fn (q) q > 1.5*mean, en)
+expect(s.count(0) == 0, "Field Selection is on the integrand grade, not vertices")
+if (s.count(2) > 0) {
+  var pThr = Plot(en, selection=s)
+  expect(pThr.entries.contains("faces"), "Plot(en, selection=s) has faces")
+}
+
+print "ok"
