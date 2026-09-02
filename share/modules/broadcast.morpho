@@ -1,34 +1,54 @@
-/** Broadcaster / Listener
- *
- *    class Hub with Broadcaster { ... }
- *    class Sink with Listener { ... }
- *
- *    sink.listen(hub)
- *    hub.notify(event)          // → sink.receive(hub, event)
- *    sink.ignore(hub)
- *
- *  Nested batches coalesce same-key events before delivery:
- *
- *    hub.beginBatch()
- *    hub.notify(ev1)
- *    hub.notify(ev2)
- *    hub.endBatch()             // flush once
- *
- *  Mix in BroadcastEvent so batched events can expose batchKey / coalesce.
- */
+/* ***************************************************************
+ * Broadcast
+ * =========
+ * Notify listeners of events.
+ **************************************************************** */
 
-/** Defaults: no coalesce. Override batchKey (non-nil) and coalesce as needed. */
+/* ----------------------------------------------------------------
+ * BroadcastEvent
+ *
+ * Optional merge for events in a batch.
+ *   batchKey()      -> value|nil   nil = do not merge
+ *   coalesce(prev)                 combine with the previous same-key event
+ * Default does not merge. Override batchKey to opt in.
+ * ---------------------------------------------------------------- */
+
 class BroadcastEvent {
   batchKey() { return nil }
   coalesce(prev) { }
 }
 
+/* ----------------------------------------------------------------
+ * Broadcaster
+ *
+ * Sends events to listeners.
+ *
+ *    class Sender with Broadcaster { ... }
+ *    class Receiver with Listener { ... }
+ *
+ *    receiver.listen(sender)
+ *    sender.notify(event)       // → receiver.receive(sender, event)
+ *    receiver.ignore(sender)
+ *
+ * Batches delay delivery until endBatch. Same-key events merge
+ * (see BroadcastEvent):
+ *
+ *    sender.beginBatch()
+ *    sender.notify(ev1)
+ *    sender.notify(ev2)
+ *    sender.endBatch()          // flush once
+ *
+ *   subscribe(listener) / unsubscribe(listener)
+ *   notify(event)               deliver now, or queue inside a batch
+ *   beginBatch() / endBatch()
+ * ---------------------------------------------------------------- */
+
 class Broadcaster {
   _broadcasterInit() {
     self.listeners = []
     self._batchDepth = 0
-    self._pending = []       // delivery order (non-keyed + first-seen keys)
-    self._pendingByKey = Dictionary()  // batchKey → event (keyed coalesce)
+    self._pending = []                 // events waiting to be delivered
+    self._pendingByKey = Dictionary()  // batchKey → event
   }
 
   subscribe(listener) {
@@ -43,8 +63,7 @@ class Broadcaster {
     self._batchDepth += 1
   }
 
-  /** Flush pending when outermost batch ends. Nested notify during flush is
-   *  re-queued (depth held > 0) and drained before returning. */
+  // Deliver queued events when the outermost batch ends.
   endBatch() {
     if (self._batchDepth <= 0) return
     self._batchDepth -= 1
@@ -61,8 +80,6 @@ class Broadcaster {
     }
   }
 
-  /** Queue while batching; deliver immediately otherwise.
-   *  Events use BroadcastEvent: nil batchKey → append; non-nil → replace by key. */
   notify(event) {
     if (self._batchDepth > 0) {
       var key = event.batchKey()
@@ -87,7 +104,7 @@ class Broadcaster {
     }
   }
 
-  /** Snapshot listeners so receive may subscribe/unsubscribe safely. */
+  // Clone the list so receive may subscribe or unsubscribe.
   _deliver(event) {
     var ls = self.listeners.clone()
     for (l in ls) {
@@ -95,6 +112,14 @@ class Broadcaster {
     }
   }
 }
+
+/* ----------------------------------------------------------------
+ * Listener
+ *
+ * Receives events from a Broadcaster.
+ *   listen(sender) / ignore(sender)
+ *   receive(sender, event)     override; default does nothing
+ * ---------------------------------------------------------------- */
 
 class Listener {
   listen(broadcaster) {

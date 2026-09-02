@@ -1,7 +1,23 @@
-/** Cross-platform font lookup for Show and POV-Ray. */
+/* ***************************************************************
+ * Fonts
+ * =====
+ * Cross-platform font lookup.
+ **************************************************************** */
 
-/** Resolve font files and common font roles across platforms.
- *  Returns a font *name* for `Text(..., font=...)`, or nil → Show default. */
+/* ----------------------------------------------------------------
+ * FontFinder
+ *
+ * Resolve font files and common font roles across platforms.
+ * find returns a filesystem path; pick/default/symbol/cjk return a
+ * font *name* for Text(..., font=...), or nil (Show then uses its default).
+ *
+ *   find(font)        -> String|nil   path to .ttf/.ttc
+ *   pick(candidates)  -> String|nil   first name that resolves here
+ *   default()         -> String|nil   body face (Helvetica / arial / FreeSans)
+ *   symbol()          -> String|nil   math / emoji / symbol coverage
+ *   cjk()             -> String|nil   CJK body face
+ * ---------------------------------------------------------------- */
+
 class FontFinder {
   init() { }
 
@@ -34,7 +50,6 @@ class FontFinder {
     return nil
   }
 
-  /** Filesystem path for a font name, or nil. */
   find(font) {
     for (folder in self.folders()) {
       var found = self.search(folder, font)
@@ -43,7 +58,6 @@ class FontFinder {
     return nil
   }
 
-  /** First candidate that resolves on this machine, else nil. */
   pick(candidates) {
     for (name in candidates) {
       if (self.find(name)) return name
@@ -51,7 +65,6 @@ class FontFinder {
     return nil
   }
 
-  /** Platform default body face (Helvetica / arial / FreeSans). */
   default() {
     var platform = System.platform()
     if (platform=="macos") {
@@ -62,12 +75,10 @@ class FontFinder {
     return self.pick(("DejaVuSans", "FreeSans", "LiberationSans", "NimbusSans-Regular", "Ubuntu-R"))
   }
 
-  /** Math / emoji / symbol coverage when available. */
   symbol() {
     return self.pick(("Apple Symbols", "seguisym", "DejaVuSans", "FreeSans", "Symbola"))
   }
 
-  /** CJK body face when available. */
   cjk() {
     return self.pick(("Hiragino Sans GB", "msyh", "NotoSansCJK-Regular", "NotoSansCJKjp-Regular", "TakaoPGothic"))
   }
