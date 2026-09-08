@@ -149,7 +149,6 @@ class Show {
     if (isWindows) {
       system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}'\"")
     } else {
-      // 1/7/25 Redirect error output to /dev/null
       system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
     }
   }

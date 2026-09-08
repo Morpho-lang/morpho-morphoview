@@ -83,7 +83,7 @@ typedef struct {
         
         struct {
             float rgba[4];
-            int use_uniform; /* 1 = geometry uses uColor; text always uses rgb */
+            int use_uniform; /* 1 = uniform-albedo program (no vColor); text always uses rgb */
         } color;
 
         struct {
@@ -110,8 +110,7 @@ typedef struct {
     GLint lightPos;
     GLint lightColor;
     GLint ambientColor;
-    GLint uColor;
-    GLint uUseUniform;
+    GLint uColor; /* Uniform-albedo program only; -1 on the vertex-color program */
     GLint uFlat;
     GLint ka;
     GLint kd;
@@ -148,9 +147,11 @@ DECLARE_VARRAY(rendertdraw, rendertdraw)
 
 /** Renderer object. */
 typedef struct {
-    GLuint shader;
+    GLuint shader; /* Vertex-color program (vColor / vAlpha) */
+    GLuint shader_unif; /* Uniform-albedo program; no vColor (xn + C) */
     GLuint textshader;
     renderuniforms uniforms;
+    renderuniforms uniforms_unif;
     rendertextuniforms textuniforms;
     varray_renderobject objects;
     varray_renderfont fonts;
@@ -160,6 +161,7 @@ typedef struct {
     GLuint fontvao;
     GLuint fontvbo;
     mat4x4 frameview; /* view matrix for the current frame (normalMatrix) */
+    mat4x4 frameproj; /* projection matrix for the current frame */
 } renderer;
 
 bool render_init(renderer *r);

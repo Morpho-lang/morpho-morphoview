@@ -68,7 +68,12 @@ void command_applyctx_init(command_applyctx *ctx) {
     command_reset_colorstamp(ctx);
 }
 
-/** Resolve the current batch's `C` into a stamp for `d` / `T`. */
+/** Resolve `C` for this `d` / `T`, then consume it.
+ *  Show emits `C` immediately before each draw; `d` without a preceding `C`
+ *  preserves the slot. If the stamp were left active, a later pose-only `d` in
+ *  the same process() batch (View `ok` is parse-ack; moves can queue before
+ *  apply) would inherit a leftover CLEAR from a vertex-color mesh and wipe a
+ *  uniform translucent `xn` color — the boing shadow going white. */
 static void command_draw_colorstamp(command_applyctx *ctx, bool *stamp_color, int *colorid) {
     if (ctx->colorstamp==COLORSTAMP_SET) {
         *stamp_color=true;
@@ -80,6 +85,7 @@ static void command_draw_colorstamp(command_applyctx *ctx, bool *stamp_color, in
         *stamp_color=false;
         *colorid=SCENE_EMPTY;
     }
+    command_reset_colorstamp(ctx);
 }
 
 /** Sticky apply context across command_process batches (follow-up chunks may omit `S`). */
@@ -674,8 +680,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
  * @returns number applied before an error, or the full batch count */
 int command_process(void) {
     command_applyctx *ctx = command_sticky_applyctx();
-    /* Per-batch color selection: pose-only `d` must not stamp a stale `C`
-     * from a previous ZMQ chunk (e.g. after recolor). */
+    /* Drop a `C` that arrived with no following `d`/`T` in this chunk. */
     command_reset_colorstamp(ctx);
 
     /* Steal the queue under the lock so apply (GL) does not block the I/O thread. */

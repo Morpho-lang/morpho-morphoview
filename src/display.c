@@ -277,10 +277,18 @@ display *display_open(scene *s) {
     glfwSetWindowUserPointer(window, new);
     
     if (!gladLoadGLLoader((GLADloadproc) glfwGetProcAddress)) {
-        fprintf(stderr, "morphoview: Failed to initialize GLAD");
+        fprintf(stderr, "morphoview: Failed to initialize GLAD\n");
+        glfwDestroyWindow(window);
+        free(new);
+        return NULL;
     }
-    
-    render_init(&new->render);
+
+    if (!render_init(&new->render)) {
+        fprintf(stderr, "morphoview: renderer init failed\n");
+        glfwDestroyWindow(window);
+        free(new);
+        return NULL;
+    }
     new->window=window;
     
     display_add(new);

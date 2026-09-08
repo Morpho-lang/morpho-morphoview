@@ -27,11 +27,55 @@ DEFINE_VARRAY(rendertdraw, rendertdraw)
  * Shaders
  * ------------------------------------------------------- */
 
-/* Geometry: OpenGL/VTK Phong when uFlat==0 (Lambert when ks=0); unlit albedo when uFlat!=0.
- * Lighting and normals in view space; normalMatrix = inverseTranspose(view*model). */
+/* Two geometry programs: vertex-color (xnc / xnca) never reads uColor; uniform-albedo
+ * (xn + C) never declares vColor. A GLSL `if (uUseUniform)` can compile as mix() and
+ * let a disabled generic attrib (often white) poison translucent C draws on Apple GL. */
 
 #define MV_STR(x) MV_XSTR(x)
 #define MV_XSTR(x) #x
+
+#define RENDER_PHONG_TAIL \
+    "   if (uFlat != 0) {\n" \
+    "       FragColor = vec4(albedo, alpha);\n" \
+    "       return;\n" \
+    "   }\n" \
+    "   vec3 norm = normalize(normal);\n" \
+    "   if (!gl_FrontFacing) norm = -norm;\n" \
+    "   vec3 viewDir = vec3(0.0, 0.0, 1.0);\n" \
+    "   vec3 lit = ka * ambientColor;\n" \
+    "   int n = nLights;\n" \
+    "   if (n > MAX_LIGHTS) n = MAX_LIGHTS;\n" \
+    "   for (int i = 0; i < MAX_LIGHTS; i++) {\n" \
+    "       if (i >= n) break;\n" \
+    "       vec4 lp = lightPos[i];\n" \
+    "       vec3 Lvec = (lp.w < 0.5) ? lp.xyz : (lp.xyz - fragPos);\n" \
+    "       float llen = length(Lvec);\n" \
+    "       if (llen < 1e-8) continue;\n" \
+    "       vec3 lightDir = Lvec / llen;\n" \
+    "       float NdotL = max(dot(norm, lightDir), 0.0);\n" \
+    "       vec3 C = lightColor[i].rgb;\n" \
+    "       vec3 diffuse = kd * NdotL * C;\n" \
+    "       vec3 reflectDir = reflect(-lightDir, norm);\n" \
+    "       float spec = pow(max(dot(viewDir, reflectDir), 0.0), max(shininess, 1e-4));\n" \
+    "       vec3 specular = ks * spec * C;\n" \
+    "       lit += diffuse + specular;\n" \
+    "   }\n" \
+    "   FragColor = vec4(lit * albedo, alpha);\n"
+
+#define RENDER_FRAG_LIGHT_UNIFORMS \
+    "#define MAX_LIGHTS " MV_STR(SCENE_MAX_LIGHTS) "\n" \
+    "out vec4 FragColor;\n" \
+    "in vec3 fragPos;\n" \
+    "in vec3 normal;\n" \
+    "uniform int nLights;\n" \
+    "uniform vec4 lightPos[MAX_LIGHTS];\n" \
+    "uniform vec4 lightColor[MAX_LIGHTS];\n" \
+    "uniform vec3 ambientColor;\n" \
+    "uniform int uFlat;\n" \
+    "uniform float ka;\n" \
+    "uniform float kd;\n" \
+    "uniform float ks;\n" \
+    "uniform float shininess;\n"
 
 const char *vertexshader =
     "#version 330 core\n"
@@ -59,60 +103,44 @@ const char *vertexshader =
 
 const char *fragmentshader =
     "#version 330 core\n"
-    "#define MAX_LIGHTS " MV_STR(SCENE_MAX_LIGHTS) "\n"
-    "out vec4 FragColor;\n"
+    RENDER_FRAG_LIGHT_UNIFORMS
     "in vec3 fragColor;\n"
-    "in vec3 fragPos;\n"
-    "in vec3 normal;\n"
     "in float fragAlpha;\n"
-    "uniform int nLights;\n"
-    "uniform vec4 lightPos[MAX_LIGHTS];\n"
-    "uniform vec4 lightColor[MAX_LIGHTS];\n"
-    "uniform vec3 ambientColor;\n"
-    "uniform vec4 uColor;\n"
-    "uniform int uUseUniform;\n"
-    "uniform int uFlat;\n"
-    "uniform float ka;\n"
-    "uniform float kd;\n"
-    "uniform float ks;\n"
-    "uniform float shininess;\n"
     "\n"
     "void main() {\n"
-    "   vec3 albedo;\n"
-    "   float alpha;\n"
-    "   if (uUseUniform != 0) {\n"
-    "       albedo = uColor.rgb;\n"
-    "       alpha = uColor.a;\n"
-    "   } else {\n"
-    "       albedo = fragColor;\n"
-    "       alpha = fragAlpha;\n"
-    "   }\n"
-    "   if (uFlat != 0) {\n"
-    "       FragColor = vec4(albedo, alpha);\n"
-    "       return;\n"
-    "   }\n"
-    "   vec3 norm = normalize(normal);\n"
-    "   if (!gl_FrontFacing) norm = -norm;\n"
-    "   vec3 viewDir = vec3(0.0, 0.0, 1.0);\n"
-    "   vec3 lit = ka * ambientColor;\n"
-    "   int n = nLights;\n"
-    "   if (n > MAX_LIGHTS) n = MAX_LIGHTS;\n"
-    "   for (int i = 0; i < MAX_LIGHTS; i++) {\n"
-    "       if (i >= n) break;\n"
-    "       vec4 lp = lightPos[i];\n"
-    "       vec3 Lvec = (lp.w < 0.5) ? lp.xyz : (lp.xyz - fragPos);\n"
-    "       float llen = length(Lvec);\n"
-    "       if (llen < 1e-8) continue;\n"
-    "       vec3 lightDir = Lvec / llen;\n"
-    "       float NdotL = max(dot(norm, lightDir), 0.0);\n"
-    "       vec3 C = lightColor[i].rgb;\n"
-    "       vec3 diffuse = kd * NdotL * C;\n"
-    "       vec3 reflectDir = reflect(-lightDir, norm);\n"
-    "       float spec = pow(max(dot(viewDir, reflectDir), 0.0), max(shininess, 1e-4));\n"
-    "       vec3 specular = ks * spec * C;\n"
-    "       lit += diffuse + specular;\n"
-    "   }\n"
-    "   FragColor = vec4(lit * albedo, alpha);\n"
+    "   vec3 albedo = fragColor;\n"
+    "   float alpha = fragAlpha;\n"
+    RENDER_PHONG_TAIL
+    "}\n";
+
+/* Uniform albedo: vPos + vNormal only. Location 2 matches VAO layout (c is location 1). */
+const char *vertexshader_unif =
+    "#version 330 core\n"
+    "layout (location = 0) in vec3 vPos;\n"
+    "layout (location = 2) in vec3 vNormal;\n"
+    "out vec3 fragPos;\n"
+    "out vec3 normal;\n"
+    "uniform mat4 model;\n"
+    "uniform mat4 view;\n"
+    "uniform mat4 proj;\n"
+    "uniform mat3 normalMatrix;\n"
+    "\n"
+    "void main() {\n"
+    "   vec4 viewPos4 = view * model * vec4(vPos, 1.0);\n"
+    "   gl_Position = proj * viewPos4;\n"
+    "   fragPos = viewPos4.xyz;\n"
+    "   normal = normalMatrix * vNormal;\n"
+    "}\n";
+
+const char *fragmentshader_unif =
+    "#version 330 core\n"
+    RENDER_FRAG_LIGHT_UNIFORMS
+    "uniform vec4 uColor;\n"
+    "\n"
+    "void main() {\n"
+    "   vec3 albedo = uColor.rgb;\n"
+    "   float alpha = uColor.a;\n"
+    RENDER_PHONG_TAIL
     "}\n";
 
 /* Text shader */
@@ -200,28 +228,27 @@ bool render_compileprogram(const char *vertexshadersource, const char *fragments
 }
 
 /** Cache geometry-program uniform locations after a successful link. */
-static bool render_cacheuniforms(renderer *r) {
-    GLuint p = r->shader;
-    r->uniforms.model = glGetUniformLocation(p, "model");
-    r->uniforms.view = glGetUniformLocation(p, "view");
-    r->uniforms.proj = glGetUniformLocation(p, "proj");
-    r->uniforms.normalMatrix = glGetUniformLocation(p, "normalMatrix");
-    r->uniforms.nLights = glGetUniformLocation(p, "nLights");
-    r->uniforms.lightPos = glGetUniformLocation(p, "lightPos");
-    r->uniforms.lightColor = glGetUniformLocation(p, "lightColor");
-    r->uniforms.ambientColor = glGetUniformLocation(p, "ambientColor");
-    r->uniforms.uColor = glGetUniformLocation(p, "uColor");
-    r->uniforms.uUseUniform = glGetUniformLocation(p, "uUseUniform");
-    r->uniforms.uFlat = glGetUniformLocation(p, "uFlat");
-    r->uniforms.ka = glGetUniformLocation(p, "ka");
-    r->uniforms.kd = glGetUniformLocation(p, "kd");
-    r->uniforms.ks = glGetUniformLocation(p, "ks");
-    r->uniforms.shininess = glGetUniformLocation(p, "shininess");
-    if (r->uniforms.model<0 || r->uniforms.view<0 || r->uniforms.proj<0 ||
-        r->uniforms.normalMatrix<0 || r->uniforms.ambientColor<0 ||
-        r->uniforms.uColor<0 || r->uniforms.uUseUniform<0 || r->uniforms.uFlat<0 ||
-        r->uniforms.nLights<0 || r->uniforms.lightPos<0 || r->uniforms.lightColor<0 ||
-        r->uniforms.ka<0 || r->uniforms.kd<0 || r->uniforms.ks<0 || r->uniforms.shininess<0) {
+static bool render_cachegeomuniforms(GLuint p, renderuniforms *u, bool need_ucolor) {
+    u->model = glGetUniformLocation(p, "model");
+    u->view = glGetUniformLocation(p, "view");
+    u->proj = glGetUniformLocation(p, "proj");
+    u->normalMatrix = glGetUniformLocation(p, "normalMatrix");
+    u->nLights = glGetUniformLocation(p, "nLights");
+    u->lightPos = glGetUniformLocation(p, "lightPos");
+    u->lightColor = glGetUniformLocation(p, "lightColor");
+    u->ambientColor = glGetUniformLocation(p, "ambientColor");
+    u->uColor = glGetUniformLocation(p, "uColor");
+    u->uFlat = glGetUniformLocation(p, "uFlat");
+    u->ka = glGetUniformLocation(p, "ka");
+    u->kd = glGetUniformLocation(p, "kd");
+    u->ks = glGetUniformLocation(p, "ks");
+    u->shininess = glGetUniformLocation(p, "shininess");
+    if (u->model<0 || u->view<0 || u->proj<0 ||
+        u->normalMatrix<0 || u->ambientColor<0 ||
+        u->uFlat<0 ||
+        u->nLights<0 || u->lightPos<0 || u->lightColor<0 ||
+        u->ka<0 || u->kd<0 || u->ks<0 || u->shininess<0 ||
+        (need_ucolor && u->uColor<0)) {
         fprintf(stderr, "morphoview: geometry shader is missing a lighting/color uniform\n");
         return false;
     }
@@ -342,35 +369,56 @@ static void render_uploadlights(renderer *r, scene *s, mat4x4 view) {
     glUniform4fv(r->uniforms.lightPos, SCENE_MAX_LIGHTS, (const GLfloat *) pos);
     glUniform4fv(r->uniforms.lightColor, SCENE_MAX_LIGHTS, (const GLfloat *) color);
     glUniform3fv(r->uniforms.ambientColor, 1, ambient);
+
+    glUseProgram(r->shader_unif);
+    glUniform1i(r->uniforms_unif.nLights, n);
+    glUniform4fv(r->uniforms_unif.lightPos, SCENE_MAX_LIGHTS, (const GLfloat *) pos);
+    glUniform4fv(r->uniforms_unif.lightColor, SCENE_MAX_LIGHTS, (const GLfloat *) color);
+    glUniform3fv(r->uniforms_unif.ambientColor, 1, ambient);
 }
 
 /* -------------------------------------------------------
  * Initialize/finalize display
  * ------------------------------------------------------- */
 
+/** Delete compiled programs (init failure / shutdown). */
+static void render_delete_programs(renderer *r) {
+    if (r->shader) glDeleteProgram(r->shader);
+    if (r->shader_unif) glDeleteProgram(r->shader_unif);
+    if (r->textshader) glDeleteProgram(r->textshader);
+    r->shader=0;
+    r->shader_unif=0;
+    r->textshader=0;
+}
+
 /** Initialize a renderer and compile shaders. */
 bool render_init(renderer *r) {
     r->shader=0;
+    r->shader_unif=0;
     r->textshader=0;
     memset(&r->uniforms, 0, sizeof(r->uniforms));
+    memset(&r->uniforms_unif, 0, sizeof(r->uniforms_unif));
     memset(&r->textuniforms, 0, sizeof(r->textuniforms));
 
     if (!render_compileprogram(vertexshader, fragmentshader, &r->shader)) return false;
-    if (!render_cacheuniforms(r)) {
-        glDeleteProgram(r->shader);
-        r->shader=0;
+    if (!render_cachegeomuniforms(r->shader, &r->uniforms, false)) {
+        render_delete_programs(r);
+        return false;
+    }
+    if (!render_compileprogram(vertexshader_unif, fragmentshader_unif, &r->shader_unif)) {
+        render_delete_programs(r);
+        return false;
+    }
+    if (!render_cachegeomuniforms(r->shader_unif, &r->uniforms_unif, true)) {
+        render_delete_programs(r);
         return false;
     }
     if (!render_compileprogram(textvertexshader, textfragmentshader, &r->textshader)) {
-        glDeleteProgram(r->shader);
-        r->shader=0;
+        render_delete_programs(r);
         return false;
     }
     if (!render_cachetextuniforms(r)) {
-        glDeleteProgram(r->shader);
-        glDeleteProgram(r->textshader);
-        r->shader=0;
-        r->textshader=0;
+        render_delete_programs(r);
         return false;
     }
     
@@ -387,6 +435,7 @@ bool render_init(renderer *r) {
     r->fontvao=0;
     r->fontvbo=0;
     mat3d_identity4x4(r->frameview);
+    mat3d_identity4x4(r->frameproj);
 
     return true;
 }
@@ -429,10 +478,7 @@ void render_reset(renderer *r) {
 void render_clear(renderer *r) {
     render_reset(r);
     varray_rendertdrawclear(&r->tdraws);
-    if (r->shader) glDeleteProgram(r->shader);
-    if (r->textshader) glDeleteProgram(r->textshader);
-    r->shader=0;
-    r->textshader=0;
+    render_delete_programs(r);
 }
 
 
@@ -1064,39 +1110,63 @@ void render_preparescene(renderer *r, scene *s) {
  * Render the scene
  * ------------------------------------------------------- */
 
-/** Upload model and derived normalMatrix. */
-static void render_setmodel(renderer *r, mat4x4 model) {
+/** Bind the vertex-color or uniform-albedo program and upload view/proj. */
+static renderuniforms *render_use_geom(renderer *r, int use_uniform) {
+    renderuniforms *u;
+    if (use_uniform) {
+        glUseProgram(r->shader_unif);
+        u = &r->uniforms_unif;
+    } else {
+        glUseProgram(r->shader);
+        u = &r->uniforms;
+    }
+    glUniformMatrix4fv(u->view, 1, GL_FALSE, r->frameview);
+    glUniformMatrix4fv(u->proj, 1, GL_FALSE, r->frameproj);
+    return u;
+}
+
+/** Upload model and derived normalMatrix to the bound geometry program. */
+static void render_setmodel(renderer *r, renderuniforms *u, mat4x4 model) {
     mat4x4 vm;
     mat3x3 nmat;
     mat3d_mul4x4(r->frameview, model, vm);
     render_normalmatrix(vm, nmat);
-    glUniformMatrix4fv(r->uniforms.model, 1, GL_FALSE, model);
-    glUniformMatrix3fv(r->uniforms.normalMatrix, 1, GL_FALSE, nmat);
+    glUniformMatrix4fv(u->model, 1, GL_FALSE, model);
+    glUniformMatrix3fv(u->normalMatrix, 1, GL_FALSE, nmat);
 }
 
-/** Bind view and projection uniforms. */
-static void render_bind_viewproj(renderer *r, mat4x4 view, mat4x4 proj) {
-    glUseProgram(r->shader);
-    glUniformMatrix4fv(r->uniforms.view, 1, GL_FALSE, view);
-    glUniformMatrix4fv(r->uniforms.proj, 1, GL_FALSE, proj);
-}
-
-/** Upload geometry-program uniforms (lights already bound for the frame). */
-static void render_setgeometryuniforms(renderer *r, mat4x4 view, mat4x4 proj,
-                                       mat4x4 model, float *ucolor, int use_uniform, int uflat,
-                                       float ka, float kd, float ks, float shininess) {
-    renderuniforms *u = &r->uniforms;
-    glUseProgram(r->shader);
-    glUniformMatrix4fv(u->view, 1, GL_FALSE, view);
-    glUniformMatrix4fv(u->proj, 1, GL_FALSE, proj);
-    render_setmodel(r, model);
-    glUniform4fv(u->uColor, 1, ucolor);
-    glUniform1i(u->uUseUniform, use_uniform);
+/** Upload shade coefficients and, on the uniform program, uColor. */
+static void render_bind_material(renderuniforms *u, int uflat, const float rgba[4],
+                                 float ka, float kd, float ks, float shininess) {
     glUniform1i(u->uFlat, uflat);
     glUniform1f(u->ka, ka);
     glUniform1f(u->kd, kd);
     glUniform1f(u->ks, ks);
     glUniform1f(u->shininess, shininess);
+    if (u->uColor>=0) glUniform4fv(u->uColor, 1, rgba);
+}
+
+/** Set generic color/alpha for meshes with those arrays disabled (`xn`, `x`). */
+static void render_set_fallback_attribs(const float rgba[4]) {
+    glVertexAttrib3f(1, rgba[0], rgba[1], rgba[2]);
+    glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
+    glVertexAttrib1f(3, rgba[3]);
+}
+
+/** Bind program, uniforms, and VAO for one geometry draw. */
+static void render_bind_draw(renderer *r, int use_uniform, mat4x4 model,
+                             int uflat, const float rgba[4],
+                             float ka, float kd, float ks, float shininess,
+                             GLuint vao) {
+    static const float white[4]={1.0f, 1.0f, 1.0f, 1.0f};
+    const float *fb = use_uniform ? rgba : white;
+    renderuniforms *u = render_use_geom(r, use_uniform);
+    render_setmodel(r, u, model);
+    render_bind_material(u, uflat, rgba, ka, kd, ks, shininess);
+    /* Apple Core Profile may snapshot generics at VAO bind; set before and after. */
+    render_set_fallback_attribs(fb);
+    if (vao) glBindVertexArray(vao);
+    render_set_fallback_attribs(fb);
 }
 
 #define RENDER_OPAQUE_ALPHA_EPS 0.999f
@@ -1131,13 +1201,6 @@ static void render_geostate_reset(rendergeostate *st) {
     st->use_uniform=0;
     st->uflat=0;
     st->curvao=0;
-}
-
-/** Set generic color/alpha for meshes with those arrays disabled (`xn`, `x`). */
-static void render_set_fallback_attribs(const float rgba[4]) {
-    glVertexAttrib3f(1, rgba[0], rgba[1], rgba[2]);
-    glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
-    glVertexAttrib1f(3, rgba[3]);
 }
 
 /** Local-space AABB center of object positions.
@@ -1211,18 +1274,9 @@ static int render_tdraw_cmp(const void *a, const void *b) {
 
 /** Draw a transparent packet; closed meshes get back faces then front. */
 static void render_draw_tdraw(renderer *r, rendertdraw *d) {
-    glUseProgram(r->shader);
-    render_setmodel(r, d->model);
-    glUniform4fv(r->uniforms.uColor, 1, d->rgba);
-    glUniform1i(r->uniforms.uUseUniform, d->use_uniform);
-    glUniform1i(r->uniforms.uFlat, d->uflat);
-    glUniform1f(r->uniforms.ka, d->ka);
-    glUniform1f(r->uniforms.kd, d->kd);
-    glUniform1f(r->uniforms.ks, d->ks);
-    glUniform1f(r->uniforms.shininess, d->shininess);
+    render_bind_draw(r, d->use_uniform, d->model, d->uflat, d->rgba,
+                     d->ka, d->kd, d->ks, d->shininess, d->vao);
     if (!d->vao) return;
-    glBindVertexArray(d->vao);
-    render_set_fallback_attribs(d->rgba);
     if (d->mode==GL_TRIANGLES) {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_FRONT);
@@ -1266,18 +1320,11 @@ typedef enum {
 } rendergeopass;
 
 /** Walk the geometry renderlist, drawing opaque or collecting transparent. */
-static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj,
-                                 rendergeopass pass) {
+static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, rendergeopass pass) {
     rendergeostate st;
     render_geostate_reset(&st);
 
-    if (pass==RENDER_PASS_OPAQUE) {
-        render_setgeometryuniforms(r, view, proj, st.model,
-                                   st.ucolor, st.use_uniform, st.uflat,
-                                   st.ka, st.kd, st.ks, st.shininess);
-    } else {
-        r->tdraws.count=0;
-    }
+    if (pass!=RENDER_PASS_OPAQUE) r->tdraws.count=0;
 
     for (unsigned i=0; i<r->renderlist.count; i++) {
         renderinstruction *ins=&r->renderlist.data[i];
@@ -1291,10 +1338,6 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
                 st.ks=ins->data.shade.ks;
                 st.shininess=ins->data.shade.shininess;
                 st.uflat=(ins->data.shade.mode==SCENE_SHADE_FLAT) ? 1 : 0;
-                if (pass==RENDER_PASS_OPAQUE)
-                    render_setgeometryuniforms(r, view, proj, st.model,
-                                               st.ucolor, st.use_uniform, st.uflat,
-                                               st.ka, st.kd, st.ks, st.shininess);
                 break;
             case RCOLOR:
                 st.ucolor[0]=ins->data.color.rgba[0];
@@ -1302,18 +1345,12 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
                 st.ucolor[2]=ins->data.color.rgba[2];
                 st.ucolor[3]=ins->data.color.rgba[3];
                 st.use_uniform=ins->data.color.use_uniform;
-                if (pass==RENDER_PASS_OPAQUE) {
-                    glUniform4fv(r->uniforms.uColor, 1, st.ucolor);
-                    glUniform1i(r->uniforms.uUseUniform, st.use_uniform);
-                }
                 break;
             case RMODEL:
                 memcpy(st.model, ins->data.model.model, sizeof(mat4x4));
-                if (pass==RENDER_PASS_OPAQUE) render_setmodel(r, st.model);
                 break;
             case RARRAY:
                 st.curvao=ins->data.array.handle;
-                if (pass==RENDER_PASS_OPAQUE) glBindVertexArray(st.curvao);
                 break;
             case RTRIANGLES:
             case RLINES:
@@ -1324,19 +1361,10 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
                 const char *fmt = (ins->obj && ins->obj->obj) ? ins->obj->obj->vertexdata.format : NULL;
                 bool trans=render_is_transparent(use_uniform, alpha, fmt);
                 if (pass==RENDER_PASS_OPAQUE && !trans) {
-                    /* Force GPU color even if a prior uniform C left uUseUniform set. */
-                    glUniform1i(r->uniforms.uFlat, st.uflat);
-                    glUniform1i(r->uniforms.uUseUniform, use_uniform);
-                    if (use_uniform==0) {
-                        float one[4]={1.0f,1.0f,1.0f,1.0f};
-                        glUniform4fv(r->uniforms.uColor, 1, one);
-                        render_set_fallback_attribs(one);
-                    } else {
-                        glUniform4fv(r->uniforms.uColor, 1, st.ucolor);
-                        render_set_fallback_attribs(st.ucolor);
-                    }
                     GLenum mode=(ins->instruction==RTRIANGLES) ? GL_TRIANGLES :
                                 (ins->instruction==RLINES) ? GL_LINES : GL_POINTS;
+                    render_bind_draw(r, use_uniform, st.model, st.uflat, st.ucolor,
+                                     st.ka, st.kd, st.ks, st.shininess, st.curvao);
                     glDrawElements(mode, ins->data.triangles.length, GL_UNSIGNED_INT,
                                    ins->data.triangles.offset);
                 } else if (pass==RENDER_PASS_COLLECT_TRANSPARENT && trans) {
@@ -1371,10 +1399,11 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     mat3d_copy4x4(view, r->frameview);
-    render_uploadlights(r, s, view);
 
     mat4x4 proj;
     mat3d_ortho(NULL, proj, -1.0*aspectratio, 1.0*aspectratio, -1.0, 1.0, near, far);
+    mat3d_copy4x4(proj, r->frameproj);
+    render_uploadlights(r, s, view);
 
     mat4x4 model;
     mat3d_identity4x4(model);
@@ -1385,15 +1414,14 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     /* --- Opaque pass: display-list order, depth write on, no blending --- */
     glDepthMask(GL_TRUE);
     glDisable(GL_BLEND);
-    render_walk_geometry(r, s, view, proj, RENDER_PASS_OPAQUE);
+    render_walk_geometry(r, s, view, RENDER_PASS_OPAQUE);
 
     /* --- Transparent pass: collect, sort far→near by centroid view-z, draw --- */
     glEnable(GL_BLEND);
     glDepthMask(GL_FALSE);
-    if (render_walk_geometry(r, s, view, proj, RENDER_PASS_COLLECT_TRANSPARENT) &&
+    if (render_walk_geometry(r, s, view, RENDER_PASS_COLLECT_TRANSPARENT) &&
         r->tdraws.count>0) {
         qsort(r->tdraws.data, r->tdraws.count, sizeof(rendertdraw), render_tdraw_cmp);
-        render_bind_viewproj(r, view, proj);
         for (unsigned i=0; i<r->tdraws.count; i++) render_draw_tdraw(r, &r->tdraws.data[i]);
     }
 
