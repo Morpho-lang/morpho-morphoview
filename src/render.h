@@ -4,7 +4,6 @@
  *  @brief OpenGL rendering
  */
 
-
 #ifndef render_h
 #define render_h
 
@@ -19,12 +18,7 @@
 
 DECLARE_VARRAY(GLuint, GLuint)
 
-/** @brief Structure to hold information about OpenGL buffers.
- *  @details Each of these includes several types of OpenGL buffer:
- *  - a vertex array object that saves OpenGL state (e.g. the structure of the vertex buffer) for swift use.
- *  - a vertex buffer object to hold vertex and attribute data.
- *  - element array buffer to hold draw instruction lists.
- * The renderer consolidates objects and references into as few OpenGL objects as possible. */
+/** OpenGL VAO, VBO and element buffer for one object's vertices. */
 typedef struct {
     char *format;
     GLuint array; /* Handle for vertex array object */
@@ -36,9 +30,7 @@ typedef struct {
 
 DECLARE_VARRAY(renderglbuffers, renderglbuffers)
 
-/** @brief An object to be rendered
- *  @details Refers to an OpenGL buffer by index into the renderer's glbuffers
- *  varray (not a raw pointer — that varray reallocates as formats are added). */
+/** A scene object bound to a GL buffer (index, not a raw pointer — the varray reallocates). */
 typedef struct {
     gobject *obj; /* The original object */
     int bufferindex; /* Index into renderer.glbuffers, or -1 if unset */
@@ -48,15 +40,15 @@ typedef struct {
 
 DECLARE_VARRAY(renderobject, renderobject)
 
-/** @brief A font to be used */
+/** Font with an uploaded atlas texture. */
 typedef struct {
     textfont *font;
-    GLuint texture;
+    GLuint texture; /* Handle for atlas texture */
 } renderfont;
 
 DECLARE_VARRAY(renderfont, renderfont)
 
-/** @brief Render instructions */
+/** One packed render-list instruction. */
 typedef struct {
     enum {
         RNOP,
@@ -135,7 +127,7 @@ typedef struct {
     GLint textColor;
 } rendertextuniforms;
 
-/** Baked transparent draw with state needed to replay out of list order. */
+/** Transparent draw replayed after the opaque pass (sorted far to near). */
 typedef struct {
     GLenum mode;
     int length;
@@ -175,8 +167,7 @@ void render_reset(renderer *r); /**< Drop GL geometry; keep shaders */
 void render_clear(renderer *r);
 
 void render_preparescene(renderer *r, scene *s);
-/** Upload same-length vertex data for @p objectid into an existing VBO.
- *  Returns false if no prepared buffer exists (caller should full-prepare). */
+/** Upload same-length vertex data; false if no prepared buffer exists. */
 bool render_updateobjectvertices(renderer *r, scene *s, int objectid);
 void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s);
 

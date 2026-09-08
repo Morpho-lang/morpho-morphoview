@@ -15,9 +15,7 @@
 #define DET3(a,b,c, d,e,f, g,h,i) \
     ((a)*((e)*(i)-(f)*(h)) - (b)*((d)*(i)-(f)*(g)) + (c)*((d)*(h)-(e)*(g)))
 
-/** @brief Normalizes a vector
- * @param[in] in - input vector
- * @param[out] out - output vector. */
+/** Normalize a vector; out may alias in. */
 void mat3d_vectornormalize(vec3 in, vec3 out) {
     float norm = sqrtf(in[0]*in[0] + in[1]*in[1] + in[2]*in[2]);
     if (norm>EPS) norm = 1.0f/norm;
@@ -25,8 +23,7 @@ void mat3d_vectornormalize(vec3 in, vec3 out) {
     out[0] *= norm; out[1] *= norm; out[2] *= norm;
 }
 
-/** @brief Stores the identity matrix in out.
- * @param[out] out - output matrix. */
+/** Store the 4x4 identity in out. */
 void mat3d_identity4x4(mat4x4 out) {
     static const float ident[] = { 1.0f, 0.0f, 0.0f, 0.0f,
                                    0.0f, 1.0f, 0.0f, 0.0f,
@@ -35,8 +32,7 @@ void mat3d_identity4x4(mat4x4 out) {
     memcpy(out, ident, sizeof(ident));
 }
 
-/** @brief Stores the identity matrix in out.
- * @param[out] out - output matrix. */
+/** Store the 3x3 identity in out. */
 void mat3d_identity3x3(mat3x3 out) {
     static const float ident[] = { 1.0f, 0.0f, 0.0f,
                                    0.0f, 1.0f, 0.0f,
@@ -44,11 +40,7 @@ void mat3d_identity3x3(mat3x3 out) {
     memcpy(out, ident, sizeof(ident));
 }
 
-/** @brief Multiply out = a*b
- * @param[in] a input matrix
- * @param[in] b input matrix
- * @param[out] out filled with a*b
- * @warning: out must be distinct from a and b */
+/** Multiply 4x4 matrices: out = a*b. out must be distinct from a and b. */
 void mat3d_mul4x4(mat4x4 a, mat4x4 b, mat4x4 out) {
     for (unsigned int col=0; col<4; col++) {
         for (unsigned int row=0; row<4; row++) {
@@ -58,11 +50,7 @@ void mat3d_mul4x4(mat4x4 a, mat4x4 b, mat4x4 out) {
     }
 }
 
-/** @brief Multiply: out = a*b
- * @param[in] a input matrix
- * @param[in] b input matrix
- * @param[out] out filled with a*b
- * @warning: out must be distinct from a and b */
+/** Multiply 3x3 matrices: out = a*b. out must be distinct from a and b. */
 void mat3d_mul3x3(mat3x3 a, mat3x3 b, mat3x3 out) {
     for (unsigned int col=0; col<3; col++) {
         for (unsigned int row=0; row<3; row++) {
@@ -71,26 +59,18 @@ void mat3d_mul3x3(mat3x3 a, mat3x3 b, mat3x3 out) {
     }
 }
 
-/** @brief Add with scale: out = a + alpha*b
- * @param[in] a input matrix
- * @param[in] alpha scale factor for b
- * @param[in] b input matrix
- * @param[out] out filled with a + alpha*b; a and out may alias */
+/** out = a + alpha*b; a and out may alias. */
 void mat3d_addscale3x3(mat3x3 a, float alpha, mat3x3 b, mat3x3 out) {
     if (a!=out) memcpy(out, a, sizeof(float)*9);
     for (unsigned int i=0; i<9; i++) out[i] += alpha*b[i];
 }
 
-/** @brief Copy: out = a
- * @param[in] a input matrix
- * @param[out] out filled with a */
+/** Copy a 4x4 matrix: out = a. */
 void mat3d_copy4x4(mat4x4 a, mat4x4 out) {
     memcpy(out, a, sizeof(float)*16);
 }
 
-/** @brief Matrix inversion via cofactors
- * @param[in] a input matrix
- * @param[out] out filled with inverse(a); copy of a if singular */
+/** Invert a 4x4 matrix via cofactors; copies a into out if singular. */
 void mat3d_invert4x4(mat4x4 a, mat4x4 out) {
     /* Adjugate of a in column-major order (transpose of cofactor matrix) */
     float c[16];
@@ -121,9 +101,7 @@ void mat3d_invert4x4(mat4x4 a, mat4x4 out) {
     for (unsigned int i=0; i<16; i++) out[i] = c[i]*id;
 }
 
-/** @brief Convert a 3x3 matrix to a 4x4 matrix
- * @param[in] in input matrix
- * @param[out] out 3x3 block of in embedded in a 4x4 with last row/column [0,0,0,1] */
+/** Embed a 3x3 into a 4x4 (last row/column [0,0,0,1]). */
 void mat3d_lift(mat3x3 in, mat4x4 out) {
     mat4x4 new = { in[0], in[1], in[2], 0.0f, // Col major order!
                    in[3], in[4], in[5], 0.0f,
@@ -132,7 +110,7 @@ void mat3d_lift(mat3x3 in, mat4x4 out) {
     memcpy(out, new, sizeof(new));
 }
 
-/** @brief Print a 3x3 matrix (column-major storage, rows across) */
+/** Print a 3x3 matrix (column-major storage, rows across). */
 void mat3d_print3x3(mat3x3 in) {
     for (unsigned int j=0; j<3; j++) { // row
         printf("[ ");
@@ -143,7 +121,7 @@ void mat3d_print3x3(mat3x3 in) {
     }
 }
 
-/** @brief Print a 4x4 matrix (column-major storage, rows across) */
+/** Print a 4x4 matrix (column-major storage, rows across). */
 void mat3d_print4x4(mat4x4 in) {
     for (unsigned int j=0; j<4; j++) { // row
         printf("[ ");
@@ -154,10 +132,10 @@ void mat3d_print4x4(mat4x4 in) {
     }
 }
 
-/** @brief Translate by a vector
- * @param[in] in input matrix, or NULL to start from the translation alone
- * @param[in] vec translation vector
- * @param[out] out T*in (or T if in is NULL); in and out may alias */
+/** Translate: out = T*in (or T if in is NULL). in and out may alias.
+ * @param[in] in - input matrix, or NULL
+ * @param[in] vec - translation
+ * @param[out] out - result */
 void mat3d_translate(mat4x4 in, vec3 vec, mat4x4 out) {
     mat4x4 tr = { 1.0f, 0.0f, 0.0f, 0.0f, // Col major order!
                   0.0f, 1.0f, 0.0f, 0.0f,
@@ -169,19 +147,13 @@ void mat3d_translate(mat4x4 in, vec3 vec, mat4x4 out) {
     else mat3d_copy4x4(tr, out);
 }
 
-/** @brief Scale uniformly by a factor
- * @param[in] in input matrix, or NULL to start from the scale alone
- * @param[in] scale uniform scale factor
- * @param[out] out S*in (or S if in is NULL); in and out may alias */
+/** Uniform scale: out = S*in (or S if in is NULL). in and out may alias. */
 void mat3d_scale(mat4x4 in, float scale, mat4x4 out) {
     vec3 s = { scale, scale, scale };
     mat3d_scale3(in, s, out);
 }
 
-/** @brief Non-uniform scale
- * @param[in] in input matrix, or NULL to start from the scale alone
- * @param[in] scale per-axis scale factors
- * @param[out] out S*in (or S if in is NULL) where S is diag(sx,sy,sz,1); in and out may alias */
+/** Non-uniform scale: out = S*in (or S if in is NULL). in and out may alias. */
 void mat3d_scale3(mat4x4 in, vec3 scale, mat4x4 out) {
     mat4x4 tr = { scale[0], 0.0f, 0.0f, 0.0f, // Col major order!
                   0.0f, scale[1], 0.0f, 0.0f,
@@ -193,11 +165,11 @@ void mat3d_scale3(mat4x4 in, vec3 scale, mat4x4 out) {
     else mat3d_copy4x4(tr, out);
 }
 
-/** @brief Rotate by angle around an axis (Rodrigues)
- * @param[in] in input matrix, or NULL to start from the rotation alone
- * @param[in] axis rotation axis (normalized internally)
- * @param[in] angle rotation angle in radians
- * @param[out] out R*in (or R if in is NULL); in and out may alias */
+/** Rotate by angle (radians) about axis: out = R*in (or R if in is NULL).
+ * @param[in] in - input matrix, or NULL
+ * @param[in] axis - rotation axis (normalized internally)
+ * @param[in] angle - radians
+ * @param[out] out - result; in and out may alias */
 void mat3d_rotate(mat4x4 in, vec3 axis, float angle, mat4x4 out) {
     vec3 u;
     mat3x3 rot;
@@ -227,10 +199,7 @@ void mat3d_rotate(mat4x4 in, vec3 axis, float angle, mat4x4 out) {
     else mat3d_copy4x4(rot4, out);
 }
 
-/** @brief Orthographic projection matrix
- * @param[in] in input matrix, or NULL to start from the projection alone
- * @param[out] out P*in (or P if in is NULL); in and out may alias
- * @param[in] left,right,bottom,top,near,far view volume bounds */
+/** Orthographic projection: out = P*in (or P if in is NULL). in and out may alias. */
 void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float near, float far) {
     mat4x4 pr = { 2.0f/(right-left), 0.0f, 0.0f, 0.0f, // Col major order!
                   0.0f, 2.0f/(top-bottom), 0.0f, 0.0f,
@@ -244,10 +213,7 @@ void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, f
     else mat3d_copy4x4(pr, out);
 }
 
-/** @brief Perspective projection matrix (frustum)
- * @param[in] in input matrix, or NULL to start from the projection alone
- * @param[out] out P*in (or P if in is NULL); in and out may alias
- * @param[in] left,right,bottom,top,near,far view frustum bounds */
+/** Perspective (frustum) projection: out = P*in (or P if in is NULL). in and out may alias. */
 void mat3d_frustum(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float near, float far) {
     mat4x4 pr = { 2*near/(right-left), 0.0f, 0.0f, 0.0f, // Col major order!
                   0.0f, 2*near/(top-bottom), 0.0f, 0.0f,

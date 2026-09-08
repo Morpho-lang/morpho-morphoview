@@ -31,6 +31,7 @@ static reply_node *reply_head = NULL;
 static reply_node *reply_tail = NULL;
 static MorphoMutex reply_mutex;
 
+/** Enqueue a reply string for the I/O thread. */
 static bool reply_enqueue(const char *msg) {
     if (!msg) return false;
     reply_node *node = malloc(sizeof(reply_node));
@@ -53,6 +54,7 @@ static bool reply_enqueue(const char *msg) {
     return true;
 }
 
+/** Dequeue one reply, or NULL if empty. */
 static char *reply_dequeue(void) {
     MorphoMutex_lock(&reply_mutex);
     reply_node *node = reply_head;
@@ -68,6 +70,7 @@ static char *reply_dequeue(void) {
     return msg;
 }
 
+/** Drain and free the reply queue. */
 static void reply_clear(void) {
     char *msg;
     while ((msg = reply_dequeue()) != NULL) MORPHO_FREE(msg);
@@ -95,6 +98,7 @@ bool listener_reply(const char *msg) {
  * I/O thread
  * ------------------------------------------------------- */
 
+/** Send queued replies on sock. */
 static void listener_process_replies(zsock_t *sock) {
     char *msg;
     while ((msg = reply_dequeue()) != NULL) {
@@ -103,6 +107,7 @@ static void listener_process_replies(zsock_t *sock) {
     }
 }
 
+/** I/O thread: recv ASCII, parse, send ok/err. */
 static MorphoThreadFnReturnType listener_thread_main(void *arg) {
     (void) arg;
 
@@ -169,6 +174,7 @@ static MorphoThreadFnReturnType listener_thread_main(void *arg) {
     return (MorphoThreadFnReturnType) NULL;
 }
 
+/** Start the I/O thread; do_bind selects bind vs connect. */
 static bool listener_start(const char *endpoint, bool do_bind) {
     if (listener_running) {
         fprintf(stderr, "morphoview: Listener already active.\n");

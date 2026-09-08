@@ -78,8 +78,15 @@ const char *fragmentshader =
     "uniform float shininess;\n"
     "\n"
     "void main() {\n"
-    "   vec3 albedo = (uUseUniform != 0) ? uColor.rgb : fragColor;\n"
-    "   float alpha = ((uUseUniform != 0) ? uColor.a : 1.0) * fragAlpha;\n"
+    "   vec3 albedo;\n"
+    "   float alpha;\n"
+    "   if (uUseUniform != 0) {\n"
+    "       albedo = uColor.rgb;\n"
+    "       alpha = uColor.a;\n"
+    "   } else {\n"
+    "       albedo = fragColor;\n"
+    "       alpha = fragAlpha;\n"
+    "   }\n"
     "   if (uFlat != 0) {\n"
     "       FragColor = vec4(albedo, alpha);\n"
     "       return;\n"
@@ -141,11 +148,11 @@ const char *textfragmentshader =
  * Compile shaders
  * ------------------------------------------------------- */
 
-/** Compiles and links shaders
- * @param[in] vertexshadersource - vertex shader
- * @param[in] fragmentshadersource - fragment shader
- * @param[out] program - compiled program id
- * @returns true on success, false if compilation failed */
+/** Compile and link a vertex + fragment shader.
+ * @param[in] vertexshadersource - vertex GLSL
+ * @param[in] fragmentshadersource - fragment GLSL
+ * @param[out] program - linked program id
+ * @returns true on success */
 bool render_compileprogram(const char *vertexshadersource, const char *fragmentshadersource, GLuint *program) {
     int success;
     char infoLog[512];
@@ -236,7 +243,7 @@ static bool render_cachetextuniforms(renderer *r) {
     return true;
 }
 
-/** normalMatrix = transpose(inverse(upper 3x3 of M)), column-major. */
+/** Inverse-transpose of the upper 3x3 of M (column-major). */
 static void render_normalmatrix(mat4x4 m, mat3x3 out) {
     mat4x4 inv;
     mat3d_invert4x4(m, inv);
@@ -271,7 +278,7 @@ static const float render_neutral_color[3][3] = {
     { RENDER_NEUTRAL_INTENSITY, RENDER_NEUTRAL_INTENSITY, RENDER_NEUTRAL_INTENSITY }
 };
 
-/** Copy a view-space directional rig (`w=0`) into the upload buffers. */
+/** Copy a view-space directional rig (w=0) into the upload buffers. */
 static void render_copy_dir_rig(const float dir[][3], const float col[][3], int n,
                                 float pos[SCENE_MAX_LIGHTS][4],
                                 float color[SCENE_MAX_LIGHTS][4]) {
@@ -287,14 +294,14 @@ static void render_copy_dir_rig(const float dir[][3], const float col[][3], int 
     }
 }
 
-/** Transform world xyz by view (column-major); w=1. */
+/** Transform a world-space point by the view matrix (w=1). */
 static void render_view_transform_point(mat4x4 view, const float world[3], float out[3]) {
     out[0]=view[0]*world[0] + view[4]*world[1] + view[8]*world[2]  + view[12];
     out[1]=view[1]*world[0] + view[5]*world[1] + view[9]*world[2]  + view[13];
     out[2]=view[2]*world[0] + view[6]*world[1] + view[10]*world[2] + view[14];
 }
 
-/** Upload nLights / lightPos / lightColor / ambientColor for this frame. */
+/** Upload lighting uniforms for this frame. */
 static void render_uploadlights(renderer *r, scene *s, mat4x4 view) {
     float pos[SCENE_MAX_LIGHTS][4];
     float color[SCENE_MAX_LIGHTS][4];
@@ -341,7 +348,7 @@ static void render_uploadlights(renderer *r, scene *s, mat4x4 view) {
  * Initialize/finalize display
  * ------------------------------------------------------- */
 
-/** Initializes a display, compiling shaders */
+/** Initialize a renderer and compile shaders. */
 bool render_init(renderer *r) {
     r->shader=0;
     r->textshader=0;
@@ -418,6 +425,7 @@ void render_reset(renderer *r) {
     varray_renderinstructioninit(&r->renderlist);
 }
 
+/** Release all renderer GL resources including shaders. */
 void render_clear(renderer *r) {
     render_reset(r);
     varray_rendertdrawclear(&r->tdraws);
@@ -432,11 +440,7 @@ void render_clear(renderer *r) {
  * Text rendering
  * ------------------------------------------------------- */
 
-//GLuint fonttexture;
-//GLuint fontvao;
-//GLuint fontvbo;
-
-/** Creates an OpenGL texture from the texture atlas */
+/** Create an OpenGL texture from a font atlas. */
 void render_fonttexture(renderer *r, textfont *font, GLuint *out) {
     /* Now create an OpenGL texture from this */
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1); // disable byte-alignment restriction
@@ -452,7 +456,7 @@ void render_fonttexture(renderer *r, textfont *font, GLuint *out) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 }
 
-/** Prepare fonts for display */
+/** Upload fonts and allocate the shared text quad VAO. */
 void render_preparefonts(renderer *r, scene *scene) {
     
     for (int i=0; i<scene->fontlist.count; i++) {
@@ -572,7 +576,7 @@ static void render_resolve_color(scene *s, int colorid, float rgba[4], int *use_
     *use_uniform=1;
 }
 
-/** Prepares text for display */
+/** Pack text instructions for one TEXT draw. */
 void render_preparetext(renderer *r, scene *s, gdraw *drw, renderpackstate *st) {
     /* Per-draw-slot uniform albedo when stamped (Phase 5f). */
     if (drw->colorid != SCENE_EMPTY) {
@@ -610,7 +614,7 @@ void render_preparetext(renderer *r, scene *s, gdraw *drw, renderpackstate *st) 
     varray_renderinstructionwrite(&r->renderlist, ins);
 }
 
-/** Draws a text element */
+/** Draw a text string with the given font. */
 void render_rendertext(renderer *r, int rfontid, char *text) {
     textglyph glyph;
     float x=0.0, y=0.0, z=0.0;
@@ -656,7 +660,7 @@ void render_rendertext(renderer *r, int rfontid, char *text) {
     }
 }
 
-/** Renders the texture atlas for a font (for debugging purposes) */
+/** Draw a font atlas (debug). */
 void render_renderfonttextureatlas(renderer *r, int rfontid) {
     renderfont *font = &r->fonts.data[rfontid];
     
@@ -687,7 +691,7 @@ void render_renderfonttextureatlas(renderer *r, int rfontid) {
  * Object rendering
  * ------------------------------------------------------- */
 
-/** Checks if an object is present in the render object list */
+/** Find a render object by scene gobject pointer. */
 renderobject *render_findrenderobject(varray_renderobject *list, gobject *obj) {
     for (unsigned int i=0; i<list->count; i++) {
         if (list->data[i].obj==obj) return &list->data[i];
@@ -695,7 +699,7 @@ renderobject *render_findrenderobject(varray_renderobject *list, gobject *obj) {
     return NULL;
 }
 
-/** Finds a render object based on an object id */
+/** Find a render object by scene object id. */
 renderobject *render_findrenderobjectwithid(varray_renderobject *list, int id) {
     for (unsigned int i=0; i<list->count; i++) {
         if (list->data[i].obj->id==id) return &list->data[i];
@@ -703,7 +707,7 @@ renderobject *render_findrenderobjectwithid(varray_renderobject *list, int id) {
     return NULL;
 }
 
-/** Same-length vertex upload into an existing VBO (no full prepare). */
+/** Replace vertex floats in an existing VBO (same length only). */
 bool render_updateobjectvertices(renderer *r, scene *s, int objectid) {
     if (!r || !s) return false;
     renderobject *robj = render_findrenderobjectwithid(&r->objects, objectid);
@@ -724,7 +728,7 @@ bool render_updateobjectvertices(renderer *r, scene *s, int objectid) {
     return true;
 }
 
-/** Adds an id to an id list only if it is not present already */
+/** Add obj to the render list if it is not already present. */
 renderobject *render_addobject(varray_renderobject *list, gobject *obj) {
     renderobject *out = render_findrenderobject(list, obj);
     if (!out) {
@@ -736,9 +740,7 @@ renderobject *render_addobject(varray_renderobject *list, gobject *obj) {
     return out;
 }
 
-/** Adds an object to its own OpenGL buffer (one VAO/VBO/EBO per object).
- *  Sharing by vertex format used to store raw pointers into a reallocating
- *  varray; one-buffer-per-object keeps lifetimes simple and isolates meshes. */
+/** Allocate a dedicated VAO/VBO/EBO for an object. */
 void render_addobjecttoglbuffer(varray_renderglbuffers *list, renderobject *robj) {
     if (!robj || robj->bufferindex>=0) return;
 
@@ -760,7 +762,7 @@ void render_addobjecttoglbuffer(varray_renderglbuffers *list, renderobject *robj
     }
 }
 
-/** Calculate the size of vertex data given a format string */
+/** Vertex float stride from a format string. */
 int render_entrysizefromformat(scene *s, char *format) {
     int size = 0;
     for (char *c = format; *c != '\0'; c++) {
@@ -775,9 +777,7 @@ int render_entrysizefromformat(scene *s, char *format) {
     return size;
 }
 
-/** Flip facet windings so geometric normal agrees with averaged vertex normals.
- *  Dense Matrix connectivity (and bad serializers) can lose winding; transparent
- *  back/front passes need consistent orientation. */
+/** Flip facet windings so geometric normal agrees with averaged vertex normals. */
 static void render_orient_facets(scene *s, gobject *obj, gelement *el) {
     char *fmt;
     int stride, xpos=-1, npos=-1, pos=0;
@@ -818,7 +818,7 @@ static void render_orient_facets(scene *s, gobject *obj, gelement *el) {
     }
 }
 
-/** Draws an object to  newly allocated OpenGL buffers */
+/** Upload objects that share GL buffer i. */
 void render_drawobject(renderer *r, scene *s, unsigned int i) {
     renderglbuffers *b = &r->glbuffers.data[i];
     int entrysize = render_entrysizefromformat(s, b->format);
@@ -867,8 +867,7 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
             offset += 1;
         }
     }
-    /* xn meshes must not inherit a stale color/alpha array (generic attrib is white).
-     * Set generics while this VAO is bound — some drivers store current attribs per-VAO. */
+    /* Disable unused attribs; draw paths set per-draw generics after bind. */
     if (!have_c) {
         glDisableVertexAttribArray(1);
         glVertexAttrib3f(1, 1.0f, 1.0f, 1.0f);
@@ -927,7 +926,7 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
     glBindVertexArray(0);
 }
 
-/** Prepares an object for rendering, inserting appropriate instructions into the render list */
+/** Pack renderlist instructions for one OBJECT draw. */
 void render_prepareobject(renderer *r, scene *s, gdraw *drw, renderpackstate *st) {
     renderobject *obj = render_findrenderobjectwithid(&r->objects, drw->id);
     if (!obj || !obj->obj || obj->bufferindex<0 ||
@@ -935,11 +934,9 @@ void render_prepareobject(renderer *r, scene *s, gdraw *drw, renderpackstate *st
 
     renderglbuffers *buf = &r->glbuffers.data[obj->bufferindex];
 
-    /* Bind VAO only when it changes (xn vs xnc must not leave a stale binding). */
     render_pack_array(r, st, buf->array, obj);
 
-    /* Per-draw albedo: `C` on the slot is a uniform override (even on `xnc`/`xc`).
-     * Emit RCOLOR when the effective color differs so a prior translucent `C` cannot leak. */
+    /* Emit RCOLOR when the slot's effective color differs from the last packed one. */
     {
         float rgba[4];
         int use_uniform;
@@ -992,7 +989,7 @@ void render_prepareobject(renderer *r, scene *s, gdraw *drw, renderpackstate *st
  * Prepare scene
  * ------------------------------------------------------- */
 
-/** Prepares a scene for rendering */
+/** Build GL buffers and the renderlist for a scene. */
 void render_preparescene(renderer *r, scene *s) {
     render_preparefonts(r, s);
     
@@ -1067,7 +1064,7 @@ void render_preparescene(renderer *r, scene *s) {
  * Render the scene
  * ------------------------------------------------------- */
 
-/** Upload model + derived normalMatrix = inverseTranspose(view*model). */
+/** Upload model and derived normalMatrix. */
 static void render_setmodel(renderer *r, mat4x4 model) {
     mat4x4 vm;
     mat3x3 nmat;
@@ -1077,14 +1074,14 @@ static void render_setmodel(renderer *r, mat4x4 model) {
     glUniformMatrix3fv(r->uniforms.normalMatrix, 1, GL_FALSE, nmat);
 }
 
-/** Upload view/proj only — do not install a dummy white/shaded material. */
+/** Bind view and projection uniforms. */
 static void render_bind_viewproj(renderer *r, mat4x4 view, mat4x4 proj) {
     glUseProgram(r->shader);
     glUniformMatrix4fv(r->uniforms.view, 1, GL_FALSE, view);
     glUniformMatrix4fv(r->uniforms.proj, 1, GL_FALSE, proj);
 }
 
-/** Upload uniforms for the geometry program (lights already bound for the frame). */
+/** Upload geometry-program uniforms (lights already bound for the frame). */
 static void render_setgeometryuniforms(renderer *r, mat4x4 view, mat4x4 proj,
                                        mat4x4 model, float *ucolor, int use_uniform, int uflat,
                                        float ka, float kd, float ks, float shininess) {
@@ -1104,7 +1101,7 @@ static void render_setgeometryuniforms(renderer *r, mat4x4 view, mat4x4 proj,
 
 #define RENDER_OPAQUE_ALPHA_EPS 0.999f
 
-/** True when the current uniform/vertex color is treated as transparent. */
+/** True if this draw should go in the transparent pass. */
 static bool render_is_transparent(int use_uniform, float alpha, const char *format) {
     if (format && strchr(format, 'a')) return true;
     float a = (use_uniform!=0) ? alpha : 1.0f;
@@ -1136,8 +1133,18 @@ static void render_geostate_reset(rendergeostate *st) {
     st->curvao=0;
 }
 
-/** Local-space AABB center of object positions; false if no usable vertices.
- *  Caches on @p obj until geometry/format changes (pose-only updates leave it). */
+/** Set generic color/alpha for meshes with those arrays disabled (`xn`, `x`). */
+static void render_set_fallback_attribs(const float rgba[4]) {
+    glVertexAttrib3f(1, rgba[0], rgba[1], rgba[2]);
+    glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
+    glVertexAttrib1f(3, rgba[3]);
+}
+
+/** Local-space AABB center of object positions.
+ * @param[in] s - scene vertex store
+ * @param[in,out] obj - caches centroid until geometry changes
+ * @param[out] out - centroid
+ * @returns false if no usable vertices */
 static bool render_object_centroid(scene *s, gobject *obj, vec3 out) {
     if (!s || !obj || !obj->vertexdata.format || !strchr(obj->vertexdata.format, 'x')) return false;
     if (obj->vertexdata.indx==SCENE_EMPTY || obj->vertexdata.length<=0) return false;
@@ -1202,8 +1209,7 @@ static int render_tdraw_cmp(const void *a, const void *b) {
     return (da<db) ? -1 : (da>db) ? 1 : 0;
 }
 
-/** Apply baked packet state and issue the draw.
- *  Closed translucent meshes: back faces then front (avoids mesh-order striping). */
+/** Draw a transparent packet; closed meshes get back faces then front. */
 static void render_draw_tdraw(renderer *r, rendertdraw *d) {
     glUseProgram(r->shader);
     render_setmodel(r, d->model);
@@ -1216,9 +1222,7 @@ static void render_draw_tdraw(renderer *r, rendertdraw *d) {
     glUniform1f(r->uniforms.shininess, d->shininess);
     if (!d->vao) return;
     glBindVertexArray(d->vao);
-    glVertexAttrib3f(1, 1.0f, 1.0f, 1.0f);
-    glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
-    glVertexAttrib1f(3, 1.0f);
+    render_set_fallback_attribs(d->rgba);
     if (d->mode==GL_TRIANGLES) {
         glEnable(GL_CULL_FACE);
         glCullFace(GL_FRONT);
@@ -1231,7 +1235,8 @@ static void render_draw_tdraw(renderer *r, rendertdraw *d) {
     }
 }
 
-/** Bake one transparent draw into the scratch varray; false on allocation failure. */
+/** Append one transparent draw to the scratch list.
+ * @returns false on allocation failure */
 static bool render_collect_tdraw(renderer *r, scene *s, mat4x4 view, rendergeostate *st,
                                  renderinstruction *ins) {
     rendertdraw d;
@@ -1260,7 +1265,7 @@ typedef enum {
     RENDER_PASS_COLLECT_TRANSPARENT /* bake transparent into r->tdraws */
 } rendergeopass;
 
-/** Walk the geometry render list once, applying state and either drawing or collecting. */
+/** Walk the geometry renderlist, drawing opaque or collecting transparent. */
 static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj,
                                  rendergeopass pass) {
     rendergeostate st;
@@ -1308,33 +1313,27 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
                 break;
             case RARRAY:
                 st.curvao=ins->data.array.handle;
-                if (pass==RENDER_PASS_OPAQUE) {
-                    glBindVertexArray(st.curvao);
-                    /* Re-assert generics after bind; skipped arrays read this, not a leftover VBO. */
-                    glVertexAttrib3f(1, 1.0f, 1.0f, 1.0f);
-                    glVertexAttrib3f(2, 0.0f, 0.0f, 1.0f);
-                    glVertexAttrib1f(3, 1.0f);
-                }
+                if (pass==RENDER_PASS_OPAQUE) glBindVertexArray(st.curvao);
                 break;
             case RTRIANGLES:
             case RLINES:
             case RPOINTS: {
-                /* Trust the last RCOLOR for this object (emitted at prepare when color changes).
-                 * A draw-slot `C` may override vertex colors; colorless/`xnc` without
-                 * `C` uses use_uniform=0 so a prior translucent `C` cannot leak. */
+                /* Color state is the last packed RCOLOR for this object. */
                 int use_uniform = st.use_uniform;
                 float alpha = st.ucolor[3];
                 const char *fmt = (ins->obj && ins->obj->obj) ? ins->obj->obj->vertexdata.format : NULL;
                 bool trans=render_is_transparent(use_uniform, alpha, fmt);
                 if (pass==RENDER_PASS_OPAQUE && !trans) {
-                    /* Force GPU state even if a prior uniform `C` left uUseUniform set. */
+                    /* Force GPU color even if a prior uniform C left uUseUniform set. */
                     glUniform1i(r->uniforms.uFlat, st.uflat);
                     glUniform1i(r->uniforms.uUseUniform, use_uniform);
                     if (use_uniform==0) {
                         float one[4]={1.0f,1.0f,1.0f,1.0f};
                         glUniform4fv(r->uniforms.uColor, 1, one);
+                        render_set_fallback_attribs(one);
                     } else {
                         glUniform4fv(r->uniforms.uColor, 1, st.ucolor);
+                        render_set_fallback_attribs(st.ucolor);
                     }
                     GLenum mode=(ins->instruction==RTRIANGLES) ? GL_TRIANGLES :
                                 (ins->instruction==RLINES) ? GL_LINES : GL_POINTS;
@@ -1360,6 +1359,7 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, mat4x4 proj
     return true;
 }
 
+/** Draw one frame: opaque pass, sorted transparent pass, then text. */
 void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s) {
     /* Clear the display */
     if (s) {

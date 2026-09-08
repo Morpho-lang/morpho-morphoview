@@ -12,8 +12,7 @@ FT_Library ftlibrary;
  * UTF8 handling code
  * ------------------------------------------------------- */
 
-/** @brief Returns the number of bytes in the next character of a given utf8 string
-    @returns number of bytes */
+/** Number of bytes in the next UTF-8 character, or 0 if this is a continuation byte. */
 int text_utf8numberofbytes(uint8_t *string) {
     uint8_t byte = * string;
     
@@ -26,10 +25,10 @@ int text_utf8numberofbytes(uint8_t *string) {
     return 1;
 }
 
-/** Decodes a utf8 character.
- * @param[in] string - string to decode
- * @param[out] out - decoded character
- * @returns true on success, false otherwise */
+/** Decode one UTF-8 character.
+ * @param[in] string - bytes to decode
+ * @param[out] out - code point
+ * @returns true on success */
 bool text_utf8decode(const uint8_t* string, int *out) {
     if (*string <= 0x7f) { // ASCII single byte value
         *out = *string;
@@ -63,7 +62,7 @@ bool text_utf8decode(const uint8_t* string, int *out) {
  * Testing code
  * ------------------------------------------------------- */
 
-/** Prints a bitmap (for testing purposes only) */
+/** Print a FreeType bitmap (debug). */
 void text_drawbitmap(FT_Bitmap *bitmap) {
   FT_Int  i, j;
   FT_Int  x_max = bitmap->width;
@@ -78,7 +77,7 @@ void text_drawbitmap(FT_Bitmap *bitmap) {
   }
 }
 
-/** Displays the texture associated with a given font */
+/** Print a font atlas as ASCII (debug). */
 void text_showtexture(textfont *font) {
     for (int i=0; i<font->skyline.height; i++) {
       for (int j=0; j<font->skyline.width; j++) {
@@ -110,8 +109,7 @@ void text_showtexture(textfont *font) {
 
 DEFINE_VARRAY(textskylineentry, textskylineentry);
 
-/* Initializes a texture skyline
- * @param[in] skyline - skyline to initialize */
+/** Initialize a texture skyline of the given size. */
 void text_skylineinit(textskyline *skyline, int width, int height) {
     skyline->width=width;
     skyline->height=height;
@@ -122,13 +120,12 @@ void text_skylineinit(textskyline *skyline, int width, int height) {
     varray_textskylineentrywrite(&skyline->skyline, def);
 }
 
-/* Clears a texture skyline
- * @param[in] skyline - skyline to clear */
+/** Clear a texture skyline. */
 void text_skylineclear(textskyline *skyline) {
     varray_textskylineentryclear(&skyline->skyline);
 }
 
-/** Check if a skyline entry can fit a rectangle, looking right */
+/** True if a rectangle of the given width fits at start looking right. */
 bool text_skylinetestfit(textskyline *skyline, int start, int width, int ypos) {
     int w = width;
     for (int i=start; i!=TEXTSKYLINE_EMPTY && i<skyline->skyline.count; i=skyline->skyline.data[i].next) {
@@ -157,7 +154,7 @@ bool text_skylineforcefit(textskyline *skyline, int start, int width, int *ypos)
     return false;
 }
 
-/** Fit a new rectangle into the skyline  */
+/** Fit a rectangle into the skyline starting at index start. */
 bool text_skylinefit(textskyline *skyline, int start, int width, int height, int ypos) {
     int end=start; // Final element
     int w = width;
@@ -195,13 +192,13 @@ bool text_skylinefit(textskyline *skyline, int start, int width, int height, int
     return true;
 }
 
-/* Insert a rectangle into the texture skyline
- * @param[in] skyline - skyline to use
- * @param[in] width - width of rectangle to insert
- * @param[in] height - height of rectangle to insert
- * @param[out] x - bottom left x
- * @param[out] y - bottom left y
- * @returns true if the rectangle has been successfully inserted, false if there's no more room */
+/** Insert a rectangle into the skyline, growing the atlas if needed.
+ * @param[in] skyline - packing state
+ * @param[in] width - rectangle width
+ * @param[in] height - rectangle height
+ * @param[out] x - bottom-left x
+ * @param[out] y - bottom-left y
+ * @returns false if there is no room */
 bool text_skylinesinsert(textskyline *skyline, int width, int height, int *x, int *y) {
     int best=-1, bxpos=0, bypos=skyline->height; // Start with maximum possible height
     
@@ -230,7 +227,7 @@ bool text_skylinesinsert(textskyline *skyline, int width, int height, int *x, in
     return false;
 }
 
-/** Tries to extend a skyline */
+/** Grow the skyline height. */
 bool text_skylineextend(textskyline *skyline, int height) {
     int extend = height;
     if (extend<TEXT_DEFAULTHEIGHT) extend = TEXT_DEFAULTHEIGHT;
@@ -254,7 +251,7 @@ bool text_allocatetexture(textfont *font) {
     return (font->texturedata != NULL);
 }
 
-/** Generates the texture atlas from glyph data */
+/** Generate the texture atlas from glyph bitmaps. */
 bool text_generatetexture(textfont *font) {
     if (!text_allocatetexture(font)) return false;
     
@@ -277,7 +274,7 @@ bool text_generatetexture(textfont *font) {
     return true;
 }
 
-/** Clears the texture atlas */
+/** Free the texture atlas. */
 void text_cleartexture(textfont *font) {
     if (font->texturedata) free(font->texturedata);
 }
@@ -288,7 +285,7 @@ void text_cleartexture(textfont *font) {
 
 DEFINE_VARRAY(textglyph, textglyph);
 
-/** Initializes a font structure */
+/** Initialize a font structure. */
 void text_fontinit(textfont *font, int width) {
     text_skylineinit(&font->skyline, width, width*3/4);
     varray_textglyphinit(&font->glyphs);
@@ -296,7 +293,7 @@ void text_fontinit(textfont *font, int width) {
     font->atlas_dirty=true;
 }
 
-/** Clears a font structure */
+/** Clear a font structure. */
 void text_fontclear(textfont *font) {
     FT_Done_Face(font->face);
     
@@ -306,11 +303,10 @@ void text_fontclear(textfont *font) {
     text_cleartexture(font);
 }
 
-/* Opens a font
- * @param[in] file - Font file
- * @param[in] size - Font size in pixels
- * @param[out] font - Font record filled out
- * @returns true on success */
+/** Open a FreeType face.
+ * @param[in] file - font path
+ * @param[in] size - pixel size
+ * @param[out] font - filled font record */
 bool text_openfont(char *file, int size, textfont *font) {
     FT_Error error = FT_New_Face(ftlibrary, file, 0, &font->face);
     if (error) return false;
@@ -321,10 +317,7 @@ bool text_openfont(char *file, int size, textfont *font) {
     return true;
 }
 
-/* Check if a font contains a record for a character
- * @param[in] font - Font record filled out
- * @param[in] code - code point to check
- * @param[out] indx - indx filled out if not NULL */
+/** True if the font already has a glyph for this code point. */
 bool text_containscharacter(textfont *font, int code, int *indx) {
     for (int i=0; i<font->glyphs.count; i++) {
         if (font->glyphs.data[i].code==code) {
@@ -335,11 +328,10 @@ bool text_containscharacter(textfont *font, int code, int *indx) {
     return false;
 }
 
-/* Adds a character with code to a font
- * @param[in] font - Font record filled out
- * @param[in] code - code point to add */
+/** Add a glyph to a font atlas if it is not already present.
+ * @param[in] font - font record
+ * @param[in] code - Unicode code point */
 bool text_addcharacter(textfont *font, int code) {
-    /** Check if we already have this glyph */
     if (text_containscharacter(font, code, NULL)) return true;
     
     FT_Error error = FT_Load_Char(font->face, code, FT_LOAD_RENDER);
@@ -370,9 +362,7 @@ bool text_addcharacter(textfont *font, int code) {
     return true;
 }
 
-/* Prepares a font to display a particular piece of text
- * @param[in] font - Font record filled out
- * @param[in] text - */
+/** Ensure the font has glyphs for every character in text. */
 bool text_prepare(textfont *font, char *text) {
     for (uint8_t *c = (uint8_t *) text; *c!='\0'; ) {
         int code;
@@ -385,12 +375,11 @@ bool text_prepare(textfont *font, char *text) {
     return true;
 }
 
-/** Finds a glyph for the next character in a string.
- * @param[in] font - font structure
- * @param[in] string - string
- * @param[out] glyph - glyph structure
- * @param[out] next - points to the next character
- * @returns true if the glyph was found */
+/** Find the glyph for the next UTF-8 character.
+ * @param[in] font - font
+ * @param[in] string - remaining text
+ * @param[out] glyph - glyph metrics
+ * @param[out] next - advanced past this character */
 bool text_findglyph(textfont *font, char *string, textglyph *glyph, char **next) {
     uint8_t *c = (uint8_t *) string;
     int code;
@@ -411,11 +400,12 @@ bool text_findglyph(textfont *font, char *string, textglyph *glyph, char **next)
  * Initialization
  * ------------------------------------------------------- */
 
-/* Initialize the text library */
+/** Initialize FreeType. */
 void text_initialize(void) {
     FT_Init_FreeType(&ftlibrary);
 }
 
+/** Shut down FreeType. */
 void text_finalize(void) {
     FT_Done_FreeType(ftlibrary);
 }

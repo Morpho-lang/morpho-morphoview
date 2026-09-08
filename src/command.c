@@ -116,6 +116,7 @@ void *command_new(mv_command_type type, size_t size) {
     return cmd;
 }
 
+/** Free a command and any owned payloads. */
 void command_free(mv_command *cmd) {
     if (!cmd) return;
 
@@ -157,8 +158,7 @@ void command_free(mv_command *cmd) {
 static varray_mv_commandptr command_queue;
 static MorphoMutex command_queue_mutex;
 
-/** While non-NULL, command_enqueue appends here (parse staging) instead of the
- *  shared queue — so a failed parse cannot wipe already-ok'd peer batches. */
+/** Staging destination while parsing one chunk (failed parse cannot wipe the live queue). */
 static varray_mv_commandptr *command_parse_staging = NULL;
 
 void command_queue_init(void) {
@@ -250,6 +250,7 @@ static void command_touchscene(command_applyctx *ctx) {
     if (ctx->scene) scene_markchanged(ctx->scene);
 }
 
+/** Apply one IR command to the sticky scene/display context. */
 bool command_apply(mv_command *cmd, command_applyctx *ctx) {
     switch (cmd->type) {
         case MVCMD_SCENE_CREATE: {
@@ -669,6 +670,8 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
     return command_apply_error("Unrecognized command.");
 }
 
+/** Apply queued commands on the GLFW thread.
+ * @returns number applied before an error, or the full batch count */
 int command_process(void) {
     command_applyctx *ctx = command_sticky_applyctx();
     /* Per-batch color selection: pose-only `d` must not stamp a stale `C`
@@ -1857,9 +1860,10 @@ void command_formaterror(const error *err, varray_char *out) {
     varray_charwrite(out, '\0');
 }
 
-/** @brief Parses a command sequence into the shared queue (does not apply).
- *  Failed parses discard only this chunk's IR — prior enqueued batches stay.
- *  Fills @p err on failure; does not print. */
+/** Parse ASCII into the shared queue (does not apply).
+ * @param[in] in - command text
+ * @param[out] err - filled on failure; not printed
+ * @returns true on success; failed chunks discard only their own IR */
 bool command_parse(char *in, error *err) {
     if (!err) return false;
     error_init(err);
@@ -1918,9 +1922,9 @@ bool command_parse(char *in, error *err) {
  * File I/O
  * ********************************************************************** */
 
-/** Get the size of an open file
- *  @param[in] f file handle
- *  @param[out] s The file size */
+/** Size of an open file.
+ * @param[in] f - file handle
+ * @param[out] s - size in bytes */
 bool command_getfilesize(FILE *f, size_t *s) {
     long int curr, size;
     curr=ftell(f);
@@ -1931,18 +1935,17 @@ bool command_getfilesize(FILE *f, size_t *s) {
     return true;
 }
 
-/** Removes a command file (for temporary files)
- *  @param[in] in file name */
+/** Delete a command file (temporary Show output). */
 void command_removefile(const char *in) {
     if (remove(in) != 0) {
         printf("Warning: failed to remove temporary file '%s'.\n", in);
     }
 }
 
-/** Returns the contents of a file as a string
- *  @param[in] in file name
- *  @param[out] out a string with the contents of the file. Call MORPHO_FREE on this once done.
- *  @returns bool indicating success. */
+/** Read a file into a newly allocated string.
+ * @param[in] in - path
+ * @param[out] out - contents; caller MORPHO_FREE
+ * @returns true on success */
 bool command_loadinput(const char *in, char **out) {
     FILE *f=NULL;
     varray_char buffer;
@@ -1982,6 +1985,7 @@ loadinput_cleanup:
  * Initialization
  * ********************************************************************** */
 
+/** Initialize lexer, parser, queue and error ids. */
 void command_initialize(void) {
     MorphoMutex_init(&command_queue_mutex);
     command_queue_init();
@@ -2001,6 +2005,7 @@ void command_initialize(void) {
     morpho_defineerror(COMMAND_INVLDLIGHT, ERROR_PARSE, COMMAND_INVLDLIGHT_MSG);
 }
 
+/** Shut down the command queue. */
 void command_finalize(void) {
     command_queue_clear();
     MorphoMutex_clear(&command_queue_mutex);

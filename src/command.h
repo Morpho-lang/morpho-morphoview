@@ -360,7 +360,7 @@ void command_removefile(const char *in);
  *  Caller inits/clears @p out; result is null-terminated in out->data. */
 void command_formaterror(const error *err, varray_char *out);
 
-/** Parse ASCII into the shared queue. Fills @p err on failure; does not print. */
+/** Parse ASCII into the shared queue; fills err on failure. */
 bool command_parse(char *in, error *err);
 
 void command_initialize(void);

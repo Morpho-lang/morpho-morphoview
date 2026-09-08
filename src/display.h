@@ -24,7 +24,6 @@
 #include <GLFW/glfw3.h>
 #pragma clang diagnostic pop
 
-
 #define DISPLAY_DEFAULTWIDTH 480
 #define DISPLAY_DEFAULTHEIGHT 480
 
@@ -32,7 +31,7 @@
 
 typedef GLFWwindow windowref;
 
-/** Display object corresponds to a discrete window */
+/** Display object corresponds to a window. */
 typedef struct sdisplay {
     struct sdisplay *next; /** Linked list */
     
@@ -67,7 +66,7 @@ void display_requestclose(display *d);
 void display_requestcloseall(void);
 bool display_anyopen(void);
 void display_fit(display *d);
-void display_prepareall(void); /**< Upload only scenes marked changed since last prepare */
+void display_prepareall(void); /**< Upload scenes marked changed since last prepare */
 
 void display_loop(void);
 

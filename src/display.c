@@ -26,7 +26,7 @@ static display *display_fromwindow(windowref *window) {
     return (display *) glfwGetWindowUserPointer(window);
 }
 
-/** Find the display attached to a scene */
+/** Find the display attached to a scene. */
 display *display_findforscene(scene *s) {
     for (display *d = opendisplays; d!=NULL; d=d->next) {
         if (d->s==s) return d;
@@ -34,13 +34,13 @@ display *display_findforscene(scene *s) {
     return NULL;
 }
 
-/** Add to list of open displays */
+/** Add to the list of open displays. */
 void display_add(display *d) {
     d->next=opendisplays;
     opendisplays=d;
 }
 
-/** Frees data attached to a display */
+/** Free a display and its scene. */
 void display_free(display *d) {
     command_invalidate_scene(d->s);
     scene_free(d->s);
@@ -52,7 +52,7 @@ void display_free(display *d) {
     free(d);
 }
 
-/** Remove from list of open displays */
+/** Remove from the list of open displays. */
 void display_remove(display *d) {
     if (opendisplays==d) {
         opendisplays=d->next;
@@ -74,22 +74,21 @@ void display_remove(display *d) {
  * Event callbacks
  * ------------------------------------------------------- */
 
-/** Error callback */
+/** GLFW error callback. */
 static void display_errorcallback(int error, const char* description) {
     fprintf(stderr, "morphoview: GLFW error '%s'\n", description);
 }
 
-/** Framebuffer resize callback */
+/** Framebuffer resize callback. */
 static void display_framebuffersizecallback(windowref *window, int width, int height) {
     display *d=display_fromwindow(window);
     
     d->aspectRatio=(float) width/(float) height;
-    //glViewport(0, 0, width, height);
     d->width = (float) width;
     glViewport(0, 0, width, height);
 }
 
-/** Keypress callback function */
+/** Keypress callback. */
 static void display_keycallback(windowref *window, int key, int scancode, int action, int mods) {
     if (action!=GLFW_PRESS) return;
     display *d=display_fromwindow(window);
@@ -177,7 +176,7 @@ static void display_keycallback(windowref *window, int key, int scancode, int ac
     
 }
 
-/** Cursor position callback */
+/** Cursor position callback. */
 static void display_cursorposncallback(windowref *window, double x, double y) {
     display *d=display_fromwindow(window);
 
@@ -199,7 +198,7 @@ static void display_cursorposncallback(windowref *window, double x, double y) {
     d->ox=x; d->oy=y;
 }
 
-/** Scroll callback */
+/** Scroll callback. */
 static void display_scrollcallback(windowref *window, double x, double y) {
     display *d=display_fromwindow(window);
     
@@ -207,7 +206,7 @@ static void display_scrollcallback(windowref *window, double x, double y) {
     mat3d_scale(d->view, 1.0-0.25*y, d->view);
 }
 
-/** Mouse click callback */
+/** Mouse button callback. */
 static void display_mousebuttoncallback(windowref *window, int button, int action, int mods) {
     display *d=display_fromwindow(window);
     
@@ -222,7 +221,7 @@ static void display_mousebuttoncallback(windowref *window, int button, int actio
  * Create a window
  * ------------------------------------------------------- */
 
-/** Initializes a display structure */
+/** Initialize a display structure. */
 void display_init(display *d, scene *s) {
     d->s=s;
     d->width=0.0;
@@ -238,7 +237,7 @@ void display_init(display *d, scene *s) {
     d->ortho_far=10.0f;
 }
 
-/** Create a new display */
+/** Open a window for a scene. */
 display *display_open(scene *s) {
     display *new = malloc(sizeof(display));
     if (!new) {
@@ -281,17 +280,15 @@ display *display_open(scene *s) {
         fprintf(stderr, "morphoview: Failed to initialize GLAD");
     }
     
-    /** Initialize the display */
     render_init(&new->render);
     new->window=window;
     
-    /** Add this to the display list */
     display_add(new);
     
     return new;
 }
 
-/** Sets the window title */
+/** Set the window title. */
 void display_setwindowtitle(display *d, char *title) {
     if (d) glfwSetWindowTitle(d->window, title);
 }
@@ -370,6 +367,7 @@ void display_prepareall(void) {
  * Main loop
  * ------------------------------------------------------- */
 
+/** Event loop: process commands and redraw until all windows close. */
 void display_loop(void) {
     bool had_displays = (opendisplays != NULL);
 
@@ -408,6 +406,7 @@ void display_loop(void) {
  * Initialization/Finalization
  * ------------------------------------------------------- */
 
+/** Initialize GLFW. */
 bool display_initialize(void) {
     bool success = glfwInit();
     if (!success) fprintf(stderr, "morphoview: Could not launch GLFW.\n");
@@ -419,6 +418,7 @@ bool display_initialize(void) {
     return success;
 }
 
+/** Shut down GLFW. */
 void display_finalize(void) {
     glfwTerminate();
 }
