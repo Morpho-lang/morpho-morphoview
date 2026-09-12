@@ -129,9 +129,12 @@ expect(countPrefix(buf2.lines, "d ") == 2, "Show draws two point clouds")
 var buf3 = Buf()
 var show = Show()
 show.replacemode = true
+gs.title = "replace-title"
 show.write(gs, buf3)
 expect(buf3.lines.count() > 0 && buf3.lines[0].count() >= 3 && buf3.lines[0][0] == "U",
        "replace path starts with U")
+expect(countPrefix(buf3.lines, "W \"replace-title\"") == 1,
+       "replace path emits window title")
 
 /* ---- faceIndices: dense membership vs sparse winding ---- */
 var dense = TriangleComplex(

@@ -180,8 +180,8 @@ class Show {
       out.write("U S ${self.sceneId}")
     } else {
       out.write("S ${self.sceneId} 3")
-      out.write("W \"${_mvEscape(graphic.title)}\"")
     }
+    out.write("W \"${_mvEscape(graphic.title)}\"")
     var bg = graphic.background.rgb(0)
     out.write("G ${self.fmt(bg[0])} ${self.fmt(bg[1])} ${self.fmt(bg[2])}")
     self._writeL(graphic.light, out)
