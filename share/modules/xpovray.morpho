@@ -9,8 +9,8 @@
 
 import constants
 import xgraphics
-import xcolor
-import xfonts
+import color
+import fonts
 
 var _PovExecErr = Error("PovExec", "Could not run POV-Ray.")
 var _PovLightRig = Error("PovLightRig",

@@ -6,7 +6,7 @@
 
 import xgraphics
 import xshow
-import xcolor
+import color
 
 class Buf {
   init() { self.lines = [] }

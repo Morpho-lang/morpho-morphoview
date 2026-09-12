@@ -8,7 +8,7 @@
 import morphoview
 import implicitmesh
 import xplot
-import xcolor
+import color
 
 // Major radius r, tube radius a
 var r = 1.0

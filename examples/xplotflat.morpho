@@ -9,7 +9,7 @@
 import morphoview
 import meshtools
 import xplot
-import xcolor
+import color
 
 // Axis-aligned rectangle in z=0, centered on the origin.
 var m = AreaMesh(fn (u, v) [u, v, 0],

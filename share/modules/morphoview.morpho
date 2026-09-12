@@ -6,7 +6,7 @@
  *    var v = View(scene)            // open + listen
  *    v.open(commands)               // or ASCII chunk
  *    scene.move(id, ...)            // → pose-only d / C
-   *    v.morph(id, item)              // same-layout U V; layout change → replace
+ *    v.morph(id, item)              // same-layout U V; layout change → replace
  *    v.poll(timeoutms=0)
  *    v.wait(sessiontimeout=1500)
  *    v.close()

@@ -6,7 +6,7 @@
 
 import morphoview
 import xgraphics
-import xcolor
+import color
 import constants
 
 var roomGrey = Color(10/15, 10/15, 10/15)

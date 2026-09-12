@@ -5,7 +5,7 @@
 
 import meshtools
 import xplot
-import xcolor
+import color
 import xgraphics
 
 fn expect(cond, msg) {

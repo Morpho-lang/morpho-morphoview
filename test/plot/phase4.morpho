@@ -7,7 +7,7 @@ import meshtools
 import xplot
 import xgraphics
 import xshow
-import xcolor
+import color
 
 class Buf {
   init() { self.lines = [] }

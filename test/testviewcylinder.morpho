@@ -6,7 +6,7 @@
 
 import morphoview
 import xgraphics
-import xcolor
+import color
 
 var g = Scene()
 g.title = "cylinder-move"

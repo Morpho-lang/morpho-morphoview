@@ -5,7 +5,7 @@
 
 import morphoview
 import xgraphics
-import xcolor
+import color
 import constants
 
 class Buf {

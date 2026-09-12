@@ -16,7 +16,7 @@
 
 import constants
 import xgraphics
-import xcolor
+import color
 
 /* --------------------------
  * Errors

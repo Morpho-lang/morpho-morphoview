@@ -9,7 +9,7 @@
 import morphoview
 import implicitmesh
 import xplot
-import xcolor
+import color
 
 var impl = ImplicitMeshBuilder(fn (x, y, z) x^2 + y^2 + z^2 - 1)
 var m = impl.build(stepsize=0.25)

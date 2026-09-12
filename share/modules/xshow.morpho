@@ -8,8 +8,8 @@
  */
 
 import xgraphics
-import xcolor
-import xfonts
+import color
+import fonts
 
 var _fntntfnd = Error("FntNtFnd", "Font not found.")
 

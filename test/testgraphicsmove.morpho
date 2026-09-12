@@ -6,7 +6,7 @@
 import xgraphics
 import xshow
 import broadcast
-import xcolor
+import color
 
 fn expect(cond, msg) {
   if (!cond) {

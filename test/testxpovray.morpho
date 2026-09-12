@@ -5,7 +5,7 @@
 
 import xpovray
 import xgraphics
-import xcolor
+import color
 
 fn expect(cond, msg) {
   if (!cond) {

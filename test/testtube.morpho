@@ -4,7 +4,7 @@
 //   cd test && morpho6 testtube.morpho
 
 import xgraphics
-import xcolor
+import color
 
 fn expect(cond, msg) {
   if (!cond) {

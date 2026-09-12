@@ -7,7 +7,7 @@
 
 import morphoview
 import xgraphics
-import xcolor
+import color
 
 fn glassSpheres() {
   var g = Graphics()

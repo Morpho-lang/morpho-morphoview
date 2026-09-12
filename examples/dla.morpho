@@ -8,7 +8,7 @@
 
 import morphoview
 import xgraphics
-import xcolor
+import color
 import kdtree
 
 var Np = 120          // particles to attach (plus the seed)

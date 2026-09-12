@@ -5,7 +5,7 @@
 //   cd test && morpho6 testwinding.morpho
 
 import xgraphics
-import xcolor
+import color
 import meshtools
 import xplot
 

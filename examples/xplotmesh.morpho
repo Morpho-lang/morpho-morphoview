@@ -11,7 +11,7 @@
 import morphoview
 import meshtools
 import xplot
-import xcolor
+import color
 
 var n = 40
 var m = AreaMesh(fn (u, v) [u, v, 0.2*sin(2*u)*cos(3*v)],

@@ -6,7 +6,7 @@
 // written either way.
 
 import xgraphics
-import xcolor
+import color
 import xpovray
 import constants
 
