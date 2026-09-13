@@ -325,7 +325,7 @@ class POVRaytracer {
   }
 
   _lines(item, col, flat, tail, out) {
-    var segs = item._segmentIndices()
+    var segs = item.connectivity
     if (segs.count() < 2) return
     var per = self._perVertex(col)
     self._grouped(tail, out, fn () {
@@ -401,24 +401,20 @@ class POVRaytracer {
     }
   }
 
-  /** Empty → Neutral rig. `"off"` → no lamps. Explicit lamps use `intensity * color`. */
-  _writeLightVal(val, out, sl) {
-    var lights = asLighting(val)
-    if (islist(lights) && lights.count() == 0) {
-      self._writeNamedRig(out, sl, "neutral")
+  /** Lighting → POV lamps. Neutral uses the camera-frame rig; `"off"` emits none. */
+  _writeLightVal(Lighting lighting, out, sl) {
+    if (lighting.mode == "off") return
+    if (lighting.mode != "custom") {
+      self._writeNamedRig(out, sl, lighting.mode)
       return
     }
-    if (isstring(lights)) {
-      if (lights == "off") return
-      self._writeNamedRig(out, sl, lights)
-      return
-    }
-    for (lamp in lights) {
+    for (lamp in lighting.lights) {
       var p = lamp.position
       var c = (lamp.intensity*lamp.color).rgb(0)
       out.write("light_source { ${_povVector(p)} color rgb <${_num(c[0])}, ${_num(c[1])}, ${_num(c[2])}>${sl} }")
     }
   }
+  _writeLightVal(val, out, sl) { self._writeLightVal(Lighting(val), out, sl) }
 
   _writeLights(out, shadowless) {
     var sl = shadowless ? " shadowless" : ""

@@ -1,4 +1,5 @@
-// Show emits L from Graphics.light; empty list is Neutral (no L line).
+// Show emits L from Graphics.light (always a Lighting).
+// Neutral (default, [], "neutral", "auto", resetLights) omits L in static Show.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testshowlight.morpho
@@ -54,69 +55,78 @@ g0.display(sph)
 var b0 = Buf()
 Show().write(g0, b0)
 expect(!anyHasL(b0.lines), "nil light omits L")
+expect(g0.light.clss() == Lighting && g0.light.mode == "neutral",
+       "Graphics() stores Neutral Lighting")
+expect(g0.light.lights.count() == 0, "Neutral has no custom lamps")
 
 var gn = Graphics()
-gn.light = "neutral"
+gn.setLights("neutral")
 gn.display(sph)
 var bn = Buf()
 Show().write(gn, bn)
-expect(anyExact(bn.lines, "L \"neutral\""), "neutral emits L \"neutral\"")
+expect(gn.light.mode == "neutral", "setLights(\"neutral\") is Neutral")
+expect(!anyHasL(bn.lines), "named Neutral omits L")
 
 var ga = Graphics()
-ga.light = "auto"
+ga.setLights("auto")
 ga.display(sph)
 var ba = Buf()
 Show().write(ga, ba)
-expect(anyExact(ba.lines, "L \"neutral\""), "auto aliases neutral")
+expect(ga.light.mode == "neutral", "auto aliases Neutral")
+expect(!anyHasL(ba.lines), "auto omits L")
 
 var gt = Graphics()
-gt.light = "threepoint"
+gt.setLights("threepoint")
 gt.display(sph)
 var bt = Buf()
 Show().write(gt, bt)
+expect(gt.light.mode == "threepoint", "setLights stores named rig")
 expect(anyExact(bt.lines, "L \"threepoint\""), "threepoint emits L \"threepoint\"")
 
 var gx = Graphics()
-gx.light = Matrix([-2.5, 0.4, 0.2])
+gx.setLights(Matrix([-2.5, 0.4, 0.2]))
 gx.display(sph)
 var bx = Buf()
 Show().write(gx, bx)
+expect(gx.light.mode == "custom" && gx.light.lights.count() == 1, "Matrix is one lamp")
 expect(anyStarts(bx.lines, "L 1 \"xc\""), "Matrix emits L 1 \"xc\"")
 
 var gxyz = Graphics()
-gxyz.light = [-2.5, 0.4, 0.2]
+gxyz.setLights([-2.5, 0.4, 0.2])
 gxyz.display(sph)
 var bxyz = Buf()
 Show().write(gxyz, bxyz)
 expect(anyStarts(bxyz.lines, "L 1 \"xc\""), "[x,y,z] is one lamp, not three")
 
 var gtup = Graphics()
-gtup.light = (-2.5, 0.4, 0.2)
+gtup.setLights((-2.5, 0.4, 0.2))
 gtup.display(sph)
 var btup = Buf()
 Show().write(gtup, btup)
 expect(anyStarts(btup.lines, "L 1 \"xc\""), "(x,y,z) is one lamp")
 
 var g2 = Graphics()
-g2.light = [Matrix([10, 10, 10]), Matrix([-10, -10, 10])]
+g2.setLights([Matrix([10, 10, 10]), Matrix([-10, -10, 10])])
 g2.display(sph)
 var b2 = Buf()
 Show().write(g2, b2)
+expect(g2.light.lights.count() == 2, "two matrices stored")
 expect(anyStarts(b2.lines, "L 2 \"xc\""), "two matrices emit L 2 \"xc\"")
 
 var gZ = Graphics()
-gZ.light = []
+gZ.setLights([])
 gZ.display(sph)
 var bz = Buf()
 Show().write(gZ, bz)
-expect(!anyHasL(bz.lines), "empty list is Neutral (no L line)")
-expect(islist(g0.light) && g0.light.count() == 0, "Graphics() stores empty light list")
+expect(gZ.light.mode == "neutral", "empty list is Neutral")
+expect(!anyHasL(bz.lines), "empty list omits L")
 
 var gOff = Graphics()
-gOff.light = "off"
+gOff.setLights("off")
 gOff.display(sph)
 var bOff = Buf()
 Show().write(gOff, bOff)
+expect(gOff.light.mode == "off", "setLights(\"off\") stores off")
 expect(anyExact(bOff.lines, "L \"off\""), "off emits L \"off\"")
 
 var gAdd = Graphics()
@@ -125,7 +135,8 @@ gAdd.addLight([-2.5, 0.4, 0.2])
 var bAdd = Buf()
 Show().write(gAdd, bAdd)
 expect(anyStarts(bAdd.lines, "L 1 \"xc\""), "addLight white lamp emits L 1 \"xc\"")
-expect(gAdd.light.count() == 1, "addLight stores one Light")
+expect(gAdd.light.mode == "custom" && gAdd.light.lights.count() == 1,
+       "addLight stores one Light")
 
 var gCol = Graphics()
 gCol.display(sph)
@@ -136,37 +147,38 @@ expect(anyStarts(bCol.lines, "L 1 \"xc\""), "colored Light emits xc")
 expect(anyExact(bCol.lines, "L 1 \"xc\" -10 5 8 0.4 0 0"), "xc includes scaled RGB")
 
 gAdd.addLight([1, 2, 3])
-expect(gAdd.light.count() == 2, "second addLight appends")
+expect(gAdd.light.lights.count() == 2, "second addLight appends")
 gAdd.setLights([Matrix([10, 10, 10]), Matrix([-10, -10, 10])])
-expect(gAdd.light.count() == 2, "setLights replaces with two lamps")
+expect(gAdd.light.lights.count() == 2, "setLights replaces with two lamps")
 gAdd.setLights("threepoint")
-expect(gAdd.light == "threepoint", "setLights stores named rig")
+expect(gAdd.light.mode == "threepoint", "setLights stores named rig")
 gAdd.resetLights()
-expect(gAdd.light.count() == 0, "resetLights clears to Neutral")
+expect(gAdd.light.mode == "neutral" && gAdd.light.lights.count() == 0,
+       "resetLights clears to Neutral")
 var bRst = Buf()
 Show().write(gAdd, bRst)
 expect(!anyHasL(bRst.lines), "resetLights Show omits L")
 
 var bLive = Buf()
-Show().writeLights([], bLive)
-expect(anyExact(bLive.lines, "L \"neutral\""), "live writeLights empty emits L \"neutral\"")
+Show().writeLights(Lighting(), bLive)
+expect(anyExact(bLive.lines, "L \"neutral\""), "live writeLights Neutral emits L \"neutral\"")
 
 var gTPAdd = Graphics()
-gTPAdd.light = "threepoint"
+gTPAdd.setLights("threepoint")
 gTPAdd.addLight([1, 0, 0])
-expect(islist(gTPAdd.light) && gTPAdd.light.count() == 1, "addLight replaces threepoint")
+expect(gTPAdd.light.mode == "custom" && gTPAdd.light.lights.count() == 1,
+       "addLight replaces threepoint")
 
 var gInit = Graphics(light="auto")
-expect(gInit.light == "neutral", "Graphics(light=) canonicalizes auto")
+expect(gInit.light.mode == "neutral", "Graphics(light=) canonicalizes auto")
 var bi = Buf()
 Show().write(gInit, bi)
-expect(anyExact(bi.lines, "L \"neutral\""), "init light=auto emits L \"neutral\"")
+expect(!anyHasL(bi.lines), "init light=auto omits L")
 
 var badName = false
 try {
   var gBad = Graphics()
-  gBad.light = "studio"
-  Show().write(gBad, Buf())
+  gBad.setLights("studio")
 } catch {
   "GfxLightName" : badName = true
 }
@@ -175,8 +187,7 @@ expect(badName, "unknown light name throws")
 var badPos = false
 try {
   var g2v = Graphics()
-  g2v.light = [1, 2]
-  Show().write(g2v, Buf())
+  g2v.setLights([1, 2])
 } catch {
   "GfxLightPos" : badPos = true
 }
@@ -185,8 +196,7 @@ expect(badPos, "2-vector lamp throws")
 var badN = false
 try {
   var g5 = Graphics()
-  g5.light = [Matrix([0,0,0]), Matrix([1,0,0]), Matrix([2,0,0]), Matrix([3,0,0]), Matrix([4,0,0])]
-  Show().write(g5, Buf())
+  g5.setLights([Matrix([0,0,0]), Matrix([1,0,0]), Matrix([2,0,0]), Matrix([3,0,0]), Matrix([4,0,0])])
 } catch {
   "GfxLightN" : badN = true
 }

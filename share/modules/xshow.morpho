@@ -209,8 +209,9 @@ class Show {
     out.write(line)
   }
 
-  writeLights(Lighting lighting, out) { // 
-    if (lighting.mode == "neutral") { // Emit neutral so viewer drops prior lamps
+  // Live replace: Neutral must emit L so the viewer drops prior lamps.
+  writeLights(Lighting lighting, out) {
+    if (lighting.mode == "neutral") {
       out.write("L \"neutral\"")
       return
     }

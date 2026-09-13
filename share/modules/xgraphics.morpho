@@ -830,7 +830,7 @@ class Light {
  * Canonicalized lighting configuration for a Graphics object.
  *
  * Constructors:
- *   Lighting()                        neutral lighting
+ *   Lighting()                        Neutral (also nil or [])
  *   Lighting("neutral")               or "threepoint" or "off"
  *   Lighting(Light(...))
  *   Lighting([x,y,z])                 one point light
@@ -973,7 +973,7 @@ fn _textAtOrigin(Text item) {
  * GraphicsEntry
  * 
  * Displaylist entry incorporating a stable id, the item to display
- * and, optionally, pose information through position, scale and rotate.
+ * and transformation information from model to world coordinates.
  * An override color can also be provided. 
  * ---------------------------------------------------------------- */
 

@@ -88,18 +88,18 @@ Occasional full refresh uses `update(Graphics)`. Efficient animation uses a `Sce
 
 Combine two Graphics objects with `+` / `add` (left-hand ids kept; right-hand ids remapped).
 
-Optional constructor args: `title=`, `background=` (a `Color`), `light=`.
+Optional constructor args: `title=`, `background=` (a `Color`), `light=` (anything `Lighting(...)` accepts).
 
-Lighting is a list of `Light` on `Graphics` / `Scene`. An empty list (`nil`, `[]`, or `resetLights()`) is camera-relative **Neutral** — Show writes no `L` line (a bare `L` is not valid). Named values: `"neutral"` / `"auto"` (same Neutral rig, emitted as `L "neutral"`), `"threepoint"` (studio key/fill/rim), `"off"` (ambient only, `L "off"`).
+`Graphics.light` is a `Lighting` after construction, `setLights`, `addLight`, and `resetLights`. Default, `[]`, `"neutral"`, `"auto"`, and `resetLights()` are camera-relative **Neutral** — static Show writes no `L` line (a bare `L` is not valid). Named values: `"threepoint"` (studio key/fill/rim), `"off"` (ambient only). Custom lamps live in `Lighting.lights` (at most 4).
 
     var g = Graphics()
     g.setLights([[10, 10, 10], Light([-10, 5, 8], color=Red, intensity=0.4)])
     g.addLight([0, 5, 10])
     g.resetLights()
 
-A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (or of `Light`) is several (at most 4). `Light` has `position`, `color` (default `White`), and `intensity` (default `1`); the viewer RGB is `color * intensity`. `setLights` replaces the whole list (same values as `Graphics.light`). The first `addLight` leaves Neutral because the list is no longer empty; `"threepoint"` / `"off"` are replaced by a new list. Unknown names and over-long lists error rather than silently falling back.
+A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (or of `Light`) is several. `Light` has `position`, `color` (default `White`), and `intensity` (default `1`); the viewer RGB is `color * intensity`. `setLights` replaces the whole `Lighting`. The first `addLight` leaves Neutral; `"threepoint"` / `"off"` are replaced by a custom list. Unknown names and over-long lists error rather than silently falling back. Live `View` sends `L "neutral"` on `resetLights()`.
 
-`import xgraphics` also provides `Light`, `setLights` / `addLight` / `resetLights` (on `Graphics`), and `cross3D(a, b)` (3-vector cross product).
+`import xgraphics` also provides `Light`, `Lighting`, `setLights` / `addLight` / `resetLights` (on `Graphics`), and `cross3D(a, b)` (3-vector cross product).
 
 ## Scene
 [tagScene]: # (Scene)

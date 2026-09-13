@@ -177,27 +177,27 @@ expect(contains(sDef, "color rgb <0.4"), "default Neutral directional-equivalent
 expect(!contains(sDef, "<-5, -5, 8>"), "no silent old default lamp")
 
 var gTP = Graphics()
-gTP.light = "threepoint"
+gTP.setLights("threepoint")
 gTP.display(Sphere([0, 0, 0], 1, color=Red))
 expect(contains(scene(gTP), "color rgb <0.85"), "threepoint key in camera frame")
 
 var gWL = Graphics()
-gWL.light = Matrix([3, 4, 5])
+gWL.setLights(Matrix([3, 4, 5]))
 gWL.display(Sphere([0, 0, 0], 1, color=Red))
 expect(contains(scene(gWL), "light_source { <3, 4, 5>"), "Graphics.light world point")
 
 var gList = Graphics()
-gList.light = [3, 4, 5]
+gList.setLights([3, 4, 5])
 gList.display(Sphere([0, 0, 0], 1, color=Red))
 expect(contains(scene(gList), "light_source { <3, 4, 5>"), "[x,y,z] is one lamp")
 
 var gTup = Graphics()
-gTup.light = (3, 4, 5)
+gTup.setLights((3, 4, 5))
 gTup.display(Sphere([0, 0, 0], 1, color=Red))
 expect(contains(scene(gTup), "light_source { <3, 4, 5>"), "(x,y,z) is one lamp")
 
 var gOff = Graphics()
-gOff.light = "off"
+gOff.setLights("off")
 gOff.display(Sphere([0, 0, 0], 1, color=Red))
 var sOff = scene(gOff)
 expect(!contains(sOff, "light_source"), "off emits no POV lamps")
@@ -211,8 +211,7 @@ expect(contains(scene(gCol), "light_source { <1, 2, 3> color rgb <0.5, 0, 0>"),
 var badPov = false
 try {
   var gBad = Graphics()
-  gBad.light = "studio"
-  scene(gBad)
+  gBad.setLights("studio")
 } catch {
   "GfxLightName" : badPov = true
 }
