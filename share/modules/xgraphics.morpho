@@ -549,23 +549,13 @@ class Arrow is Cylinder {
  * Represents a spherical shell of radius r about a center
  * ---------------------------------------------------------------- */
 
-var _sphereCache = Dictionary() // Cache spheres by level -> (verts, faces)
+var _sphereCache = Dictionary() // Cache unit spheres by level -> (verts, faces)
 
 class Sphere is GraphicsPrimitive with TriangleConvertibleMixin {
-  init(center, r, color=nil, maxrefine=3, filter=nil, transmit=nil) {
+  init(center, r, color=nil, filter=nil, transmit=nil) {
     super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.center = center
     self.r = r
-    self.maxrefine = maxrefine
-  }
-
-  _refinementLevel() { return self._refinementLevel(self.r) }
-
-  // Level from effective display radius
-  _refinementLevel(effectiveradius) {
-    var n = 0, r = self.effectiveRadius(effectiveradius)
-    while (r / (2^n) > 0.1 && n < self.maxrefine) n += 1
-    return n
   }
 
   // Compute vertex index given azimuthal and polar indices i, j
@@ -604,27 +594,16 @@ class Sphere is GraphicsPrimitive with TriangleConvertibleMixin {
     return _sphereCache[level]
   }
 
-  // @param scale false → unit ball at origin. @param radiusforrefine picks tessellation. */
-  toTriangleComplex(scale=true, radiusforrefine=nil) {
+  // scale false → unit ball at origin. level is the requested tessellation.
+  toTriangleComplex(scale=true, level=3) {
     var col = self.color
-    var mesh = _uvSphere(self._refinementLevel(isnil(radiusforrefine) ? self.r : radiusforrefine))
+    var mesh = _uvSphere(level)
     var unit = mesh[0], v = unit.clone(), nv = v.dimensions()[1]
     var x0 = scale ? _asPosition(self.center) : Matrix([0, 0, 0])
     var r = scale ? self.r : 1
     for (i in 0...nv) v.setcolumn(i, x0 + r * unit.column(i))
     return TriangleComplex(v, unit.clone(), col, mesh[1].clone())
   }
-
-  // Scalar radius for sphere refine / mesh keys (max |component| if Matrix/list). 
-  effectiveRadius(Matrix scale) {
-    var m = abs(scale[0]), a1 = abs(scale[1]), a2 = abs(scale[2])
-    if (a1 > m) m = a1
-    if (a2 > m) m = a2
-    return m
-  }
-  effectiveRadius(List scale) { return effectiveRadius(Matrix(scale)) }
-  effectiveRadius(Tuple scale) { return effectiveRadius(Matrix(scale)) }
-  effectiveRadius(scale) { return isnil(scale) ? 1 : scale }
 }
 
 /* ----------------------------------------------------------------

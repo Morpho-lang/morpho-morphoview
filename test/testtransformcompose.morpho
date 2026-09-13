@@ -67,7 +67,7 @@ expect(mtok[13] == "1" && mtok[14] == "0" && mtok[15] == "0",
 
 /* ---- Noncommuting: model offset + 90° entry rotation + translation ---- */
 var gn = Graphics()
-gn.display(Sphere([1, 0, 0], 1, maxrefine=1), [0, 10, 0], rotate=[Pi/2, 0, 0, 1])
+gn.display(Sphere([1, 0, 0], 1), [0, 10, 0], rotate=[Pi/2, 0, 0, 1])
 var nbuf = Buf()
 Show().write(gn, nbuf)
 var iR = firstPrefix(nbuf.lines, "r ")
@@ -82,7 +82,7 @@ expect(ntok[13] == "1" && ntok[14] == "0" && ntok[15] == "0",
 
 /* ---- Sphere center/r compose with entry scale ---- */
 var gs = Graphics()
-var sid = gs.display(Sphere([1, 2, 3], 0.5, maxrefine=1), [10, 0, 0], scale=2)
+var sid = gs.display(Sphere([1, 2, 3], 0.5), [10, 0, 0], scale=2)
 var se = gs.findEntry(sid)
 expect(se.item.center[0] == 1 && se.item.r == 0.5, "authored sphere kept")
 expect(se.position[0] == 10 && se.scale == 2, "entry pose additional")
@@ -122,8 +122,8 @@ expect(atok[1] == "0.2" && atok[11] == "2", "arrow radius scales xy, length scal
 
 /* ---- Sphere cache key uses item.r × entry.scale ---- */
 var gcache = Graphics()
-gcache.display(Sphere([0, 0, 0], 2, maxrefine=3, color=Red))
-gcache.display(Sphere([0, 0, 0], 1, maxrefine=3, color=Blue), [1, 0, 0], scale=2)
+gcache.display(Sphere([0, 0, 0], 2, color=Red))
+gcache.display(Sphere([0, 0, 0], 1, color=Blue), [1, 0, 0], scale=2)
 var kbuf = Buf()
 var kshow = Show()
 kshow.write(gcache, kbuf)
@@ -131,17 +131,17 @@ expect(countPrefix(kbuf.lines, "o ") == 1, "same effective radius → one sphere
 expect(kshow.slots[1].objectid == kshow.slots[2].objectid, "shared viewer mesh")
 
 var gdiff = Graphics()
-gdiff.display(Sphere([0, 0, 0], 0.05, maxrefine=3, color=Red))
-gdiff.display(Sphere([0, 0, 0], 8, maxrefine=3, color=Blue))
+gdiff.display(Sphere([0, 0, 0], 0.05, color=Red))
+gdiff.display(Sphere([0, 0, 0], 8, color=Blue))
 var dbuf = Buf()
 Show().write(gdiff, dbuf)
 expect(countPrefix(dbuf.lines, "o ") == 2, "different refine levels → two sphere o")
 
 /* ---- replace keeps entry SRT/color/flat ---- */
 var scp = Scene()
-var pid = scp.display(Sphere([0, 0, 0], 1, maxrefine=1), [5, 0, 0], scale=3,
+var pid = scp.display(Sphere([0, 0, 0], 1), [5, 0, 0], scale=3,
                       rotate=[0.2, 0, 1, 0], color=Red, flat=true)
-expect(scp.replace(pid, Sphere([1, 0, 0], 0.25, maxrefine=1, color=Blue)), "replace")
+expect(scp.replace(pid, Sphere([1, 0, 0], 0.25, color=Blue)), "replace")
 var pe = scp.findEntry(pid)
 expect(pe.item.center[0] == 1 && pe.item.r == 0.25, "new model geometry")
 expect(pe.position[0] == 5 && pe.scale == 3, "entry pose kept")

@@ -201,7 +201,7 @@ expect(capM2.movedIds[0] == idMa && capM2.movedIds[1] == idMb, "listener 2 full 
 
 /* ---- recolor ---- */
 var g8 = Scene()
-var id8 = g8.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], scale=0.5)
+var id8 = g8.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.5)
 expect(g8.recolor(id8, Blue), "recolor ok")
 expect(g8.findEntry(id8).color == Blue, "entry color updated")
 expect(!g8.recolor(999, Red), "missing id fails")
@@ -307,7 +307,7 @@ expect(show10.slots.contains(id10), "replace remaps entry")
 
 /* ---- shared Sphere remove: X D only while other users remain ---- */
 var g11 = Scene()
-var sUnit = Sphere([0, 0, 0], 1, color=Red, maxrefine=1)
+var sUnit = Sphere([0, 0, 0], 1, color=Red)
 var id11a = g11.display(sUnit, [0, 0, 0], scale=0.4)
 var id11b = g11.display(sUnit, [1, 0, 0], scale=0.4)
 var show11 = Show()

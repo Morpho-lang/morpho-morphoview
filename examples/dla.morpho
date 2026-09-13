@@ -21,7 +21,7 @@ var stick = 2*r       // centers sit this far apart on contact
 
 var seedCol = Color(1, 0.82, 0.38)
 var walkerCol = Color(0.95, 0.97, 1)
-var proto = Sphere([0, 0, 0], 1, color=White, maxrefine=2)
+var proto = Sphere([0, 0, 0], 1, color=White)
 
 fn randomPt() {
   var x = Matrix([randomnormal(), randomnormal(), randomnormal()])

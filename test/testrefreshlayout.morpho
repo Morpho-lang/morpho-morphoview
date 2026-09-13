@@ -137,7 +137,7 @@ expect(countUvFloats(morphU.lines) == 18, "opaque uniform morph is 3×6 floats")
 /* ---- unmapped / wrong type fail cleanly ---- */
 expect(!showO.verts(gOpaque, 999, Buf()), "missing id fails")
 var gSph = Scene()
-var sid = gSph.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], scale=0.2)
+var sid = gSph.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.2)
 var showS = Show()
 showS.write(gSph, Buf())
 expect(!showS.verts(gSph, sid, Buf()), "sphere entry is not mesh morph")

@@ -25,8 +25,7 @@ var rad = []
 var ids = []
 
 var g = Scene(title="N-body", background=Color(0.08, 0.09, 0.11))
-var protoLo = Sphere([0, 0, 0], 1, color=White, maxrefine=1)
-var protoHi = Sphere([0, 0, 0], 1, color=White, maxrefine=2)
+var proto = Sphere([0, 0, 0], 1, color=White)
 
 for (i in 0...nBodies) {
   var imod = i - 3*Int(i/3)
@@ -39,8 +38,6 @@ for (i in 0...nBodies) {
   vel[1,i] = (2*random()-1)*0.8
   vel[2,i] = (2*random()-1)*0.8
   var col = HSV(360*Float(i)/Float(nBodies), 0.75, 0.95)
-  var proto = protoLo
-  if (r > 0.16) proto = protoHi
   var id = g.display(proto, [pos[0,i], pos[1,i], pos[2,i]], scale=r, color=col.opacity(glass))
   ids.append(id)
 }

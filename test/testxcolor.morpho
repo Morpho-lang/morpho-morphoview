@@ -303,14 +303,14 @@ expect(badLen, "ColorTable count must match vertices")
 
 var badEnt = false
 try {
-  Graphics().display(Sphere([0, 0, 0], 1, maxrefine=1), color=rgbTab)
+  Graphics().display(Sphere([0, 0, 0], 1), color=rgbTab)
 } catch {
   "GfxEntryClr" : badEnt = true
 }
 expect(badEnt, "entry.color rejects ColorTable")
 
 var scBad = Scene()
-var sid = scBad.display(Sphere([0, 0, 0], 1, maxrefine=1))
+var sid = scBad.display(Sphere([0, 0, 0], 1))
 var badRecolor = false
 try {
   scBad.recolor(sid, rgbTab)

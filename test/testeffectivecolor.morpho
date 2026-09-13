@@ -24,9 +24,9 @@ fn isGrayHalf(c) {
 }
 
 /* ---- primitive color is never nil ---- */
-var sph = Sphere([0, 0, 0], 1, color=Blue, maxrefine=1)
+var sph = Sphere([0, 0, 0], 1, color=Blue)
 expect(!isnil(sph.color) && rgbEq(sph.color, Blue), "explicit primitive color")
-var sphDef = Sphere([0, 0, 0], 1, maxrefine=1)
+var sphDef = Sphere([0, 0, 0], 1)
 expect(!isnil(sphDef.color) && isGrayHalf(sphDef.color), "missing color → Gray(0.5)")
 
 /* ---- display does not copy intrinsic color onto the entry ---- */
@@ -48,13 +48,13 @@ expect(isnil(e.color), "override cleared")
 expect(rgbEq(e.effectiveColor(), Blue), "effectiveColor restored to Blue")
 
 /* ---- replace with no override adopts new intrinsic color ---- */
-expect(scene.replace(id, Sphere([0, 0, 0], 1, color=Green, maxrefine=1)), "replace Green")
+expect(scene.replace(id, Sphere([0, 0, 0], 1, color=Green)), "replace Green")
 expect(isnil(e.color), "still no override after replace")
 expect(rgbEq(e.effectiveColor(), Green), "effectiveColor is new Green")
 
 /* ---- explicit recolor survives item replacement ---- */
 expect(scene.recolor(id, Red), "override Red again")
-expect(scene.replace(id, Sphere([0, 0, 0], 1, color=Yellow, maxrefine=1)), "replace Yellow")
+expect(scene.replace(id, Sphere([0, 0, 0], 1, color=Yellow)), "replace Yellow")
 expect(rgbEq(e.color, Red), "override survives replace")
 expect(rgbEq(e.effectiveColor(), Red), "effectiveColor still Red")
 expect(rgbEq(e.item.color, Yellow), "new item is Yellow")

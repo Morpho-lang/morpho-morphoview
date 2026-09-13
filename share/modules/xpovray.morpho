@@ -221,14 +221,14 @@ class POVRaytracer {
   visit(entry, Cylinder item, out) {
     var dx = item.end - item.start, length = dx.norm()
     if (!(length > 1e-8)) return
-    var r = item._radius(length)
+    var r = item._radialScale(length)
     out.write("cylinder { ${_povVector(item.start)}, ${_povVector(item.end)}, ${_num(r)} ${self._skin(entry)}${self._wrap(entry)} }")
   }
 
   visit(entry, Arrow item, out) {
     var dx = item.end - item.start, length = dx.norm()
     if (!(length > 1e-8)) return
-    var r = item._radius(length)
+    var r = item._radialScale(length)
     var h = 1 - item.aspectratio
     var mid = item.start + h*dx
     var sk = self._skin(entry)

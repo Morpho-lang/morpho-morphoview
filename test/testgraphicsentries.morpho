@@ -47,7 +47,7 @@ expect(g.displaylist[0].id == id1 && g.displaylist[1].id == id2, "entry ids matc
 
 /* ---- Sphere stores authored center/r; identity entry ---- */
 var gs = Graphics()
-var sid = gs.display(Sphere([1, 2, 3], 0.5, color=Red, maxrefine=1))
+var sid = gs.display(Sphere([1, 2, 3], 0.5, color=Red))
 expect(sid == 1, "sphere id")
 expect(ismatrix(gs.displaylist[0].position), "position is Matrix")
 expect(gs.displaylist[0].position[0] == 0 && gs.displaylist[0].position[1] == 0 &&
@@ -60,7 +60,7 @@ expect(gs.displaylist[0].item.center[0] == 1 && gs.displaylist[0].item.center[1]
 
 /* ---- Sphere with pose args ---- */
 var gp = Graphics()
-var unit = Sphere([0, 0, 0], 1, color=Blue, maxrefine=1)
+var unit = Sphere([0, 0, 0], 1, color=Blue)
 gp.display(unit, [4, 5, 6], scale=2.5, rotate=[0.1, 0, 1, 0])
 var e = gp.displaylist[0]
 expect(e.position[0] == 4 && e.position[1] == 5 && e.position[2] == 6, "posed position")
@@ -71,7 +71,7 @@ expect(e.item.center[0] == 0, "posed unit Sphere keeps center origin")
 
 /* ---- display color= / flat= (Phase 5dx) ---- */
 var gc = Graphics()
-var cid = gc.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [0, 0, 0], scale=0.5,
+var cid = gc.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.5,
                      color=Blue, flat=true)
 expect(gc.findEntry(cid).color == Blue, "color= overrides sphere item color")
 expect(gc.findEntry(cid).flat == true, "flat= on sphere display")
@@ -95,7 +95,7 @@ var pcid2 = gflat.display(PointCloud(Matrix([[1], [0], [0]])), flat=false)
 var lsid2 = gflat.display(LineSet(Matrix([[0, 1], [1, 1], [0, 0]])), flat=false)
 expect(gflat.findEntry(pcid2).flat == false, "PointCloud flat=false override")
 expect(gflat.findEntry(lsid2).flat == false, "LineSet flat=false override")
-var sphflat = gflat.display(Sphere([0, 0, 0], 1, maxrefine=1))
+var sphflat = gflat.display(Sphere([0, 0, 0], 1))
 expect(isnil(gflat.findEntry(sphflat).flat), "Sphere omitted flat=")
 var fbuf = Buf()
 Show().write(gflat, fbuf)
@@ -107,7 +107,7 @@ a.display(PointCloud(Matrix([[0], [0], [0]])))
 a.display(PointCloud(Matrix([[1], [0], [0]])))
 var b = Graphics()
 b.display(PointCloud(Matrix([[2], [0], [0]])))
-b.display(Sphere([0, 0, 0], 1, maxrefine=1))
+b.display(Sphere([0, 0, 0], 1))
 expect(b.displaylist[0].id == 1 && b.displaylist[1].id == 2, "right starts at 1")
 var u = a.add(b)
 expect(u.displaylist.count() == 4, "union has four entries")

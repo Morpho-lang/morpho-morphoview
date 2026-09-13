@@ -15,6 +15,8 @@ import constants
 var _fntntfnd = Error("FntNtFnd", "Font not found.")
 var _epsShaft = 1e-8
 var _epsNorm = 1e-15
+var _sphereRefineThresh = 0.1
+var _sphereRefineMax = 3
 
 fn _vec3(Matrix p) { return p }
 fn _vec3(List p) { return Matrix(p) }
@@ -71,18 +73,35 @@ fn _mvEscape(s) {
  * Unit-mesh cache keys and local model matrices
  * ---------------------------------------------------------------- */
 
-fn _displayRadius(Sphere item, entry) {
-  return abs(item.r) * item.effectiveRadius(entry.scale)
+fn _maxScale(Matrix scale) {
+  var m = abs(scale[0]), a1 = abs(scale[1]), a2 = abs(scale[2])
+  if (a1 > m) m = a1
+  if (a2 > m) m = a2
+  return m
+}
+fn _maxScale(List scale) { return _maxScale(Matrix(scale)) }
+fn _maxScale(Tuple scale) { return _maxScale(Matrix(scale)) }
+fn _maxScale(scale) { return isnil(scale) ? 1 : abs(scale) }
+
+fn _sphereEffectiveRadius(Sphere item, entry) {
+  return abs(item.r) * _maxScale(entry.scale)
+}
+
+fn _sphereRefinementLevel(Sphere item, entry) {
+  var radius = _sphereEffectiveRadius(item, entry)
+  var n = 0
+  while (radius / (2^n) > _sphereRefineThresh && n < _sphereRefineMax) n += 1
+  return n
 }
 
 fn _meshKey(Sphere item, entry) {
-  return "sphere:${item._refinementLevel(_displayRadius(item, entry))}"
+  return "sphere:${_sphereRefinementLevel(item, entry)}"
 }
 fn _meshKey(Cylinder item, entry) { return "cylinder:${item.n}" }
 fn _meshKey(Arrow item, entry) { return "arrow:${item.n}:${item.aspectratio}" }
 
 fn _unitTri(Sphere item, entry) {
-  return item.toTriangleComplex(scale=false, radiusforrefine=_displayRadius(item, entry))
+  return item.toTriangleComplex(scale=false, level=_sphereRefinementLevel(item, entry))
 }
 fn _unitTri(Cylinder item, entry) { return item.toTriangleComplex(unit=true) }
 fn _unitTri(Arrow item, entry) { return item.toTriangleComplex(unit=true) }

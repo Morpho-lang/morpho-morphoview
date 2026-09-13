@@ -13,10 +13,10 @@ fn glassSpheres() {
   var g = Graphics()
   g.title = "alpha spheres"
 
-  g.display(Sphere([-0.38, 0.0, 0.0], 0.28, color=Red.opacity(0.45), maxrefine=2))
-  g.display(Sphere([ 0.38, 0.0, 0.0], 0.28, color=Blue.opacity(0.45), maxrefine=2))
-  g.display(Sphere([ 0.0,  0.38, 0.12], 0.24, color=Green.opacity(0.55), maxrefine=2))
-  g.display(Sphere([ 0.0, -0.32, 0.22], 0.22, color=Yellow.opacity(0.5), maxrefine=2))
+  g.display(Sphere([-0.38, 0.0, 0.0], 0.28, color=Red.opacity(0.45)))
+  g.display(Sphere([ 0.38, 0.0, 0.0], 0.28, color=Blue.opacity(0.45)))
+  g.display(Sphere([ 0.0,  0.38, 0.12], 0.24, color=Green.opacity(0.55)))
+  g.display(Sphere([ 0.0, -0.32, 0.22], 0.22, color=Yellow.opacity(0.5)))
 
   return g
 }

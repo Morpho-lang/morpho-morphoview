@@ -110,10 +110,10 @@ expect(show2.slots.contains(id1), "sibling cylinder still mapped")
 
 /* ---- replace Sphere keeps entry pose; stores authored item ---- */
 var gsph = Scene()
-var sid = gsph.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [1, 2, 3], scale=2)
+var sid = gsph.display(Sphere([0, 0, 0], 1, color=Red), [1, 2, 3], scale=2)
 var se = gsph.findEntry(sid)
 expect(se.position[0] == 1 && se.scale == 2, "initial sphere pose")
-expect(gsph.replace(sid, Sphere([2, 3, 4], 0.5, color=Blue, maxrefine=1)), "replace sphere")
+expect(gsph.replace(sid, Sphere([2, 3, 4], 0.5, color=Blue)), "replace sphere")
 se = gsph.findEntry(sid)
 expect(se.item.r == 0.5 && se.item.center[0] == 2, "replaced stores authored sphere")
 expect(abs(se.position[0]-1) < 1e-9 && abs(se.position[1]-2) < 1e-9 && abs(se.position[2]-3) < 1e-9,

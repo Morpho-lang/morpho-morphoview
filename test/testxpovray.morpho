@@ -49,6 +49,13 @@ g.display(Sphere([0,0,0], 0.5, color=Red))
 var sdl = scene(g)
 expect(contains(sdl, "sphere { <0, 0, 0>, 0.5"), "authored sphere radius")
 expect(contains(sdl, "pigment { rgb <1, 0, 0> }"), "Red pigment")
+expect(!contains(sdl, "mesh2"), "POV Sphere is native, not tessellated")
+
+var gBig = Graphics()
+gBig.display(Sphere([0, 0, 0], 50, color=Red))
+var sBig = scene(gBig)
+expect(contains(sBig, "sphere { <0, 0, 0>, 50"), "large authored sphere")
+expect(!contains(sBig, "mesh2"), "large Sphere is not a triangle mesh")
 
 /* ---- Color.a → rgbt ---- */
 var ga = Graphics()

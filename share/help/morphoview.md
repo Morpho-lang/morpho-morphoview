@@ -129,7 +129,7 @@ Mutators return `true`/`false`. Prefer `View(Scene)` for live sessions.
 
 Graphical elements for `display` (from `xgraphics`):
 
-* `Sphere(center, r, color=, transmit=, filter=, maxrefine=)`
+* `Sphere(center, r, color=, transmit=, filter=)`
 * `Cylinder(start, end, aspectratio=, radius=, n=, color=, …)`
 * `Arrow(start, end, aspectratio=, radius=, n=, color=, …)`
 * `Text(string, posn, font=, color=, …)` — draw-slot text; string/font via `replace`

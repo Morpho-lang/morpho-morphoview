@@ -34,10 +34,10 @@ fn expect(cond, msg) {
 }
 
 var g = Graphics()
-var proto = Sphere([0, 0, 0], 1, color=Red, maxrefine=1)
+var proto = Sphere([0, 0, 0], 1, color=Red)
 g.display(proto, [0, 0, 0], scale=0.3)
 g.display(proto, [1, 0, 0], scale=0.3)
-g.display(Sphere([0, 0, 0], 1, color=Blue, maxrefine=1), [0, 1, 0], scale=0.3)
+g.display(Sphere([0, 0, 0], 1, color=Blue), [0, 1, 0], scale=0.3)
 
 var buf = Buf()
 var show = Show()
