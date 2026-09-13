@@ -1,0 +1,180 @@
+// Model × entry composition: Text offset, noncommuting SRT, radius=, cache, degeneracy.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testtransformcompose.morpho
+
+import xgraphics
+import xshow
+import color
+import constants
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn firstPrefix(lines, prefix) {
+  for (i in 0...lines.count()) {
+    var line = lines[i]
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (j in 0...prefix.count()) {
+        if (line[j] != prefix[j]) { ok = false; break }
+      }
+      if (ok) return i
+    }
+  }
+  return -1
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+/* ---- Text: display(Text("Hi", [1,0,0]), [10,0,0]) → world [11,0,0] ---- */
+var gt = Graphics()
+var tid = gt.display(Text("Hi", [1, 0, 0], color=White), [10, 0, 0])
+var te = gt.findEntry(tid)
+expect(te.item.posn[0] == 1, "text model posn")
+expect(te.position[0] == 10, "entry translation")
+var tbuf = Buf()
+Show().write(gt, tbuf)
+var ti = firstPrefix(tbuf.lines, "t ")
+var mi = firstPrefix(tbuf.lines, "m ")
+expect(ti >= 0 && mi >= 0, "text emits m and t")
+expect(mi < ti, "m before t so entry rotation/scale act on posn")
+expect(tbuf.lines[ti] == "t 10 0 0", "entry t is [10,0,0]")
+var mtok = tbuf.lines[mi].split(" ")
+expect(mtok[13] == "1" && mtok[14] == "0" && mtok[15] == "0",
+       "m translation column is model posn [1,0,0]")
+
+/* ---- Noncommuting: model offset + 90° entry rotation + translation ---- */
+var gn = Graphics()
+gn.display(Sphere([1, 0, 0], 1, maxrefine=1), [0, 10, 0], rotate=[Pi/2, 0, 0, 1])
+var nbuf = Buf()
+Show().write(gn, nbuf)
+var iR = firstPrefix(nbuf.lines, "r ")
+var iM = firstPrefix(nbuf.lines, "m ")
+var iT = firstPrefix(nbuf.lines, "t ")
+expect(iR >= 0 && iM >= 0 && iT >= 0, "emits r, m, t")
+expect(iR < iM && iM < iT, "order is r then m then t (T·R·S·X)")
+expect(nbuf.lines[iT] == "t 0 10 0", "entry translation")
+var ntok = nbuf.lines[iM].split(" ")
+expect(ntok[13] == "1" && ntok[14] == "0" && ntok[15] == "0",
+       "local m translates model center [1,0,0]")
+
+/* ---- Sphere center/r compose with entry scale ---- */
+var gs = Graphics()
+var sid = gs.display(Sphere([1, 2, 3], 0.5, maxrefine=1), [10, 0, 0], scale=2)
+var se = gs.findEntry(sid)
+expect(se.item.center[0] == 1 && se.item.r == 0.5, "authored sphere kept")
+expect(se.position[0] == 10 && se.scale == 2, "entry pose additional")
+var sbuf = Buf()
+Show().write(gs, sbuf)
+expect(firstPrefix(sbuf.lines, "s ") >= 0, "entry scale emitted")
+expect(firstPrefix(sbuf.lines, "m ") >= 0, "sphere local m emitted")
+expect(firstPrefix(sbuf.lines, "t ") >= 0, "entry t emitted")
+
+/* ---- Cylinder / Arrow explicit radius= ---- */
+var cyl = Cylinder([0, 0, 0], [0, 0, 2], radius=0.4, n=8, color=Red)
+expect(cyl.radius == 0.4, "cylinder keeps radius")
+var tri = cyl.toTriangleComplex()
+var ring = tri.position.column(1)
+expect(abs(ring[0]*ring[0] + ring[1]*ring[1] - 0.2*0.2) < 1e-8,
+       "non-unit mesh radial distance is 0.5*radius")
+var gc = Graphics()
+gc.display(cyl)
+var cbuf = Buf()
+Show().write(gc, cbuf)
+var cmi = firstPrefix(cbuf.lines, "m ")
+expect(cmi >= 0, "cylinder local m")
+var ctok = cbuf.lines[cmi].split(" ")
+expect(ctok[1] == "0.2" && ctok[6] == "0.2" && ctok[11] == "2",
+       "m xy scale 0.5*radius, z scale length")
+
+var arr = Arrow([0, 0, 0], [0, 0, 2], radius=0.4, aspectratio=0.25, n=8, color=Blue)
+expect(arr.radius == 0.4, "arrow keeps radius")
+var ga = Graphics()
+ga.display(arr)
+var abuf = Buf()
+Show().write(ga, abuf)
+var ami = firstPrefix(abuf.lines, "m ")
+expect(ami >= 0, "arrow local m")
+var atok = abuf.lines[ami].split(" ")
+expect(atok[1] == "0.2" && atok[11] == "2", "arrow radius scales xy, length scales z")
+
+/* ---- Sphere cache key uses item.r × entry.scale ---- */
+var gcache = Graphics()
+gcache.display(Sphere([0, 0, 0], 2, maxrefine=3, color=Red))
+gcache.display(Sphere([0, 0, 0], 1, maxrefine=3, color=Blue), [1, 0, 0], scale=2)
+var kbuf = Buf()
+var kshow = Show()
+kshow.write(gcache, kbuf)
+expect(countPrefix(kbuf.lines, "o ") == 1, "same effective radius → one sphere o")
+expect(kshow.slots[1].objectid == kshow.slots[2].objectid, "shared viewer mesh")
+
+var gdiff = Graphics()
+gdiff.display(Sphere([0, 0, 0], 0.05, maxrefine=3, color=Red))
+gdiff.display(Sphere([0, 0, 0], 8, maxrefine=3, color=Blue))
+var dbuf = Buf()
+Show().write(gdiff, dbuf)
+expect(countPrefix(dbuf.lines, "o ") == 2, "different refine levels → two sphere o")
+
+/* ---- replace keeps entry SRT/color/flat ---- */
+var scp = Scene()
+var pid = scp.display(Sphere([0, 0, 0], 1, maxrefine=1), [5, 0, 0], scale=3,
+                      rotate=[0.2, 0, 1, 0], color=Red, flat=true)
+expect(scp.replace(pid, Sphere([1, 0, 0], 0.25, maxrefine=1, color=Blue)), "replace")
+var pe = scp.findEntry(pid)
+expect(pe.item.center[0] == 1 && pe.item.r == 0.25, "new model geometry")
+expect(pe.position[0] == 5 && pe.scale == 3, "entry pose kept")
+expect(!isnil(pe.rotate) && pe.color == Red && pe.flat == true, "rotate/color/flat kept")
+
+/* ---- cached Cylinder replace reuses o, updates transform ---- */
+var sc = Scene()
+var id = sc.display(Cylinder([0, 0, 0], [0, 0, 1], n=6, color=Red))
+var show = Show()
+var openBuf = Buf()
+show.write(sc, openBuf)
+var vid = show.slots[id].objectid
+expect(sc.replace(id, Cylinder([1, 0, 0], [1, 0, 3], n=6, color=Blue)), "replace shaft")
+var rbuf = Buf()
+show.replace(sc, id, rbuf)
+expect(show.slots[id].objectid == vid, "same viewer mesh")
+expect(countPrefix(rbuf.lines, "o ") == 0, "no new object")
+expect(countPrefix(rbuf.lines, "v ") == 0, "no new vertices")
+expect(countPrefix(rbuf.lines, "d ") == 1, "redraw with new transform")
+expect(firstPrefix(rbuf.lines, "m ") >= 0, "new local m")
+
+/* ---- valid ↔ zero-length Cylinder: no stale drawable ---- */
+expect(sc.replace(id, Cylinder([0, 0, 0], [0, 0, 0], n=6)), "replace with degenerate")
+var zbuf = Buf()
+show.replace(sc, id, zbuf)
+expect(!show.slots.contains(id), "degenerate unmapped")
+expect(countPrefix(zbuf.lines, "X D ${id}") == 1, "old draw removed")
+expect(countPrefix(zbuf.lines, "d ") == 0, "degenerate is not redrawn")
+
+expect(sc.replace(id, Cylinder([0, 0, 0], [0, 0, 1], n=6, color=Red)), "replace back to valid")
+var vbuf = Buf()
+show.replace(sc, id, vbuf)
+expect(show.slots.contains(id), "valid remapped")
+expect(countPrefix(vbuf.lines, "d ") == 1, "valid draws")
+
+print "ok"

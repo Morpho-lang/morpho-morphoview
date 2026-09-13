@@ -147,9 +147,9 @@ class GraphicsPrimitive {
     self.color = isnil(c) ? Gray(0.5) : asColoring(c)
   }
 
-  // Check that a color setting has the correct number of vertices 
-  _checkColorCount(col, nv) { } 
-  _checkColorCount(ColorTable col, nv) { 
+  // Check that a color setting has the correct number of vertices
+  _checkColorCount(col, nv) { }
+  _checkColorCount(ColorTable col, nv) {
     if (col.count() != nv) _GfxClrTblLenErr.throw()
   }
 }
@@ -287,8 +287,8 @@ class TriangleComplex is GraphicsPrimitive {
  *   Text("Hello world", [0,0,0], dirn=[1,0,0], vertical=[0,0,1])
  *   - string : string to display 
  *   - posn : Starting point of text baseline
- *   - dirn : direction of baseline
- *   - vertical : vertical direction of text (must not be // to baseline)
+ *   - dirn : direction of baseline (default [1,0,0])
+ *   - vertical : vertical direction of text (default perp to dirn, in the xz plane)
  *   - size, font : control the font
  * ---------------------------------------------------------------- */
 
@@ -296,30 +296,44 @@ class Text is GraphicsPrimitive {
   init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil, filter=nil, transmit=nil) {
     super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.posn = _asPosition(posn)
-    self.dirn = isnil(dirn) ? nil : _asPosition(dirn)
-    self.vertical = isnil(vertical) ? nil : _asPosition(vertical)
+    self.dirn = isnil(dirn) ? Matrix([1, 0, 0]) : _asPosition(dirn)
+    self.vertical = isnil(vertical) ? self._defaultVertical() : _asPosition(vertical)
+    if (!_orientationOk()) _GfxTxtDrnVrtPrllErr.throw()
     self.string = string
     self.font = font
     self.size = size
   }
 
-  transformationMatrix() { // Compute the tranformation matrix needed to display the text
-    if (!(ismatrix(self.dirn) || ismatrix(self.vertical))) return nil 
-    var m = Matrix(4,4) 
-    for (i in 0..3) m[i,i]=1
-
-    if (!isnil(self.dirn)) for (i in 0..2) m[i,0]=self.dirn[i]
-    if (!isnil(self.vertical)) for (i in 0..2) m[i,1]=self.vertical[i]
-
-    // Now set the final direction to the cross product of the two 
-    var zp = cross3D(m.column(1), m.column(0)) 
-    for (i in 0..2) m[i,2]=zp[i]
-
-    if (!_orthonormalize(m)) _GfxTxtDrnVrtPrllErr.throw() 
-
-    return m.transpose() 
+  // Default vertical is perpendicular to dirn but parallel to the xz plane. 
+  _defaultVertical() {
+    var v = cross3D(self.dirn, Matrix([0, 1, 0]))
+    if (v.norm() < _epsNorm) return Matrix([1, 0, 0]) // If dirn is along y, use +x.
+    return v
   }
 
+  _orientationOk() {
+    if (self.dirn.norm() < _epsNorm || self.vertical.norm() < _epsNorm) return false
+    return cross3D(self.vertical, self.dirn).norm() >= _epsNorm
+  }
+
+  transformationMatrix() { // dirn, vertical and posn
+    var m = Matrix(4,4)
+    for (i in 0..3) m[i,i]=1
+    for (i in 0..2) {
+      m[i,0] = self.dirn[i]
+      m[i,1] = self.vertical[i]
+    }
+    var zp = cross3D(m.column(1), m.column(0))
+    for (i in 0..2) m[i,2] = zp[i]
+    if (!_orthonormalize(m)) _GfxTxtDrnVrtPrllErr.throw()
+
+    var p = self.posn
+    if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
+      for (i in 0..2) m[i,3] = p[i]
+    }
+
+    return m.transpose()
+  }
 }
 
 /* ----------------------------------------------------------------
@@ -365,6 +379,10 @@ class Cylinder is GraphicsPrimitive with TriangleConvertibleMixin {
     self.n = n
   }
 
+  _radialScale(length) { // Compute radial scale (r/2) for the cylinder
+    return 0.5*(self.radius ? self.radius : length*self.aspectratio)
+  }
+
   // Geometric parameters for the cylinder
   _lineFrame(unit) {
     if (unit) return self._unitFrame()
@@ -372,8 +390,7 @@ class Cylinder is GraphicsPrimitive with TriangleConvertibleMixin {
     if (length < _epsDraw) return nil
     var ndx = dx/length, px = _normalVector(dx), pxnorm = px.norm()
     if (pxnorm < _epsNorm) return nil
-    var r = self.radius ? self.radius : length*self.aspectratio
-    return (x1, x2, dx, length, ndx, 0.5*r*px/pxnorm)
+    return (x1, x2, dx, length, ndx, self._radialScale(length)*px/pxnorm)
   }
 
   // Geometric parameters for the unit cylinder (from the origin to z=1 with unit radius)
@@ -544,7 +561,7 @@ class Sphere is GraphicsPrimitive with TriangleConvertibleMixin {
 
   _refinementLevel() { return self._refinementLevel(self.r) }
 
-  // Level from effective display radius (entry.scale for unit spheres).
+  // Level from effective display radius
   _refinementLevel(effectiveradius) {
     var n = 0, r = self.effectiveRadius(effectiveradius)
     while (r / (2^n) > 0.1 && n < self.maxrefine) n += 1
@@ -928,47 +945,6 @@ class Lighting {
   clone() { return Lighting(self) }
 }
 
-/* **************************************
- * Random helpers
- **************************************** */
-
-/** Angle-axis (phi, ax, ay, az) rotating unit @p from onto unit @p to.
- *  Aligned → (0, 1, 0, 0) (so move can clear a prior tilt). */
-fn _axisAngleFromTo(from, to) {
-  var d = from.inner(to)
-  if (d > 1 - 1e-8) return (0, 1, 0, 0)
-  if (d < -1 + 1e-8) {
-    var ax = _normalVector(from)
-    var n = ax.norm()
-    if (n < _epsNorm) ax = Matrix([1, 0, 0])
-    else ax = ax/n
-    return (Pi, ax[0], ax[1], ax[2])
-  }
-  var axis = cross3D(from, to)
-  axis = axis/axis.norm()
-  var phi = acos(d)
-  return (phi, axis[0], axis[1], axis[2])
-}
-
-/** start→end + aspectratio → (position, scale Matrix(R,R,L), rotate); nil if degenerate.
- *  Unit shaft is +z, height 1, radius 1; world radius = 0.5 * length * aspectratio. */
-fn segmentSRT(start, end, aspectratio) {
-  var x1 = _asPosition(start)
-  var x2 = _asPosition(end)
-  var dx = x2 - x1
-  var length = dx.norm()
-  if (!(length > 1e-8)) return nil
-  var R = 0.5*length*aspectratio
-  var rotate = _axisAngleFromTo(Matrix([0, 0, 1]), dx/length)
-  return (x1, Matrix([R, R, length]), rotate)
-}
-
-/** Copy Text with origin posn — pose lives on the GraphicsEntry (Phase 5f). */
-fn _textAtOrigin(Text item) {
-  return Text(item.string, (0, 0, 0), dirn=item.dirn, vertical=item.vertical,
-              size=item.size, font=item.font, color=item.color)
-}
-
 /* ----------------------------------------------------------------
  * GraphicsEntry
  * 
@@ -985,7 +961,7 @@ class GraphicsEntry {
     self.scale = self._asScale(scale)
     self.rotate = rotate
     self.color = self._asEntryColor(color)
-    self.flat = false // Set true for solid facet colors
+    self.flat = nil // Override for unlit rendering
   }
 
   // Return visible  Visible coloring: entry override if set, else the primitive's intrinsic color. */
@@ -1014,23 +990,6 @@ class GraphicsEntry {
     if (isnil(c)) return nil
     return _asEntryColor(asColoring(c))
   }
-}
-
-/** Unit Sphere for entry storage (pose lives on the GraphicsEntry). */
-fn _unitSphere(Sphere item) {
-  return Sphere([0, 0, 0], 1, color=item.color, maxrefine=item.maxrefine)
-}
-
-/** Unit Cylinder for entry storage (pose lives on the GraphicsEntry). */
-fn _unitCylinder(Cylinder item) {
-  return Cylinder([0, 0, 0], [0, 0, 1], aspectratio=item.aspectratio, n=item.n,
-                  color=item.color)
-}
-
-/** Unit Arrow for entry storage (pose lives on the GraphicsEntry). */
-fn _unitArrow(Arrow item) {
-  return Arrow([0, 0, 0], [0, 0, 1], aspectratio=item.aspectratio, n=item.n,
-               color=item.color)
 }
 
 /* ----------------------------------------------------------------
@@ -1065,7 +1024,7 @@ class Graphics {
     var id = self._nextId
     self._nextId += 1
     var e = GraphicsEntry(id, item, position=position, scale=scale, rotate=rotate, color=color)
-    if (!isnil(flat)) e.flat = flat
+    e.flat = flat
     self.displaylist.append(e)
     self._entryById[id] = e
     return id
@@ -1092,21 +1051,6 @@ class Graphics {
     }
   }
 
-  /** Unit item + explicit pose. Nil `color` means no presentation override. */
-  _displayUnit(unitItem, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    var scl = isnil(scale) ? 1 : scale
-    return self._append(unitItem, position=position, scale=scl, rotate=rotate,
-                        color=color, flat=flat)
-  }
-
-  /** Unit shaft item + SRT from start→end; nil if degenerate. */
-  _displaySegment(unitItem, start, end, aspectratio, color=nil, flat=nil) {
-    var srt = segmentSRT(start, end, aspectratio)
-    if (isnil(srt)) return nil
-    return self._displayUnit(unitItem, srt[0], scale=srt[1], rotate=srt[2],
-                             color=color, flat=flat)
-  }
-
   /** Append a GraphicsPrimitive (identity SRT). Returns Graphics-owned id. */
   display(GraphicsPrimitive item, color=nil, flat=nil) {
     return self._append(item, color=color, flat=flat)
@@ -1116,72 +1060,6 @@ class Graphics {
   display(GraphicsPrimitive item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
     return self._append(item, position=position, scale=scale, rotate=rotate,
                         color=color, flat=flat)
-  }
-
-  /** Unit Sphere + entry SRT from authored center/r. */
-  display(Sphere item, color=nil, flat=nil) {
-    return self._displayUnit(_unitSphere(item), item.center, scale=item.r,
-                             color=color, flat=flat)
-  }
-
-  /** Unit Sphere + pose args on the entry (sole pose authority). */
-  display(Sphere item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    return self._displayUnit(_unitSphere(item), position, scale=scale, rotate=rotate,
-                             color=color, flat=flat)
-  }
-
-  /** Unit Cylinder + entry SRT from authored start→end. */
-  display(Cylinder item, color=nil, flat=nil) {
-    return self._displaySegment(_unitCylinder(item), item.start, item.end,
-                                item.aspectratio, color=color, flat=flat)
-  }
-
-  /** Unit Cylinder + pose args on the entry (sole pose authority). */
-  display(Cylinder item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    return self._displayUnit(_unitCylinder(item), position, scale=scale, rotate=rotate,
-                             color=color, flat=flat)
-  }
-
-  /** Unit Arrow + entry SRT from authored start→end. */
-  display(Arrow item, color=nil, flat=nil) {
-    return self._displaySegment(_unitArrow(item), item.start, item.end,
-                                item.aspectratio, color=color, flat=flat)
-  }
-
-  /** Unit Arrow + pose args on the entry (sole pose authority). */
-  display(Arrow item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    return self._displayUnit(_unitArrow(item), position, scale=scale, rotate=rotate,
-                             color=color, flat=flat)
-  }
-
-  /** Text: lift authored posn onto the entry; item kept at origin. */
-  display(Text item, color=nil, flat=nil) {
-    return self._append(_textAtOrigin(item), position=item.posn, color=color, flat=flat)
-  }
-
-  /** Text + explicit pose on the entry (sole pose authority for move). */
-  display(Text item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    return self._append(_textAtOrigin(item), position=position, scale=scale,
-                        rotate=rotate, color=color, flat=flat)
-  }
-
-  /** PointCloud defaults to unlit (entry.flat). */
-  display(PointCloud item, color=nil, flat=nil) {
-    return self._append(item, color=color, flat=isnil(flat) ? true : flat)
-  }
-  display(PointCloud item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    return self._append(item, position=position, scale=scale, rotate=rotate,
-                        color=color, flat=isnil(flat) ? true : flat)
-  }
-
-  /** LineSet defaults to unlit (entry.flat). */
-  display(LineSet item, color=nil, flat=nil) {
-    return self._append(item, color=color, flat=isnil(flat) ? true : flat)
-  }
-  
-  display(LineSet item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
-    return self._append(item, position=position, scale=scale, rotate=rotate,
-                        color=color, flat=isnil(flat) ? true : flat)
   }
 
   setLights(lights) { // Replace lights
@@ -1209,7 +1087,7 @@ class Graphics {
     target.light = self.light.clone()
   }
 
-  // Combine two Graphics; right-hand side is copied with new ids
+  // Combine two Graphics; right hand side is copied into the displaylist with new ids
   add(Graphics right) {
     var g = Graphics()
     self._copyMetaInto(g)
@@ -1361,50 +1239,6 @@ class Scene is Graphics with Broadcaster {
     var e = self.findEntry(id)
     if (isnil(e)) return false
     e.item = item
-    self.notify(GraphicsEventReplaced(id))
-    return true
-  }
-
-  // Sphere specific replace - store unit sphere and just refresh pose 
-  replace(id, Sphere item) {
-    var e = self.findEntry(id)
-    if (isnil(e)) return false
-    e.item = _unitSphere(item)
-    e.position = _asPosition(item.center)
-    e.scale = e._asScale(item.r)
-    self.notify(GraphicsEventReplaced(id))
-    return true
-  }
-
-  // Cylinder specific replace - store unit cylinder and just refresh pose
-  replace(id, Cylinder item) {
-    var e = self.findEntry(id)
-    if (isnil(e)) return false
-    var srt = segmentSRT(item.start, item.end, item.aspectratio)
-    if (isnil(srt)) return false
-    e.item = _unitCylinder(item)
-    e.position = srt[0]; e.scale = srt[1]; e.rotate = srt[2]
-    self.notify(GraphicsEventReplaced(id))
-    return true
-  }
-
-  // Arrow specific replace - store unit cylinder and just refresh pose
-  replace(id, Arrow item) {
-    var e = self.findEntry(id)
-    if (isnil(e)) return false
-    var srt = segmentSRT(item.start, item.end, item.aspectratio)
-    if (isnil(srt)) return false
-    e.item = _unitArrow(item)
-    e.position = srt[0]; e.scale = srt[1]; e.rotate = srt[2]
-    self.notify(GraphicsEventReplaced(id))
-    return true
-  }
-
-  // Replace Text content/orientation
-  replace(id, Text item) {
-    var e = self.findEntry(id)
-    if (isnil(e)) return false
-    e.item = _textAtOrigin(item)
     self.notify(GraphicsEventReplaced(id))
     return true
   }

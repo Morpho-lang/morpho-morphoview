@@ -239,9 +239,6 @@ var asList = asColoring([1, 0, 0, 0.5])
 expect(asList.clss() == Color && approx(asList.a, 0.5, 1e-9), "asColoring List RGBA → Color")
 expect(isnil(asColoring(nil)), "asColoring nil")
 
-var srt = segmentSRT([0, 0, 0], [0, 0, 1], 0.1)
-expect(istuple(srt) && srt.count() == 3, "segmentSRT Tuple")
-
 var badTbl = false
 try {
   ColorTable(Matrix([[1, 0], [0, 1]]))

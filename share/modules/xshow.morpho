@@ -10,8 +10,50 @@
 import xgraphics
 import color
 import fonts
+import constants
 
 var _fntntfnd = Error("FntNtFnd", "Font not found.")
+var _epsShaft = 1e-8
+var _epsNorm = 1e-15
+
+fn _vec3(Matrix p) { return p }
+fn _vec3(List p) { return Matrix(p) }
+fn _vec3(Tuple p) { return Matrix(p) }
+fn _vec3(p) { return Matrix(p) }
+
+fn _normalVec(vec) {
+  var order = [abs(vec[0]), abs(vec[1]), abs(vec[2])].order()
+  var out = vec.clone()
+  out[order[0]] = 0
+  out[order[1]] = vec[order[2]]
+  out[order[2]] = -vec[order[1]]
+  return out
+}
+
+fn _rot3(theta, axis) {
+  var x = axis[0], y = axis[1], z = axis[2]
+  var ctheta = cos(theta), stheta = sin(theta), cc = 1-ctheta
+  return Matrix(
+    ( ( x*x*cc+ctheta,   x*y*cc-z*stheta, x*z*cc+y*stheta ),
+      ( x*y*cc+z*stheta, y*y*cc+ctheta,   y*z*cc-x*stheta ),
+      ( z*x*cc-y*stheta, y*z*cc+x*stheta, z*z*cc+ctheta   ) )
+  )
+}
+
+fn _axisFromTo(from, to) {
+  var d = from.inner(to)
+  if (d > 1 - 1e-8) return (0, 1, 0, 0)
+  if (d < -1 + 1e-8) {
+    var ax = _normalVec(from)
+    var n = ax.norm()
+    if (n < _epsNorm) ax = Matrix([1, 0, 0])
+    else ax = ax/n
+    return (Pi, ax[0], ax[1], ax[2])
+  }
+  var axis = cross3D(from, to)
+  axis = axis/axis.norm()
+  return (acos(d), axis[0], axis[1], axis[2])
+}
 
 /** Escape `\` and `"` for morphoview quoted protocol strings. */
 fn _mvEscape(s) {
@@ -25,17 +67,89 @@ fn _mvEscape(s) {
   return out
 }
 
+/* ----------------------------------------------------------------
+ * Unit-mesh cache keys and local model matrices
+ * ---------------------------------------------------------------- */
+
+fn _displayRadius(Sphere item, entry) {
+  return abs(item.r) * item.effectiveRadius(entry.scale)
+}
+
 fn _meshKey(Sphere item, entry) {
-  return "sphere:${item._refinementLevel(item.effectiveRadius(entry.scale))}"
+  return "sphere:${item._refinementLevel(_displayRadius(item, entry))}"
 }
 fn _meshKey(Cylinder item, entry) { return "cylinder:${item.n}" }
 fn _meshKey(Arrow item, entry) { return "arrow:${item.n}:${item.aspectratio}" }
 
 fn _unitTri(Sphere item, entry) {
-  return item.toTriangleComplex(scale=false, radiusforrefine=item.effectiveRadius(entry.scale))
+  return item.toTriangleComplex(scale=false, radiusforrefine=_displayRadius(item, entry))
 }
 fn _unitTri(Cylinder item, entry) { return item.toTriangleComplex(unit=true) }
 fn _unitTri(Arrow item, entry) { return item.toTriangleComplex(unit=true) }
+
+fn _unlit(item) { return false }
+fn _unlit(PointCloud item) { return true }
+fn _unlit(LineSet item) { return true }
+
+fn _flat(entry) { return isnil(entry.flat) ? _unlit(entry.item) : entry.flat }
+
+fn _isDegenerateShaft(Cylinder item) {
+  return (item.end - item.start).norm() < _epsShaft
+}
+fn _drawable(Sphere item) { return true }
+fn _drawable(Cylinder item) { return !_isDegenerateShaft(item) }
+fn _drawable(item) { return true }
+
+fn _isIdentity4(m) {
+  for (i in 0..3) {
+    for (j in 0..3) {
+      var expect = (i == j) ? 1 : 0
+      if (abs(m[i,j] - expect) > 1e-8) return false
+    }
+  }
+  return true
+}
+
+/** 4×4 from 3×3 linear part and translation, then transpose. */
+fn _mat4LinearTranslate(linear, t) {
+  var m = Matrix(4, 4)
+  for (i in 0..2) {
+    for (j in 0..2) m[i,j] = linear[i,j]
+    m[i,3] = t[i]
+  }
+  m[3,3] = 1
+  return m.transpose()
+}
+
+fn _localModelMatrix(item) { return nil }
+
+fn _localModelMatrix(Sphere item) {
+  var c = _vec3(item.center)
+  var r = item.r
+  var atOrigin = c[0] == 0 && c[1] == 0 && c[2] == 0
+  if (atOrigin && r == 1) return nil
+  return _mat4LinearTranslate(Matrix(((r, 0, 0), (0, r, 0), (0, 0, r))), c)
+}
+
+fn _shaftLocalMatrix(Cylinder item) {
+  if (_isDegenerateShaft(item)) return nil
+  var x1 = item.start, dx = item.end - x1, length = dx.norm()
+  var Rxy = item._radialScale(length)
+  var rotate = _axisFromTo(Matrix([0, 0, 1]), dx/length)
+  var R3
+  if (abs(rotate[0]) < 1e-8) {
+    R3 = Matrix(((1, 0, 0), (0, 1, 0), (0, 0, 1)))
+  } else {
+    R3 = _rot3(rotate[0], [rotate[1], rotate[2], rotate[3]])
+  }
+  var S = Matrix(((Rxy, 0, 0), (0, Rxy, 0), (0, 0, length)))
+  return _mat4LinearTranslate(R3 * S, x1)
+}
+
+fn _localModelMatrix(Cylinder item) { return _shaftLocalMatrix(item) }
+fn _localModelMatrix(Arrow item) { return _shaftLocalMatrix(item) }
+
+fn _localModelMatrix(Text item) { return item.transformationMatrix() }
 
 /** Show's cache of an emitted morphoview `F` command (name + size + viewer id). */
 class ShowFont {
@@ -262,16 +376,25 @@ class Show {
     }
   }
 
-  /** Emit entry SRT as i / s / r / t (no draw command). */
-  _emitEntrySRT(entry, out) {
+  /** Emit `m` when the local model matrix is not identity. */
+  _emitLocalM(m, out) {
+    if (isnil(m) || _isIdentity4(m)) return
+    var str = "m"
+    for (i in 0..3) for (j in 0..3) str += " ${self.fmt(m[i,j])}"
+    out.write(str)
+  }
+
+  /** Emit i / s / r / m / t (no draw command). */
+  _emitTransforms(entry, item, out) {
     self._emitEntryBasis(entry, out)
+    self._emitLocalM(_localModelMatrix(item), out)
     self._emitEntryTranslation(entry, out)
   }
 
-  /** Emit i/s/r/t/d. With viewerid: d <graphicsId> <viewerid> (or d <viewerid> if entry.id==0).
+  /** Emit i/s/r/m/t/d. With viewerid: d <graphicsId> <viewerid> (or d <viewerid> if entry.id==0).
    *  Without viewerid: d <graphicsId> (pose-only). Does not emit `C` (pose-preserving). */
   draw(entry, out, viewerid=nil) {
-    self._emitEntrySRT(entry, out)
+    self._emitTransforms(entry, entry.item, out)
     self._emitDraw(entry, out, viewerid=viewerid)
   }
 
@@ -292,8 +415,8 @@ class Show {
   }
 
   /** SRT, then `C` immediately before `d`, so the draw-slot color mode is self-contained. */
-  _emitColoredDraw(entry, out, viewerid=nil) {
-    self._emitEntrySRT(entry, out)
+  _emitColoredDraw(entry, item, out, viewerid=nil) {
+    self._emitTransforms(entry, item, out)
     if (entry.id != 0 && self.slots.contains(entry.id)) {
       self._emitSlotC(self.slots[entry.id], out)
     }
@@ -325,7 +448,7 @@ class Show {
         continue
       }
       if (slot.flat) out.write("M flat")
-      self._emitColoredDraw(entry, out, viewerid=slot.objectid)
+      self._emitColoredDraw(entry, entry.item, out, viewerid=slot.objectid)
       if (slot.flat) out.write("M shaded")
     }
   }
@@ -336,7 +459,7 @@ class Show {
     var entry = graphic.findEntry(graphicsId)
     if (isnil(entry)) return false
     if (self.slots[graphicsId].text) {
-      self._emitTextTransforms(entry, entry.item, out)
+      self._emitTransforms(entry, entry.item, out)
       out.write("d ${graphicsId}")
       return true
     }
@@ -430,11 +553,15 @@ class Show {
   /** Reuse cached unit `o` when key still matches; else remove + rewrite. */
   _emitCachedReplace(entry, item, key, out) {
     var graphicsId = entry.id
+    if (!_drawable(item)) {
+      self.remove(graphicsId, out)
+      return true
+    }
     var oldVid = self.slots.contains(graphicsId) ? self.slots[graphicsId].objectid : nil
     if (!isnil(oldVid) && self.meshCache.contains(key) && self.meshCache[key] == oldVid) {
       var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
       self.slots[graphicsId].colorid = cid
-      self._emitColoredDraw(entry, out, viewerid=oldVid)
+      self._emitColoredDraw(entry, item, out, viewerid=oldVid)
       return true
     }
     self.remove(graphicsId, out)
@@ -690,18 +817,6 @@ class Show {
     return self.addFont(font, size, out)
   }
 
-  /** Entry SRT (+ optional dirn/vertical `m` before translation) before `T` / pose `d`. */
-  _emitTextTransforms(entry, Text item, out) {
-    self._emitEntryBasis(entry, out)
-    var m = item.transformationMatrix()
-    if (!isnil(m)) {
-      var str = "m"
-      for (i in 0..3) for (j in 0..3) str+=" "+self.fmt(m[i,j])
-      out.write(str)
-    }
-    self._emitEntryTranslation(entry, out)
-  }
-
   write(graphic, out) {
     self.preamble(graphic, out)
     self.slots = Dictionary()
@@ -724,13 +839,14 @@ class Show {
     var fid = self.findFontId(font, item.size, out)
     var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
     self._recordText(entry, colorid=cid)
-    self._emitTextTransforms(entry, item, out)
+    self._emitTransforms(entry, item, out)
     out.write("C ${cid}")
     out.write("T ${entry.id} ${fid} \"${_mvEscape(item.string)}\"")
   }
 
-  /** Unit mesh from cache + entry SRT + `C` immediately before `d`. */
+  /** Unit mesh from cache + `C` immediately before `d`. */
   _visitUnitMesh(entry, item, out) {
+    if (!_drawable(item)) return
     var key = _meshKey(item, entry)
     var vid
     if (self.meshCache.contains(key)) {
@@ -742,10 +858,10 @@ class Show {
       self.meshCache[key] = vid
     }
     var cid = self.addRgb(self.entryRgb(entry), self.opacity(entry), out)
-    var flat = entry.flat
+    var flat = _flat(entry)
     if (flat) out.write("M flat")
     self._recordObject(entry, vid, colorid=cid, flat=flat)
-    self._emitColoredDraw(entry, out, viewerid=vid)
+    self._emitColoredDraw(entry, item, out, viewerid=vid)
     if (flat) out.write("M shaded")
   }
 
@@ -753,38 +869,38 @@ class Show {
   visit(entry, Cylinder item, out) { self._visitUnitMesh(entry, item, out) }
   visit(entry, Arrow item, out) { self._visitUnitMesh(entry, item, out) }
 
-  /** PointCloud: define once, draw with entry SRT. Obeys entry.flat. */
+  /** PointCloud: define once, then draw. Unlit unless flat=false. */
   visit(entry, PointCloud item, out) {
-    var flat = entry.flat
+    var flat = _flat(entry)
     if (flat) out.write("M flat")
     var vid = self.definePointCloud(entry, item, out)
     if (!isnil(vid)) {
       self._recordObject(entry, vid, colorid=self._lastColorId, flat=flat)
-      self._emitColoredDraw(entry, out, viewerid=vid)
+      self._emitColoredDraw(entry, item, out, viewerid=vid)
     }
     if (flat) out.write("M shaded")
   }
 
-  /** LineSet: define once, draw with entry SRT. Obeys entry.flat. */
+  /** LineSet: define once, then draw. Unlit unless flat=false. */
   visit(entry, LineSet item, out) {
-    var flat = entry.flat
+    var flat = _flat(entry)
     if (flat) out.write("M flat")
     var vid = self.defineLineSet(entry, item, out)
     if (!isnil(vid)) {
       self._recordObject(entry, vid, colorid=self._lastColorId, flat=flat)
-      self._emitColoredDraw(entry, out, viewerid=vid)
+      self._emitColoredDraw(entry, item, out, viewerid=vid)
     }
     if (flat) out.write("M shaded")
   }
 
-  /** TriangleComplex: define once for this write, draw with entry SRT.
+  /** TriangleComplex: define once for this write, then draw.
    *  Pass `flat=true` on `display` (or set `entry.flat`) for unlit solid facet colors. */
   visit(entry, TriangleComplex item, out) {
-    var flat = entry.flat
+    var flat = _flat(entry)
     if (flat) out.write("M flat")
     var vid = self.defineTriangleComplex(entry, item, out)
     self._recordObject(entry, vid, colorid=self._lastColorId, flat=flat)
-    self._emitColoredDraw(entry, out, viewerid=vid)
+    self._emitColoredDraw(entry, item, out, viewerid=vid)
     if (flat) out.write("M shaded")
   }
 }

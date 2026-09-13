@@ -66,6 +66,12 @@ fn _pngPath(path) {
   return path + ".png"
 }
 
+fn _unlit(item) { return false }
+fn _unlit(PointCloud item) { return true }
+fn _unlit(LineSet item) { return true }
+
+fn _flat(entry) { return isnil(entry.flat) ? _unlit(entry.item) : entry.flat }
+
 /** View-space axes matching MorphoView: +X right, +Y up, +Z toward the camera.
  *  `_writeCamera` uses a negative POV `right`; do not flip this cross from theory
  *  — verify left/right with an asymmetric ThreePoint render vs morphoview. */
@@ -191,7 +197,7 @@ class POVRaytracer {
   }
 
   _skin(entry) {
-    return self._texture(entry.effectiveColor(), entry.flat)
+    return self._texture(entry.effectiveColor(), _flat(entry))
   }
 
   _wrap(entry) {
@@ -209,18 +215,26 @@ class POVRaytracer {
   }
 
   visit(entry, Sphere item, out) {
-    out.write("sphere { <0, 0, 0>, 1 ${self._skin(entry)}${self._wrap(entry)} }")
+    out.write("sphere { ${_povVector(item.center)}, ${_num(item.r)} ${self._skin(entry)}${self._wrap(entry)} }")
   }
 
   visit(entry, Cylinder item, out) {
-    out.write("cylinder { <0, 0, 0>, <0, 0, 1>, 1 ${self._skin(entry)}${self._wrap(entry)} }")
+    var dx = item.end - item.start, length = dx.norm()
+    if (!(length > 1e-8)) return
+    var r = item._radius(length)
+    out.write("cylinder { ${_povVector(item.start)}, ${_povVector(item.end)}, ${_num(r)} ${self._skin(entry)}${self._wrap(entry)} }")
   }
 
   visit(entry, Arrow item, out) {
-    var h = 1 - item.aspectratio, sk = self._skin(entry)
+    var dx = item.end - item.start, length = dx.norm()
+    if (!(length > 1e-8)) return
+    var r = item._radius(length)
+    var h = 1 - item.aspectratio
+    var mid = item.start + h*dx
+    var sk = self._skin(entry)
     out.write("union {")
-    out.write("  cylinder { <0, 0, 0>, <0, 0, ${h}>, 1 ${sk} }")
-    out.write("  cone { <0, 0, ${h}>, 2, <0, 0, 1>, 0 ${sk} }")
+    out.write("  cylinder { ${_povVector(item.start)}, ${_povVector(mid)}, ${_num(r)} ${sk} }")
+    out.write("  cone { ${_povVector(mid)}, ${_num(2*r)}, ${_povVector(item.end)}, 0 ${sk} }")
     out.write("${self._wrap(entry)}")
     out.write("}")
   }
@@ -234,11 +248,11 @@ class POVRaytracer {
   }
 
   visit(entry, PointCloud item, out) {
-    self._points(item, entry.effectiveColor(), entry.flat, self._wrap(entry), out)
+    self._points(item, entry.effectiveColor(), _flat(entry), self._wrap(entry), out)
   }
 
   visit(entry, LineSet item, out) {
-    self._lines(item, entry.effectiveColor(), entry.flat, self._wrap(entry), out)
+    self._lines(item, entry.effectiveColor(), _flat(entry), self._wrap(entry), out)
   }
 
   visit(entry, Text item, out) {
@@ -260,7 +274,7 @@ class POVRaytracer {
     var col = entry.effectiveColor()
     var skin = self._skin(entry)
     var tail = self._wrap(entry)
-    var flat = entry.flat
+    var flat = _flat(entry)
     var nv = item.position.dimensions()[1]
     var nf = item.connectivity.dimensions()[1]
     var per = self._perVertex(col)

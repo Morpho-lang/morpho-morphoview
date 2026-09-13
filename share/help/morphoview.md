@@ -77,14 +77,14 @@ Occasional full refresh uses `update(Graphics)`. Efficient animation uses a `Sce
     var g = Graphics()
     var id = g.display(Sphere([0,0,0], 1, color=Red))
 
-`display` returns a stable Graphics-owned id (`Int`), or `nil` on failure. Optional pose:
+`display` returns a stable Graphics-owned id (`Int`). Optional pose:
 
     g.display(item, position, scale=, rotate=, color=, flat=)
 
-* `position` — list or Matrix (absolute placement)
+* `position` — list or Matrix
 * `scale` — float or `[sx, sy, sz]`
 * `rotate` — `[angle, ax, ay, az]` or `nil`
-* `color` / `flat` — presentation color and unlit shading
+* `color` / `flat` — presentation color and unlit shading (`nil` means Show chooses: PointCloud/LineSet unlit)
 
 Combine two Graphics objects with `+` / `add` (left-hand type and ids kept; right-hand ids remapped). `Scene + Graphics` is a `Scene`; `Graphics + Scene` is a `Graphics`.
 
@@ -117,7 +117,7 @@ A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (
 * `move(id, position, scale=, rotate=)` — set position; omitted scale/rotate leave that component unchanged
 * `recolor(id, color)` — set presentation color; `recolor(id, nil)` clears the override
 * `remove(id)` — remove the entry
-* `replace(id, item)` — swap item (full redefine in the viewer)
+* `replace(id, item)` — swap the item; entry pose/color/flat are kept
 * `morph(id, item)` — same-length mesh swap; `View.morph` uses `U V` when the vertex layout matches
 * `setLights(...)` / `addLight(...)` / `resetLights()` — replace the whole lighting, append a world-space `Light` (or position/`color=`/`intensity=`), or restore Neutral; live `View` sends `L`
 * `beginBatch()` / `endBatch()` — coalesce Moved/Recolored/Lights notifies (via Broadcaster)
@@ -129,12 +129,12 @@ Mutators return `true`/`false`. Prefer `View(Scene)` for live sessions.
 
 Graphical elements for `display` (from `xgraphics`):
 
-* `Sphere(center, r, color=, transmit=, filter=, maxrefine=)` — unit mesh + entry pose
-* `Cylinder(start, end, aspectratio=, n=, color=, …)` — unit shaft + start→end as pose
-* `Arrow(start, end, aspectratio=, n=, color=, …)` — unit shaft+tip + start→end as pose
-* `Text(string, posn=, font=, color=, …)` — draw-slot text; move/remove like meshes; string/font via `replace`
+* `Sphere(center, r, color=, transmit=, filter=, maxrefine=)`
+* `Cylinder(start, end, aspectratio=, radius=, n=, color=, …)`
+* `Arrow(start, end, aspectratio=, radius=, n=, color=, …)`
+* `Text(string, posn, font=, color=, …)` — draw-slot text; string/font via `replace`
 * `TriangleComplex(position, normals, color, connectivity, …)` — triangle mesh
-* `PointCloud` / `LineSet` — points and lines with entry pose
+* `PointCloud` / `LineSet` — points and lines (unlit unless `flat=false`)
 * `Polygon` — convex planar n-gon; winding defines the normal; tessellates to triangles
 * `Tube` — tube along a path
 

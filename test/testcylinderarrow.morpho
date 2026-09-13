@@ -1,4 +1,4 @@
-// Phase 5e: unit Cylinder/Arrow mesh cache, SRT, move/remove/recolor.
+// Cylinder/Arrow: authored storage, shared unit mesh cache, move/remove/recolor.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testcylinderarrow.morpho
@@ -33,29 +33,33 @@ fn expect(cond, msg) {
   }
 }
 
-/* ---- zero-length rejected ---- */
+/* ---- zero-length stored, not drawn ---- */
 var gz = Graphics()
-expect(isnil(gz.display(Cylinder([0, 0, 0], [0, 0, 0], n=6))), "zero cylinder fails")
-expect(isnil(gz.display(Arrow([1, 1, 1], [1, 1, 1], n=6))), "zero arrow fails")
+var zcid = gz.display(Cylinder([0, 0, 0], [0, 0, 0], n=6))
+var zaid = gz.display(Arrow([1, 1, 1], [1, 1, 1], n=6))
+expect(!isnil(zcid) && !isnil(zaid), "degenerate still allocated ids")
+expect(gz.findEntry(zcid).item.start[0] == 0, "stores authored zero cylinder")
+var zbuf = Buf()
+Show().write(gz, zbuf)
+expect(countPrefix(zbuf.lines, "o ") == 0, "degenerate emits no object")
+expect(countPrefix(zbuf.lines, "d ") == 0, "degenerate emits no draw")
 
-/* ---- unit storage + SRT from start→end ---- */
+/* ---- authored start/end stored; identity entry ---- */
 var g = Graphics()
 var cid = g.display(Cylinder([0, 0, 0], [0, 0, 2], aspectratio=0.2, n=8, color=Red))
 var aid = g.display(Arrow([0, 0, 0], [1, 0, 0], aspectratio=0.25, n=8, color=Blue))
 expect(cid == 1 && aid == 2, "ids allocated")
 
 var ce = g.findEntry(cid)
-expect(ce.item.start[2] == 0 && ce.item.end[2] == 1, "cylinder stores unit shaft")
+expect(ce.item.start[2] == 0 && ce.item.end[2] == 2, "cylinder stores authored shaft")
 expect(ce.item.n == 8, "cylinder keeps n")
-expect(ismatrix(ce.scale), "cylinder scale is 3-vector")
-expect(abs(ce.scale[2] - 2) < 1e-9, "scale.z is length")
-expect(abs(ce.scale[0] - 0.5*2*0.2) < 1e-9, "scale.xy is radius")
-expect(abs(ce.rotate[0]) < 1e-8, "+z cylinder has zero-angle rotate")
+expect(ce.scale == 1, "no pose args → identity scale")
+expect(ce.position[0] == 0 && ce.position[1] == 0 && ce.position[2] == 0,
+       "no pose args → identity translation")
 
 var ae = g.findEntry(aid)
-expect(ae.item.end[2] == 1, "arrow stores unit shaft")
-expect(abs(ae.rotate[0]) > 1e-3, "arrow along +x needs nonzero rotate")
-expect(abs(ae.scale[2] - 1) < 1e-9, "arrow scale.z is length")
+expect(ae.item.end[0] == 1, "arrow stores authored end")
+expect(isnil(ae.rotate), "no pose args → nil rotate")
 
 /* ---- Show: many cylinders share one o; arrows share per (n,ar) ---- */
 var gs = Graphics()
@@ -72,7 +76,7 @@ var show = Show()
 show.write(gs, buf)
 expect(countPrefix(buf.lines, "o ") == 3, "1 cylinder o + 2 arrow o (two aspectratios)")
 expect(countPrefix(buf.lines, "d ") == 8, "eight draw slots")
-expect(countPrefix(buf.lines, "s ") >= 8, "non-uniform or length scales emitted")
+expect(countPrefix(buf.lines, "m ") >= 8, "primitive-local m for each shaft")
 
 /* ---- Scene move / recolor / remove (serialize path) ---- */
 var sc = Scene()
@@ -104,16 +108,16 @@ expect(countPrefix(remBuf.lines, "X D ${id2}") == 1, "X D for removed")
 expect(countPrefix(remBuf.lines, "X O ") == 0, "shared o retained")
 expect(show2.slots.contains(id1), "sibling cylinder still mapped")
 
-/* ---- replace Sphere refreshes position/scale like display ---- */
+/* ---- replace Sphere keeps entry pose; stores authored item ---- */
 var gsph = Scene()
-var sid = gsph.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1))
+var sid = gsph.display(Sphere([0, 0, 0], 1, color=Red, maxrefine=1), [1, 2, 3], scale=2)
 var se = gsph.findEntry(sid)
-expect(se.position[0] == 0 && se.scale == 1, "initial sphere pose")
+expect(se.position[0] == 1 && se.scale == 2, "initial sphere pose")
 expect(gsph.replace(sid, Sphere([2, 3, 4], 0.5, color=Blue, maxrefine=1)), "replace sphere")
 se = gsph.findEntry(sid)
-expect(se.item.r == 1 && se.item.center[0] == 0, "replaced stores unit sphere")
-expect(abs(se.position[0]-2) < 1e-9 && abs(se.position[1]-3) < 1e-9 && abs(se.position[2]-4) < 1e-9,
-       "replace updates position")
-expect(abs(se.scale - 0.5) < 1e-9, "replace updates scale")
+expect(se.item.r == 0.5 && se.item.center[0] == 2, "replaced stores authored sphere")
+expect(abs(se.position[0]-1) < 1e-9 && abs(se.position[1]-2) < 1e-9 && abs(se.position[2]-3) < 1e-9,
+       "replace keeps position")
+expect(abs(se.scale - 2) < 1e-9, "replace keeps scale")
 
 print "ok"

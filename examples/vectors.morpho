@@ -1,5 +1,5 @@
-// Vector field yardstick — shared unit Arrow meshes, many draw slots.
-// Color by continuous x-projection; batched Scene.move/recolor (Phase 5e).
+// Vector field — authored Arrows; shared unit mesh via Scene.replace.
+// Color by continuous x-projection.
 //
 //   morpho6 examples/vectors.morpho
 //
@@ -16,7 +16,7 @@ var nFrames = 600
 var dt = 1/50
 var spacing = 0.32
 var tipFrac = 0.22   // Arrow tip length fraction (= aspectratio)
-var shaftAR = 0.12   // thinner shaft: R = 0.5 * L * shaftAR via segmentSRT
+var shaftAR = 0.12   // shaft radius = 0.5 * length * shaftAR
 var vxScale = 0.35   // tanh scale for x-projection → color
 var cmap = TundraMap()
 
@@ -33,23 +33,31 @@ fn field(x, y, t) {
   return Matrix([vx, vy, vz])
 }
 
+fn fieldArrow(o, t) {
+  var f = field(o[0], o[1], t)
+  var nrm = f.norm()
+  if (!(nrm > 1e-8)) return nil
+  var len = 0.22 + 0.18*tanh(nrm)
+  var tip = o + (len/nrm)*f
+  return Arrow(o, tip, radius=len*shaftAR, aspectratio=tipFrac, n=10, color=colorByVx(f[0]))
+}
+
 var g = Scene(title="Vectors", background=Color(0.07, 0.08, 0.1))
 var arrIds = []
 var origins = []
-var proto = Arrow([0, 0, 0], [0, 0, 1], aspectratio=tipFrac, n=10, color=White)
 
 for (ix in 0...nX) {
   for (iy in 0...nY) {
     var ox = (Float(ix) - 0.5*Float(nX-1))*spacing
     var oy = (Float(iy) - 0.5*Float(nY-1))*spacing
-    var oz = 0
-    origins.append(Matrix([ox, oy, oz]))
-    var f0 = field(ox, oy, 0)
-    var start = [ox, oy, oz]
-    var end = [ox, oy, oz + 0.35]
-    var srt = segmentSRT(start, end, shaftAR)
-    arrIds.append(g.display(proto, srt[0], scale=srt[1], rotate=srt[2],
-                            color=colorByVx(f0[0])))
+    var o = Matrix([ox, oy, 0])
+    origins.append(o)
+    var arr = fieldArrow(o, 0)
+    if (isnil(arr)) {
+      arr = Arrow(o, o + Matrix([0, 0, 0.35]), radius=0.35*shaftAR,
+                  aspectratio=tipFrac, n=10, color=White)
+    }
+    arrIds.append(g.display(arr))
   }
 }
 
@@ -60,17 +68,8 @@ for (frame in 1...nFrames) {
   var t = Float(frame)*dt
   g.beginBatch()
   for (i in 0...origins.count()) {
-    var o = origins[i]
-    var f = field(o[0], o[1], t)
-    var nrm = f.norm()
-    if (!(nrm > 1e-8)) continue
-    var len = 0.22 + 0.18*tanh(nrm)
-    var tip = o + (len/nrm)*f
-    var srt = segmentSRT(o, tip, shaftAR)
-    if (!isnil(srt)) {
-      g.move(arrIds[i], srt[0], scale=srt[1], rotate=srt[2])
-      g.recolor(arrIds[i], colorByVx(f[0]))
-    }
+    var arr = fieldArrow(origins[i], t)
+    if (!isnil(arr)) g.replace(arrIds[i], arr)
   }
   g.endBatch()
   System.sleep(dt)
