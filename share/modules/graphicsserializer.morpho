@@ -8,28 +8,20 @@ import color
 import graphics
 
 /* ----------------------------------------------------------------
- * TriangleComplexSerializationMixin
+ * TriangleComplexSerializerMixin
  *
  * Serialize a TriangleComplex.
  * ---------------------------------------------------------------- */
 
-class TriangleComplexSerializationMixin {
+class TriangleComplexSerializerMixin {
   // Emit the vertex format string
-  _vertexFormat(Coloring color) { self._write("v \"xn\"") }
-  _vertexFormat(ColorTable color) {
+  _vertexFormat(TriangleComplex item, Coloring color) { self._write("v \"xn\"") }
+  _vertexFormat(TriangleComplex item, ColorTable color) {
     self._write(color.channels() >= 4 ? "v \"xnca\"" : "v \"xnc\"")
   }
 
-  // Emit a vertex color
-  _vertexColor(parts, Coloring color, i) { } // No-op for uniform color
-  _vertexColor(parts, ColorTable color, i) {
-    var c = color.rgb(i)
-    parts.append("${self._fmt(c[0])} ${self._fmt(c[1])} ${self._fmt(c[2])} ")
-    if (color.channels() >= 4) parts.append("${self._fmt(color.alpha(i))} ")
-  }
-
   _triangles(item, color) { // Emit triangles
-    self._vertexFormat(color)
+    self._vertexFormat(item, color)
     var x = item.position, n = item.normals
     var dim = x.dimensions()[0], nv = x.dimensions()[1]
 
@@ -55,12 +47,6 @@ class TriangleComplexSerializationMixin {
     }
   }
 
-  // Define a color resource and return its id.
-  _drawColor(entry, Coloring color) { return self._defineColor(entry.effectiveColor()) }
-  _drawColor(entry, ColorTable color) {
-    return isnil(entry.color) ? nil : self._defineColor(entry.color)
-  }
-
   // Define a triangle complex
   _define(GraphicsEntry entry, TriangleComplex item) {
     if (entry.flat) self._write("M flat")
@@ -78,10 +64,57 @@ class TriangleComplexSerializationMixin {
 }
 
 /* ----------------------------------------------------------------
+ * PointCloudSerializerMixin
+ *
+ * Serialize a PointCloud. Unlit unless flat=false.
+ * ---------------------------------------------------------------- */
+
+class PointCloudSerializerMixin {
+  // Emit the vertex format string
+  _vertexFormat(PointCloud item, Coloring color) { self._write("v \"x\"") }
+  _vertexFormat(PointCloud item, ColorTable color) {
+    self._write(color.channels() >= 4 ? "v \"xca\"" : "v \"xc\"")
+  }
+
+  _points(item, color) { // Emit points
+    self._vertexFormat(item, color)
+    var x = item.position
+    var dim = x.dimensions()[0], nv = x.dimensions()[1]
+
+    for (i in 0...nv) {
+      var parts = []
+      for (j in 0...dim) parts.append("${self._fmt(x[j,i])} ")
+      self._vertexColor(parts, color, i)
+      self._write(parts)
+    }
+
+    var parts = ["p"]
+    for (i in 0...nv) parts.append(" ${i}")
+    self._write(parts)
+  }
+
+  // Define a point cloud
+  _define(GraphicsEntry entry, PointCloud item) {
+    var flat = isnil(entry.flat) ? true : entry.flat
+    if (flat) self._write("M flat")
+    var cid = self._drawColor(entry, item.color)
+    var vid = self._uid()
+    self._write("o ${vid}")
+    _points(item, item.color)
+    self._emitTransform(entry)
+    if (isnil(cid)) self._write("C")
+    else self._write("C ${cid}")
+    self._write("d ${entry.id} ${vid}")
+    if (flat) self._write("M shaded")
+    return vid
+  }
+}
+
+/* ----------------------------------------------------------------
  * GraphicsSerializer
  * ---------------------------------------------------------------- */
 
-class GraphicsSerializer with TriangleComplexSerializationMixin {
+class GraphicsSerializer with TriangleComplexSerializerMixin, PointCloudSerializerMixin {
   init(Graphics graphic, out) {
     self.graphic = graphic
     self.out = out
@@ -156,6 +189,7 @@ class GraphicsSerializer with TriangleComplexSerializationMixin {
     return self.uid
   }
 
+  // Define a color resource; returns its id.
   _defineColor(Coloring color) {
     var id = self.colorid
     self.colorid += 1
@@ -166,10 +200,24 @@ class GraphicsSerializer with TriangleComplexSerializationMixin {
     return id
   }
 
+  // Draw-slot color, or nil to keep vertex colors.
+  _drawColor(entry, Coloring color) { return _defineColor(entry.effectiveColor()) }
+  _drawColor(entry, ColorTable color) {
+    return isnil(entry.color) ? nil : _defineColor(entry.color)
+  }
+
+  // Emit a vertex color
+  _vertexColor(parts, Coloring color, i) { } // No-op for uniform color
+  _vertexColor(parts, ColorTable color, i) {
+    var c = color.rgb(i)
+    parts.append("${_fmt(c[0])} ${_fmt(c[1])} ${_fmt(c[2])} ")
+    if (color.channels() >= 4) parts.append("${_fmt(color.alpha(i))} ")
+  }
+
   _emitTransform(entry) { // Emit transformation instructions for an entry.
     _write("i") // Begin with identity matrix
     var scl = entry.scale
-    if (ismatrix(scl)) {  // Emit scale factors 
+    if (ismatrix(scl)) {  // Emit scale factors
       _write("s ${_fmt(scl[0])} ${_fmt(scl[1])} ${_fmt(scl[2])}")
     } else if (scl != 1) { // Or a homogenous scale
       _write("s ${_fmt(scl)}")
