@@ -1,7 +1,7 @@
 /* *******************************************************************************************
  * Plot module (local prototype)
  * *******************************************************************************************
- * Modernization of morpho `plot` against xgraphics / xcolor.
+ * Modernization of morpho `plot` against graphics / color.
  * Canonical API: Plot(Mesh) / Plot(Selection) / Plot(Field) — class Plot is Scene.
  * Extend by subclassing Plot (override _drawMesh / _drawSelection / _drawField / _finish).
  * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot
@@ -15,7 +15,7 @@
  ******************************************************************************************* */
 
 import constants
-import xgraphics
+import graphics
 import color
 
 /* --------------------------
@@ -117,7 +117,7 @@ fn _centroid(m, g, id) {
  * Grade / style predicates
  * -------------------------- */
 
-/** Ones + winding for a Sparse triangle column (mirrors xgraphics `_tri`). */
+/** Ones + winding for a Sparse triangle column (mirrors graphics `_tri`). */
 fn _plotTri(conn, i, a, b, c) {
   conn[a, i] = 1; conn[b, i] = 1; conn[c, i] = 1
   conn.setrowindices(i, (a, b, c))

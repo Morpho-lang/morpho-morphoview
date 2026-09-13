@@ -5,7 +5,7 @@
 //   cd test && morpho6 testviewtext.morpho
 
 import morphoview
-import xgraphics
+import graphics
 import color
 
 var g = Scene()

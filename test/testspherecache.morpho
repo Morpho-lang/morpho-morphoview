@@ -4,7 +4,7 @@
 //   cd test && morpho6 testspherecache.morpho
 
 import morphoview
-import xgraphics
+import graphics
 import color
 
 class Buf {

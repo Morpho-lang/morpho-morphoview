@@ -1,10 +1,10 @@
-// xcolor: Coloring hierarchy, HSV, Blend/add/scale, ColorMap.color(x).
+// color: Coloring hierarchy, HSV, Blend/add/scale, ColorMap.color(x).
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testxcolor.morpho
 
 import morphoview
-import xgraphics
+import graphics
 import color
 import constants
 

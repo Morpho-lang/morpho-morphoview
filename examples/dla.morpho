@@ -7,7 +7,7 @@
 // Close the viewer window to exit early.
 
 import morphoview
-import xgraphics
+import graphics
 import color
 import kdtree
 

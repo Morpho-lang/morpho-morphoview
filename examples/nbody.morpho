@@ -6,7 +6,7 @@
 // Close the viewer window (or wait for the run to finish) to exit.
 
 import morphoview
-import xgraphics
+import graphics
 import color
 import constants
 

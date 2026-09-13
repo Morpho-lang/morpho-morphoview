@@ -4,7 +4,7 @@
 //   cd test && morpho6 testxpovray.morpho
 
 import xpovray
-import xgraphics
+import graphics
 import color
 
 fn expect(cond, msg) {

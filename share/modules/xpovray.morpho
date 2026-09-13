@@ -1,14 +1,14 @@
 /* *******************************************************************************************
  * POV-Ray
  * *******************************************************************************************
- * Ray-trace an xgraphics Graphics/Scene with POV-Ray.
+ * Ray-trace a graphics Graphics/Scene with POV-Ray.
  * Displaylists contain GraphicsEntry objects with GraphicsPrimitives.
  *
  * Public: Camera, POVRaytracer, write, render, visit.
  ******************************************************************************************* */
 
 import constants
-import xgraphics
+import graphics
 import color
 import fonts
 

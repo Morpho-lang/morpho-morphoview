@@ -3,7 +3,7 @@
 //
 //   cd test && morpho6 testpolygon.morpho
 
-import xgraphics
+import graphics
 import color
 import xshow
 import xpovray

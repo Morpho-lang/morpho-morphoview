@@ -17,10 +17,10 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 
 ### Upstream (package work is done; still to land in morpho)
 
-- [ ] Push [`xgraphics.morpho`](share/modules/xgraphics.morpho) / [`xshow.morpho`](share/modules/xshow.morpho) / [`xfonts.morpho`](share/modules/xfonts.morpho) to morpho `graphics` / `show` / `fonts`
-- [ ] Push [`xcolor.morpho`](share/modules/xcolor.morpho) to morpho `color` (`Color` alpha, `Coloring`, `ColorTable`, ColorMap ≠ Color)
+- [x] Push graphics to morpho (`graphics`); still to land: [`xshow.morpho`](share/modules/xshow.morpho) / [`xfonts.morpho`](share/modules/xfonts.morpho) as `show` / `fonts`
+- [x] Push color to morpho (`Color` alpha, `Coloring`, `ColorTable`, ColorMap ≠ Color)
 - [ ] Push [`xplot.morpho`](share/modules/xplot.morpho) to morpho `plot` (dogfood this package first)
-- [X] Keep core `graphics.morpho` free of `meshtools` (already true here: UV sphere in xgraphics; examples like soapbubble may still `import meshtools`)
+- [X] Keep core `graphics.morpho` free of `meshtools` (UV sphere in graphics; examples like soapbubble may still `import meshtools`)
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
 - [ ] Faster String.join(list, sep) (or List.join) so Show/View stop pairwise-merging and += loops.
 
@@ -47,8 +47,8 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 
 - [x] Live Graphics/Scene/View through Text draw-slots: stable ids, define vs draw, Broadcaster listeners, selective pose redraw, unit Sphere/Cylinder/Arrow mesh cache, `U O` / `U V` / `X O` / `X D`, materials/lighting/opacity, framing/auto-fit, ZMQ `View` session API, yardsticks (`boing`, `nbody`, `soapbubble`, `vectors`, `flyingtext`)
 - [x] Graphics compactification: `GraphicsEntry.effectiveColor()`, primitive color never nil, uniform color via draw-slot `C`, `_ViewerSlot` serializer bookkeeping, `TriangleComplex.faceIndices`, modules `xfonts` / `xshow` split out of `xgraphics`
-- [x] Local UV-sphere tessellation (no meshtools in xgraphics)
-- [x] `xcolor`: `Color(r,g,b)` / `Color(r,g,b,a)`, `Coloring`, `ColorTable` RGB/RGBA, ColorMap ≠ Color, Show via Coloring MD
+- [x] Local UV-sphere tessellation (no meshtools in graphics)
+- [x] `color`: `Color(r,g,b)` / `Color(r,g,b,a)`, `Coloring`, `ColorTable` RGB/RGBA, ColorMap ≠ Color, Show via Coloring MD
 - [x] `xplot` Phases 1–5: `Plot is Scene`, bulk primitives, axes/`ScaleBar`/`ScaleBarStrip`, normalize/`center=`, live `axes`/`colormap`/`range`/`center`/`refresh(view)`
 - [x] Per-vertex alpha: format letter `a`; Show emits `xnca`/`xca` for RGBA ColorTables. Uniform `Color.a` still uses `C`. Transparent sort remains object-centroid.
 

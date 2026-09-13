@@ -3,7 +3,7 @@
 //
 //   cd test && morpho6 testtextslot.morpho
 
-import xgraphics
+import graphics
 import xshow
 import color
 

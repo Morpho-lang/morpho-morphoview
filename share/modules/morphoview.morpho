@@ -15,7 +15,7 @@
  */
 
 import zeromq
-import xgraphics
+import graphics
 import xshow
 import broadcast
 

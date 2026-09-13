@@ -99,7 +99,7 @@ Optional constructor args: `title=`, `background=` (a `Color`), `light=` (anythi
 
 A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (or of `Light`) is several. `Light` has `position`, `color` (default `White`), and `intensity` (default `1`); the viewer RGB is `color * intensity`. `setLights` replaces the whole `Lighting`. The first `addLight` leaves Neutral; `"threepoint"` / `"off"` are replaced by a custom list. Unknown names and over-long lists error rather than silently falling back. Live `View` sends `L "neutral"` on `resetLights()`.
 
-`import xgraphics` also provides `Light`, `Lighting`, `setLights` / `addLight` / `resetLights` (on `Graphics`), and `cross3D(a, b)` (3-vector cross product).
+`import graphics` also provides `Light`, `Lighting`, `setLights` / `addLight` / `resetLights` (on `Graphics`), and `cross3D(a, b)` (3-vector cross product).
 
 ## Scene
 [tagScene]: # (Scene)
@@ -127,7 +127,7 @@ Mutators return `true`/`false`. Prefer `View(Scene)` for live sessions.
 ## Primitives
 [tagprimitives]: # (primitives)
 
-Graphical elements for `display` (from `xgraphics`):
+Graphical elements for `display` (from `graphics`):
 
 * `Sphere(center, r, color=, transmit=, filter=)`
 * `Cylinder(start, end, aspectratio=, radius=, n=, color=, …)` — `radius=` is the shaft radius; otherwise `aspectratio × length`

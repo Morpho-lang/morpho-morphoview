@@ -3,7 +3,7 @@
 //
 //   cd test && morpho6 testsphere.morpho
 
-import xgraphics
+import graphics
 import xshow
 import color
 

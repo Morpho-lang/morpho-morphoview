@@ -7,7 +7,7 @@
  * Live View sessions live in morphoview.morpho (Listener over ZMQ).
  */
 
-import xgraphics
+import graphics
 import color
 import fonts
 import constants

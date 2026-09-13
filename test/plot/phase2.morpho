@@ -6,7 +6,7 @@
 import meshtools
 import xplot
 import color
-import xgraphics
+import graphics
 
 fn expect(cond, msg) {
   if (!cond) {

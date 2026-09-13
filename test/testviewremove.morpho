@@ -5,7 +5,7 @@
 //   cd test && morpho6 testviewremove.morpho
 
 import morphoview
-import xgraphics
+import graphics
 
 fn expect(cond, msg) {
   if (!cond) {

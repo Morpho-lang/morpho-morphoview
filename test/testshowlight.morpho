@@ -4,7 +4,7 @@
 //
 //   cd test && morpho6 testshowlight.morpho
 
-import xgraphics
+import graphics
 import xshow
 import color
 

@@ -5,7 +5,7 @@
 
 import meshtools
 import xplot
-import xgraphics
+import graphics
 import xshow
 import color
 

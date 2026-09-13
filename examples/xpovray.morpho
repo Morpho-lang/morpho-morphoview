@@ -1,11 +1,11 @@
-// Ray-trace an xgraphics scene with POV-Ray.
+// Ray-trace a graphics scene with POV-Ray.
 //
 //   morpho6 examples/xpovray.morpho
 //
 // Needs the `povray` binary on PATH for render(); the .pov file is
 // written either way.
 
-import xgraphics
+import graphics
 import color
 import xpovray
 import constants
