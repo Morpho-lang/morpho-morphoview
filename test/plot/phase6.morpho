@@ -25,16 +25,18 @@ expect(g.displaylist.count() == 2, "two cylinders")
 
 var u = p + g
 expect(u.displaylist.count() == nPlot + 2, "plot + graphics count")
+expect(u.clss() == Scene, "plot + graphics is Scene")
 expect(p.displaylist.count() == nPlot, "+ leaves Plot unchanged")
 expect(g.displaylist.count() == 2, "+ leaves Graphics unchanged")
 
 var u2 = p.add(g)
 expect(u2.displaylist.count() == nPlot + 2, "Plot.add(Graphics) count")
 
-var p2 = Plot(m, color=Red)
-var n2 = p2.displaylist.count()
-p2.addr(g)
-expect(p2.displaylist.count() == n2 + 2, "addr grows Plot")
+var u3 = g + p
+expect(u3.displaylist.count() == nPlot + 2, "graphics + plot count")
+expect(u3.clss() == Graphics, "graphics + plot is Graphics")
+expect(p.displaylist.count() == nPlot, "g+p leaves Plot unchanged")
+expect(g.displaylist.count() == 2, "g+p leaves Graphics unchanged")
 
 var S = Field(m, fn (x, y, z) x)
 var splot = plotfield(S, style="interpolate", colormap=ViridisMap())

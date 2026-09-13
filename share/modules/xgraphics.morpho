@@ -1082,6 +1082,16 @@ class Graphics {
     }
   }
 
+  // Left-hand ids kept; right-hand entries remapped onto g
+  _joinInto(g, Graphics right) {
+    g._nextId = self._nextId
+    self._copyEntriesInto(g)
+    for (el in right.displaylist) {
+      g._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate,
+                color=el.color, flat=el.flat)
+    }
+  }
+
   /** Unit item + explicit pose. Nil `color` means no presentation override. */
   _displayUnit(unitItem, position, scale=nil, rotate=nil, color=nil, flat=nil) {
     var scl = isnil(scale) ? 1 : scale
@@ -1199,16 +1209,11 @@ class Graphics {
     target.light = self.light.clone()
   }
 
-  // Combine two Graphics; right hand side is copied into the displaylist with new ids
+  // Combine two Graphics; right-hand side is copied with new ids
   add(Graphics right) {
     var g = Graphics()
     self._copyMetaInto(g)
-    g._nextId = self._nextId
-    self._copyEntriesInto(g)
-    for (el in right.displaylist) {
-      g._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate,
-                color=el.color, flat=el.flat)
-    }
+    self._joinInto(g, right)
     return g
   }
 }
@@ -1416,16 +1421,11 @@ class Scene is Graphics with Broadcaster {
 
   replace(id, item) { return false }
 
-  // Support join operation with Graphics
+  // Scene + Graphics
   add(Graphics right) {
     var g = Scene()
     self._copyMetaInto(g)
-    g._nextId = self._nextId
-    self._copyEntriesInto(g)
-    for (el in right.displaylist) {
-      g._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate,
-                color=el.color, flat=el.flat, notify=false)
-    }
+    self._joinInto(g, right)
     return g
   }
 }

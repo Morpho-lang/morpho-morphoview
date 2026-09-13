@@ -86,7 +86,7 @@ Occasional full refresh uses `update(Graphics)`. Efficient animation uses a `Sce
 * `rotate` — `[angle, ax, ay, az]` or `nil`
 * `color` / `flat` — presentation color and unlit shading
 
-Combine two Graphics objects with `+` / `add` (left-hand ids kept; right-hand ids remapped).
+Combine two Graphics objects with `+` / `add` (left-hand type and ids kept; right-hand ids remapped). `Scene + Graphics` is a `Scene`; `Graphics + Scene` is a `Graphics`.
 
 Optional constructor args: `title=`, `background=` (a `Color`), `light=` (anything `Lighting(...)` accepts).
 

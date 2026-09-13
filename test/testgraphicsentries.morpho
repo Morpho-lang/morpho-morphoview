@@ -100,10 +100,15 @@ expect(u.display(PointCloud(Matrix([[3], [0], [0]]))) == 5, "ids continue after 
 
 var uOp = a + b
 expect(uOp.displaylist.count() == 4, "a+b operator")
-var acc = Graphics()
-acc.display(PointCloud(Matrix([[0], [0], [0]])))
-acc.addr(b)
-expect(acc.displaylist.count() == 3, "addr appends in place")
+expect(uOp.clss() == Graphics, "Graphics + Graphics is Graphics")
+expect(a.displaylist.count() == 2, "+ leaves left Graphics unchanged")
+
+var sceneL = Scene()
+sceneL.display(PointCloud(Matrix([[0], [0], [0]])))
+var scG = sceneL + b
+expect(scG.clss() == Scene && scG.displaylist.count() == 3, "Scene + Graphics is Scene")
+var gSc = b + sceneL
+expect(gSc.clss() == Graphics && gSc.displaylist.count() == 3, "Graphics + Scene is Graphics")
 
 /* ---- add copies lighting metadata (no shared Lighting) ---- */
 var lit = Graphics(light=[Matrix([1, 2, 3])])

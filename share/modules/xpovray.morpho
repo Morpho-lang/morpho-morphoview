@@ -245,10 +245,12 @@ class POVRaytracer {
     self._text(item, self._skin(entry), self._orient(item) + self._wrap(entry), out)
   }
 
-  visit(entry, GraphicsPrimitive item, out) {
+  visit(entry, TriangleConvertibleMixin item, out) {
     var tri = item.toTriangleComplex()
     if (!isnil(tri)) self._mesh(entry, tri, out)
   }
+
+  visit(entry, item, out) { }
 
   _perVertex(ColorTable col) { return true }
   _perVertex(Coloring col) { return false }
