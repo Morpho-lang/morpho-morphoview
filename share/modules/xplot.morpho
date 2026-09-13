@@ -1,46 +1,33 @@
-/* *******************************************************************************************
- * Plot module (local prototype)
- * *******************************************************************************************
- * Modernization of morpho `plot` against graphics / color.
- * Canonical API: Plot(Mesh) / Plot(Selection) / Plot(Field) — class Plot is Scene.
- * Extend by subclassing Plot (override _drawMesh / _drawSelection / _drawField / _finish).
- * Legacy plotmesh / plotselection / plotfield are thin veneers over Plot
- * (default style="thick": spheres + tubes, matching classic plot).
- * Presentation: axes=true (domain frame) + scalebar=true / ScaleBar / ScaleBarStrip.
- * ScaleBar is a vertex-colored TriangleComplex tube plus Polygon end caps
- * (ScaleBarStrip is an open strip, no caps).
- * Built locally: cross-section → positions / normals / ColorTable / connectivity. No meshtools.
- * Field coloring: linear normalize (safe on uniform fields) + optional center= for diverging maps.
- * Live: axes / colormap / range / center / refresh [view] mutate Scene (fields: morph via View, not recolor).
- ******************************************************************************************* */
+/* ***************************************************************
+ * Plot
+ * =========
+ * Visualize a Mesh, Field, Selection etc.
+ **************************************************************** */
 
 import constants
 import graphics
 import color
 
-/* --------------------------
- * Errors
- * -------------------------- */
-
+// Error messages
 var _PltMshClErr = Error("PltMshCl", "Color specification for plotmesh should be either a color, a list of [r,g,b] values or a list of colors for each grade.")
 var _PltFldIntErr = Error("PltFldInt", "Can't use 'interpolate' style: Field lacks values on vertices.")
 var _PltSlctnEmptyErr = Error("PltSlctnEmpty", "Selection is empty.")
 var _PltSclBrVctrErr = Error("PltSclBrVctr", "ScaleBar vector must be a non-zero Matrix, List, or Tuple; tickdirn must not be parallel to dirn.")
 
-/* --------------------------
- * Geometry / bounds
- * -------------------------- */
+/* ----------------------------------------------------------------
+ * Bounding boxes
+ * ---------------------------------------------------------------- */
 
-/** Bounding box from a vertex matrix: list of [min,max] per coordinate row. */
-fn _boundingBox(m) {
+// Bounding box from a vertex matrix
+fn _boundingBox(Matrix m) {
   var col = m.transpose()
   var bnds = []
   for (i in 0...col.dimensions()[1]) bnds.append(bounds(col.column(i)))
   return bnds
 }
 
-/** Scientific bounds from mesh dimensionality (vertexmatrix rows), not planarity. */
-fn _scientificBounds(mesh) {
+/** ??? Scientific bounds from mesh dimensionality (vertexmatrix rows), not planarity. */
+fn _scientificBounds(Mesh mesh) {
   return _boundingBox(mesh.vertexmatrix())
 }
 
@@ -437,9 +424,9 @@ fn _fieldColors(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=
   return (mesh, sel, showgrades, col, cm, bnd)
 }
 
-/* *******************************************************************************************
- * Presentation chrome — ticks, domain frame, axes labels
- ******************************************************************************************* */
+/* ----------------------------------------------------------------
+ * Presentation helper functions
+ * ---------------------------------------------------------------- */
 
 fn _ticksForStep(a, b, dw) {
   return (dw*ceil(a/dw))..(dw*floor(b/dw)):dw
@@ -723,9 +710,11 @@ fn _smoothVertexNormals(mesh, vertMat, selection=nil) {
   return acc
 }
 
-/* *******************************************************************************************
- * ScaleBar — tube TriangleComplex + Polygon end caps; ScaleBarStrip is an open strip
- ******************************************************************************************* */
+/* ----------------------------------------------------------------
+ * ScaleBar
+ * 
+ * Visualizes a color map with ticks and labels
+ * ---------------------------------------------------------------- */
 
 class ScaleBar {
   _asVec(val, default, unit=false) {
@@ -885,9 +874,11 @@ fn _wantScalebar(x) { return false }
 fn _scalebarObj(ScaleBar x) { return x }
 fn _scalebarObj(x) { return nil }
 
-/* *******************************************************************************************
- * Plot — scientific visualization as a Scene
- ******************************************************************************************* */
+/* ----------------------------------------------------------------
+ * Plot 
+ * 
+ * Visualizes a source object as a Scene
+ * ---------------------------------------------------------------- */
 
 class Plot is Scene {
   _setup(source, title=nil, background=nil, axes=false, scalebar=false) {
@@ -1331,9 +1322,9 @@ class Plot is Scene {
   }
 }
 
-/* *******************************************************************************************
- * Legacy veneers — one implementation path through Plot
- ******************************************************************************************* */
+/* ----------------------------------------------------------------
+ * Legacy API constructs an equivalent Plot
+ * ---------------------------------------------------------------- */
 
 fn plotmesh(mesh, selection=nil, grade=nil, color=nil, style=nil, filter=nil, transmit=nil) {
   return Plot(mesh, selection=selection, grade=grade,

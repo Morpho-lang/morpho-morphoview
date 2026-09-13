@@ -1,0 +1,188 @@
+/* ***************************************************************
+ * GraphicsSerializer
+ * ==================
+ * Serialize Graphics into morphoview ASCII IR
+ **************************************************************** */
+
+import color
+import graphics
+
+/* ----------------------------------------------------------------
+ * TriangleComplexSerializationMixin
+ *
+ * Serialize a TriangleComplex.
+ * ---------------------------------------------------------------- */
+
+class TriangleComplexSerializationMixin {
+  // Emit the vertex format string
+  _vertexFormat(Coloring color) { self._write("v \"xn\"") }
+  _vertexFormat(ColorTable color) {
+    self._write(color.channels() >= 4 ? "v \"xnca\"" : "v \"xnc\"")
+  }
+
+  // Emit a vertex color
+  _vertexColor(parts, Coloring color, i) { } // No-op for uniform color
+  _vertexColor(parts, ColorTable color, i) {
+    var c = color.rgb(i)
+    parts.append("${self._fmt(c[0])} ${self._fmt(c[1])} ${self._fmt(c[2])} ")
+    if (color.channels() >= 4) parts.append("${self._fmt(color.alpha(i))} ")
+  }
+
+  _triangles(item, color) { // Emit triangles
+    self._vertexFormat(color)
+    var x = item.position, n = item.normals
+    var dim = x.dimensions()[0], nv = x.dimensions()[1]
+
+    for (i in 0...nv) {
+      var parts = []
+      for (j in 0...dim) parts.append("${self._fmt(x[j,i])} ")
+      for (j in 0...dim) parts.append("${self._fmt(n[j,i])} ")
+      self._vertexColor(parts, color, i)
+      self._write(parts)
+    }
+
+    self._faces(item)
+  }
+
+  _faces(item) { // Emit faces
+    self._write("f")
+    var nf = item.connectivity.dimensions()[1]
+    for (i in 0...nf) {
+      var indx = item.faceIndices(i)
+      var parts = []
+      for (j in 0...indx.count()) parts.append("${indx[j]} ")
+      self._write(parts)
+    }
+  }
+
+  // Define a color resource and return its id.
+  _drawColor(entry, Coloring color) { return self._defineColor(entry.effectiveColor()) }
+  _drawColor(entry, ColorTable color) {
+    return isnil(entry.color) ? nil : self._defineColor(entry.color)
+  }
+
+  // Define a triangle complex
+  _define(GraphicsEntry entry, TriangleComplex item) {
+    if (entry.flat) self._write("M flat")
+    var cid = self._drawColor(entry, item.color)
+    var vid = self._uid()
+    self._write("o ${vid}")
+    _triangles(item, item.color)
+    self._emitTransform(entry)
+    if (isnil(cid)) self._write("C")
+    else self._write("C ${cid}")
+    self._write("d ${entry.id} ${vid}")
+    if (entry.flat) self._write("M shaded")
+    return vid
+  }
+}
+
+/* ----------------------------------------------------------------
+ * GraphicsSerializer
+ * ---------------------------------------------------------------- */
+
+class GraphicsSerializer with TriangleComplexSerializationMixin {
+  init(Graphics graphic, out) {
+    self.graphic = graphic
+    self.out = out
+    self.uid = 0
+    self.colorid = 0
+  }
+
+  serialize(replace=false) { // Serialize the graphics
+    _preamble(replace)
+    for (entry in self.graphic.displaylist) self.define(entry)
+  }
+
+  define(GraphicsEntry entry) { // Dispatch define by item type
+    return self._define(entry, entry.item)
+  }
+
+  _define(GraphicsEntry entry, item) { } // Null for entries that are not understood
+
+  // Emit lighting. Reset replaces lights already in the viewer.
+  lights(reset=false) {
+    var lighting = self.graphic.light
+    if (lighting.mode == "neutral") {
+      if (reset) _write("L \"neutral\"")
+      return
+    }
+    if (lighting.mode != "custom") {
+      _write("L \"${lighting.mode}\"")
+      return
+    }
+
+    var n = lighting.lights.count()
+    if (n == 0) return
+
+    var parts = ["L ", n, " \"xc\""]
+    for (light in lighting.lights) {
+      var p = light.position
+      var rgb = (light.intensity*light.color).rgb(0)
+      parts.append(" ${_fmt(p[0])} ${_fmt(p[1])} ${_fmt(p[2])}")
+      parts.append(" ${_fmt(rgb[0])} ${_fmt(rgb[1])} ${_fmt(rgb[2])}")
+    }
+    _write(parts)
+  }
+
+  _preamble(replace=false) { // Emit the preamble
+    _write(replace ? "U S 1" : "S 1 3") // Begin scene
+    _write("W \"${_escape(self.graphic.title)}\"") // Scene title
+
+    var bg = self.graphic.background.rgb(0) // Background color
+    _write("G ${_fmt(bg[0])} ${_fmt(bg[1])} ${_fmt(bg[2])}")
+
+    self.lights()
+  }
+
+  // Write to the output target; convenience concatenation for Lists
+  _write(String s) { self.out.write(s) }
+  _write(List parts) { self.out.write(_concat(parts)) }
+  _concat(List parts) { return apply(String, parts) }
+
+  _fmt(x) { return Float(x).format("%0.3g") } // 3 significant figures
+
+  _escape(s) { // Escape strings for morphoview IR
+    var parts = []
+    for (ch in s) {
+      if (ch == "\\" || ch == "\"") parts.append("\\")
+      parts.append(ch)
+    }
+    return _concat(parts)
+  }
+
+  _uid() { // Next object id
+    self.uid += 1
+    return self.uid
+  }
+
+  _defineColor(Coloring color) {
+    var id = self.colorid
+    self.colorid += 1
+    var rgba = color.rgba(0)
+    var r = _fmt(rgba[0]), g = _fmt(rgba[1]), b = _fmt(rgba[2]), a = _fmt(rgba[3])
+    if (rgba[3] < 0.999) _write("c ${id} ${r} ${g} ${b} ${a}")
+    else _write("c ${id} ${r} ${g} ${b}")
+    return id
+  }
+
+  _emitTransform(entry) { // Emit transformation instructions for an entry.
+    _write("i") // Begin with identity matrix
+    var scl = entry.scale
+    if (ismatrix(scl)) {  // Emit scale factors 
+      _write("s ${_fmt(scl[0])} ${_fmt(scl[1])} ${_fmt(scl[2])}")
+    } else if (scl != 1) { // Or a homogenous scale
+      _write("s ${_fmt(scl)}")
+    }
+    if (!isnil(entry.rotate)) { // Emit rotation
+      var r = entry.rotate
+      if (!(abs(r[0]) < 1e-8)) {
+        _write("r ${_fmt(r[0])} ${_fmt(r[1])} ${_fmt(r[2])} ${_fmt(r[3])}")
+      }
+    }
+    var p = entry.position // Emit translation
+    if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
+      _write("t ${_fmt(p[0])} ${_fmt(p[1])} ${_fmt(p[2])}")
+    }
+  }
+}
