@@ -1,60 +1,64 @@
-/* Graphics / Scene
- *
- * History:
- * 1/7/25 Redirect error output to /dev/null to suppress errors on macOS
- * 1/2/26 Windows compatibility
- * 7/31/26 Additional features to support new morphoview:
- * - PointCloud / LineSet primitives
- * - display() creates GraphicsEntry, enabling pose information to be decoupled from the item
- * - Scene is Graphics with Broadcaster (move / recolor)
- * Live View sessions live in morphoview.morpho; Show lives in xshow.morpho.
- * Sphere tessellation is a cached UV sphere (no meshtools).
- */
+/* ***************************************************************
+ * Graphics
+ * ========
+ * Abstract graphics containers
+ **************************************************************** */
+
+/* ----------------------------------------------------------------
+ * The graphics module provides: 
+ * - GraphicsPrimitives : displayable items, e.g. Sphere, Cylinder
+ * - Light : Point Lights
+ * - GraphicsEntry : An entry in the displaylist with pose info
+ * - Graphics : A static container representing a scene
+ * - Scene : Live container that can broadcast changes
+ * - various utility functions
+ * ---------------------------------------------------------------- */
 
 import constants
 import color
 import broadcast
 
-var _eps = 1e-15
-var _txtdrnvrtprll = Error("TxtDrnVrtPrll", "Direction and vertical must not be parallel or zero.")
-// [Compatibility shim]
-var _GfxLegacyTranspErr = Error("GfxLegacyTransp",
-  "filter=/transmit= map to Color.a. Prefer Color(..., a) or Coloring.opacity(a).")
+// Constants
+var _LIGHT_MAX = 4 // Viewer applications must support at least this
+var _epsNorm = 1e-15   // Used to detect zero norm of a vector
+var _epsDraw = 1e-8  // Cutoff 
+
+// Error messages
+var _GfxTxtDrnVrtPrllErr = Error("GfxTxtDrnVrtPrll", "Text direction and vertical are either zero length or parallel.")
+
+var _GfxEntryClrErr = Error("GfxEntryClr", "GraphicsEntry.color must be a Color.")
+var _GfxClrTblLenErr = Error("GfxClrTblLen", "ColorTable must provide one color per vertex.")
+var _GfxPolyErr = Error("GfxPoly", "Polygon must be convex and planar n-gon (n>=3).")
+var _GfxLightNameErr = Error("GfxLightName", "Graphics.light name must be \"neutral\", \"threepoint\", \"auto\", or \"off\".")
+var _GfxLightPosErr = Error("GfxLightPos", "Each lamp must be a 3-vector (Matrix, [x,y,z], or (x,y,z)).")
+var _GfxLightNErr = Error("GfxLightN", "Graphics supports up to 4 world-space point lights.")
+var _GfxLightValErr = Error("GfxLightVal", "Graphics.light must be nil, a named rig, a Light, a 3-vector, or a list of those.")
+var _GfxLightColorErr = Error("GfxLightColor", "Light.color must be a Color.")
+var _GfxLineConnErr = Error("GfxLineConn", "LineSet connectivity must contain pairs of valid vertex indices.")
+
+// [Compatibility shim] Warn about use of filter/transmit 
+var _GfxLegacyTranspErr = Error("GfxLegacyTransp", "Use of filter and transmit is deprecated. These are now mapped to a Color with alpha. Convert code to use Color(..., a) or Coloring.opacity(a).")
 var _warnedLegacyTransp = false
-var _GfxEntryClrErr = Error("GfxEntryClr",
-  "GraphicsEntry.color is a uniform presentation override; ColorTable belongs on the primitive.")
-var _GfxClrTblLenErr = Error("GfxClrTblLen",
-  "ColorTable must have one color per vertex.")
-var _GfxPolyErr = Error("GfxPoly",
-  "Polygon must be a convex planar n-gon (n>=3); winding defines the normal.")
-var _GfxLightNameErr = Error("GfxLightName",
-  "Graphics.light name must be \"neutral\", \"threepoint\", \"auto\", or \"off\".")
-var _GfxLightPosErr = Error("GfxLightPos",
-  "Each lamp must be a 3-vector (Matrix, [x,y,z], or (x,y,z)).")
-var _GfxLightNErr = Error("GfxLightN",
-  "At most 4 world-space point lights.")
-var _GfxLightValErr = Error("GfxLightVal",
-  "Graphics.light must be nil, a named rig, a Light, a 3-vector, or a list of those.")
-var _GfxLightColorErr = Error("GfxLightColor",
-  "Light.color must be a Color (RGB); alpha is unused.")
 
-/* **************************************
- * Utility functions
- **************************************** */
+/* ----------------------------------------------------------------
+ * 3D geometry utility functions
+ * ---------------------------------------------------------------- */
 
-/** Constructs a rotation matrix
-  @param[in] theta - rotation angle
-  @param[in] axis - axis to rotate about
-  @returns the rotation matrix  */
+/** 3-vector cross product. `a` and `b` need `[0],[1],[2]` (Matrix, List, or Tuple). */
+fn cross3D(a, b) {
+  return Matrix([ a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0] ])
+}
+
+// Constructs a rotation matrix with angle theta about axis
 fn _rotation(theta, axis) {
   var x = axis[0], y=axis[1], z=axis[2]
   var ctheta = cos(theta), stheta = sin(theta), cc=1-ctheta
 
   return Matrix(
-  [[x*x*cc+ctheta,   x*y*cc-z*stheta, x*z*cc+y*stheta],
-   [x*y*cc+z*stheta, y*y*cc+ctheta,   y*z*cc-x*stheta],
-   [z*x*cc-y*stheta, y*z*cc+x*stheta, z*z*cc+ctheta ]]
-  )
+    ( ( x*x*cc+ctheta,   x*y*cc-z*stheta, x*z*cc+y*stheta ),
+      ( x*y*cc+z*stheta, y*y*cc+ctheta,   y*z*cc-x*stheta ),
+      ( z*x*cc-y*stheta, y*z*cc+x*stheta, z*z*cc+ctheta   ) )
+   )
 }
 
 /** Generates a vector normal to a given vector but of arbitrary orientation */
@@ -67,13 +71,8 @@ fn _normalVector(vec) {
   return out
 }
 
-/** 3-vector cross product. `a` and `b` need `[0],[1],[2]` (Matrix, List, or Tuple). */
-fn cross3D(a, b) {
-  return Matrix([ a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0] ])
-}
-
-/* Gram-Schmidt orthonormalization */
-fn _orthogonalize(m) { 
+/** Orthonormalize a set of vectors using Gram-Schmidt */
+fn _orthonormalize(m) { 
   var ncols=m.dimensions()[1]
   for (i in 0...ncols) {
     var x = m.column(i)
@@ -82,196 +81,37 @@ fn _orthogonalize(m) {
       x -= x.inner(y)*y
     }
     var nrm = x.norm() 
-    if (nrm<_eps) _txtdrnvrtprll.throw() 
+    if (nrm<_epsNorm) return false
     x/=nrm
     m.setcolumn(i, x)
   }
+  return true 
 }
 
-/** Coerce list or Matrix to a stored position Matrix (3-vector). nil → origin. */
+/** Helper to coerce a List or Matrix to a position 3-vector. */
 fn _asPosition(Matrix p) { return p.clone() }
 fn _asPosition(List p) { return Matrix(p) }
 fn _asPosition(Tuple p) { return Matrix(p) }
-fn _asPosition(p) { return isnil(p) ? Matrix([0, 0, 0]) : Matrix(p) }
+fn _asPosition(p) { return isnil(p) ? Matrix([0, 0, 0]) : Matrix(p) } 
 
-/** Coerce scale: nil → 1; scalar; or 3-vector Matrix (non-uniform). */
-fn _asScale(Matrix s) { return s.clone() }
-fn _asScale(List s) { return Matrix(s) }
-fn _asScale(Tuple s) { return Matrix(s) }
-fn _asScale(s) { return isnil(s) ? 1 : s }
-
-/** Scalar radius for sphere refine / mesh keys (max |component| if Matrix/list). */
-fn _effectiveRadius(Matrix scale) {
-  var m = abs(scale[0]), a1 = abs(scale[1]), a2 = abs(scale[2])
-  if (a1 > m) m = a1
-  if (a2 > m) m = a2
-  return m
-}
-fn _effectiveRadius(List scale) { return _effectiveRadius(Matrix(scale)) }
-fn _effectiveRadius(Tuple scale) { return _effectiveRadius(Matrix(scale)) }
-fn _effectiveRadius(scale) { return isnil(scale) ? 1 : scale }
-
-// Public aliases — Morpho `_` helpers are not imported across modules.
-fn effectiveRadius(scale) { return _effectiveRadius(scale) }
-
-/** Keep in sync with `SCENE_MAX_LIGHTS` in scene.h. */
-var _LIGHT_MAX = 4
-
-fn _asLightPosition(p) {
-  var m = _asPosition(p)
-  if (m.count() != 3) _GfxLightPosErr.throw()
-  return m
-}
-
-/** Lamp tint: always a Color, RGB only (`a=1`). Lists/tuples become Color via asColoring. */
-fn _asLightColor(Color c) { return Color(c.r, c.g, c.b) }
-fn _asLightColor(Coloring c) { _GfxLightColorErr.throw() }
-fn _asLightColor(c) {
-  if (isnil(c)) return White
-  return _asLightColor(asColoring(c))
-}
-
-/** World-space point lamp. Viewer RGB is `intensity * color` (`xc` has no alpha). */
-class Light {
-  init(position, color=nil, intensity=1) {
-    self.position = _asLightPosition(position)
-    self.color = _asLightColor(color)
-    self.intensity = intensity
-  }
-
-  clone() {
-    return Light(self.position.clone(), color=self.color, intensity=self.intensity)
-  }
-}
-
-/** `"auto"` → `"neutral"`; `"threepoint"` / `"off"` unchanged. */
-fn _asLightName(String s) {
-  if (s == "auto" || s == "neutral") return "neutral"
-  if (s == "threepoint") return "threepoint"
-  if (s == "off") return "off"
-  _GfxLightNameErr.throw()
-}
-
-fn _asLightItem(Light l) { return l.clone() }
-fn _asLightItem(p) { return Light(_asLightPosition(p)) }
-
-/** World-space point lights: one 3-vector/`Light`, or a sequence of those.
- *  `[x,y,z]` / `(x,y,z)` is one lamp, not three. Empty → Neutral. Cap `_LIGHT_MAX`. */
-fn _asLightPositions(Matrix p) { return [Light(_asLightPosition(p))] }
-fn _asLightPositions(List L) {
-  if (L.count() == 0) return []
-  if (isnumber(L[0])) {
-    if (L.count() != 3) _GfxLightPosErr.throw()
-    return [Light(_asLightPosition(L))]
-  }
-  if (L.count() > _LIGHT_MAX) _GfxLightNErr.throw()
-  var out = []
-  for (p in L) out.append(_asLightItem(p))
-  return out
-}
-fn _asLightPositions(Tuple t) {
-  var L = []
-  for (x in t) L.append(x)
-  return _asLightPositions(L)
-}
-
-/** Canonical Graphics.light: `[]` (Neutral), `"neutral"`/`"threepoint"`/`"off"`,
- *  or a list of `Light`. `nil` → `[]`. */
-fn asLighting(String s) { return _asLightName(s) }
-fn asLighting(Light l) { return [l.clone()] }
-fn asLighting(Matrix p) { return _asLightPositions(p) }
-fn asLighting(List L) { return _asLightPositions(L) }
-fn asLighting(Tuple t) { return _asLightPositions(t) }
-fn asLighting(val) {
-  if (isnil(val)) return []
-  _GfxLightValErr.throw()
-}
-
-/** Ones + winding for a Sparse triangle column. */
-fn _tri(conn, i, a, b, c) {
-  conn[a, i] = 1; conn[b, i] = 1; conn[c, i] = 1
-  conn.setrowindices(i, (a, b, c))
-}
-
-/** Face vertex ids from Sparse (winding) or dense membership Matrix. */
-fn _faceIds(Sparse conn, Int i) { return conn.rowindices(i) }
-fn _faceIds(Matrix conn, Int i) {
-  var ids = [], nv = conn.dimensions()[0]
-  for (j in 0...nv) if (conn[j, i] != 0) ids.append(j)
-  return ids
-}
-
-/** Normalize inputs to a dim×n vertex matrix (points as columns). */
+/** Helper to normalize inputs to a dim x n vertex matrix. */
 fn _asVertexMatrix(Matrix pts) { return pts }
 fn _asVertexMatrix(List pts) { return Matrix(pts).transpose() }
 fn _asVertexMatrix(pts) { return Matrix(pts).transpose() }
 fn asVertexMatrix(pts) { return _asVertexMatrix(pts) }
 
-/** Unit or authored shaft frame → (x1,x2,dx,length,ndx,px); nil if degenerate. */
-fn _shaftFrame(unit, start, end, aspectratio) {
-  if (unit) {
-    return (Matrix([0, 0, 0]), Matrix([0, 0, 1]), Matrix([0, 0, 1]),
-            1, Matrix([0, 0, 1]), Matrix([1, 0, 0]))
-  }
-  var x1 = Matrix(start), x2 = Matrix(end), dx = x2 - x1, length = dx.norm()
-  if (abs(length) < 1e-8) return nil
-  var ndx = dx/length, px = _normalVector(dx), pxnorm = px.norm()
-  if (abs(pxnorm) < 1e-15) return nil
-  return (x1, x2, dx, length, ndx, 0.5*length*aspectratio*px/pxnorm)
+/* ----------------------------------------------------------------
+ * [Compatibility shim] Convert legacy transparency model to alpha
+ * ---------------------------------------------------------------- */
+
+// Warn on use of legacy interface 
+fn _warnLegacyTransp() {
+  if (_warnedLegacyTransp) return
+  _warnedLegacyTransp = true
+  _GfxLegacyTranspErr.warning()
 }
 
-/** Angle-axis (phi, ax, ay, az) rotating unit @p from onto unit @p to.
- *  Aligned → (0, 1, 0, 0) (so move can clear a prior tilt). */
-fn _axisAngleFromTo(from, to) {
-  var d = from.inner(to)
-  if (d > 1 - 1e-8) return (0, 1, 0, 0)
-  if (d < -1 + 1e-8) {
-    var ax = _normalVector(from)
-    var n = ax.norm()
-    if (n < _eps) ax = Matrix([1, 0, 0])
-    else ax = ax/n
-    return (Pi, ax[0], ax[1], ax[2])
-  }
-  var axis = cross3D(from, to)
-  axis = axis/axis.norm()
-  var phi = acos(d)
-  return (phi, axis[0], axis[1], axis[2])
-}
-
-/** start→end + aspectratio → (position, scale Matrix(R,R,L), rotate); nil if degenerate.
- *  Unit shaft is +z, height 1, radius 1; world radius = 0.5 * length * aspectratio. */
-fn segmentSRT(start, end, aspectratio) {
-  var x1 = _asPosition(start)
-  var x2 = _asPosition(end)
-  var dx = x2 - x1
-  var length = dx.norm()
-  if (!(length > 1e-8)) return nil
-  var R = 0.5*length*aspectratio
-  var rotate = _axisAngleFromTo(Matrix([0, 0, 1]), dx/length)
-  return (x1, Matrix([R, R, length]), rotate)
-}
-
-fn _asColoring(Coloring c) { return c }
-fn _asColoring(c) { return asColoring(c) }
-
-/** Entry color is a uniform presentation override, never a ColorTable. */
-fn _asEntryColor(ColorTable c) {
-  _GfxEntryClrErr.throw()
-  return nil
-}
-fn _asEntryColor(Coloring c) { return c }
-fn _asEntryColor(c) {
-  if (isnil(c)) return nil
-  return _asEntryColor(asColoring(c))
-}
-
-/** ColorTable on a vertex-bearing primitive is one color per vertex. */
-fn _requireVertexColors(ColorTable col, nv) {
-  if (col.count() != nv) _GfxClrTblLenErr.throw()
-}
-fn _requireVertexColors(col, nv) { }
-
-// [Compatibility shim] Old Show formula: alpha = 1 − clamp(filter + transmit, 0, 1).
+// Convert filter/transmit to alpha = 1 − clamp(filter + transmit, 0, 1)
 fn _legacyAlpha(filter, transmit) {
   var s = (isnil(filter) ? 0 : filter) + (isnil(transmit) ? 0 : transmit)
   if (s <= 0) return 1
@@ -279,79 +119,275 @@ fn _legacyAlpha(filter, transmit) {
   return 1 - s
 }
 
-fn _warnLegacyTransp() {
-  if (_warnedLegacyTransp) return
-  _warnedLegacyTransp = true
-  _GfxLegacyTranspErr.warning("Deprecated filter=/transmit=. Use Color(..., a) or Coloring.opacity(a).")
-}
+// Construct a transparent form of various Coloring objects
+fn _opacity(ColorTable color, a) { return color.opacity(a) }
+fn _opacity(Color color, a) { return color.opacity(a) }
+fn _opacity(Coloring color, a) { return Opacity(color, a) }
+fn _opacity(color, a) { return _opacity(asColoring(color), a) }
 
-fn _legacyOpacity(ColorTable color, a) { return color.opacity(a) }
-fn _legacyOpacity(Color color, a) { return color.opacity(a) }
-fn _legacyOpacity(Coloring color, a) { return Opacity(color, a) }
-fn _legacyOpacity(color, a) { return _legacyOpacity(asColoring(color), a) }
-
-fn _withLegacyTransp(color, filter, transmit) {
+// Make a color transparent using filter/transmit
+fn withLegacyTransp(color, filter, transmit) {
   if (isnil(filter) && isnil(transmit)) return color
   _warnLegacyTransp()
   var a = _legacyAlpha(filter, transmit)
   if (isnil(color)) return Gray(0.5).opacity(a)
-  return _legacyOpacity(color, a)
+  return _opacity(color, a)
 }
 
-// [Compatibility shim] Public name so xplot veneers can call this across modules.
-fn withLegacyTransp(color, filter, transmit) { return _withLegacyTransp(color, filter, transmit) }
+/* ----------------------------------------------------------------
+ * GraphicsPrimitive
+ * 
+ * Base class for displayable items. 
+ * Supports a uniform color. Converts filter/transmit to alpha.
+ * ---------------------------------------------------------------- */
 
-/* **************************************
- * Graphics primitives
- **************************************** */
-
-/** Shared albedo for every displayable item. Transparency is Color.a / Coloring.
- *  After construction, `color` is always a Coloring (default Gray(0.5)). */
 class GraphicsPrimitive {
   init(color=nil, filter=nil, transmit=nil) {
-    var c = _withLegacyTransp(color, filter, transmit)
-    self.color = isnil(c) ? Gray(0.5) : _asColoring(c)
+    var c = withLegacyTransp(color, filter, transmit)
+    self.color = isnil(c) ? Gray(0.5) : asColoring(c)
   }
 
-  toTriangleComplex() { return nil }
+  // Check that a color setting has the correct number of vertices 
+  _checkColorCount(col, nv) { } 
+  _checkColorCount(ColorTable col, nv) { 
+    if (col.count() != nv) _GfxClrTblLenErr.throw()
+  }
 }
 
-/** TriangleComplexes are a basic graphical unit that draw a set of triangles
-   from a given set of vertices. */
+/* ----------------------------------------------------------------
+ * PointCloud
+ * 
+ * Collection of points, may be individually colored 
+ * ---------------------------------------------------------------- */
+
+class PointCloud is GraphicsPrimitive {
+  init(position, color=nil) {
+    super.init(color=color)
+    self.position = _asVertexMatrix(position)
+    _checkColorCount(self.color, self.position.dimensions()[1])
+  }
+}
+
+/* ----------------------------------------------------------------
+ * LineSet
+ *
+ * Represents a collection of line segments.
+ *
+ * Constructors:
+ *   LineSet(position, color=nil, closed=false)
+ *       Polyline through successive vertices.
+ *
+ *   LineSet(position, connectivity, color=nil)
+ *       Explicit connectivity, supplied as a List/Tuple of pairs,
+ *       or Sparse matrix
+ * ---------------------------------------------------------------- */
+
+class LineSet is GraphicsPrimitive {
+  _appendSegment(out, seg, nv) { // Validate a segment and append to a list
+    if (seg.count() != 2) _GfxLineConnErr.throw()
+    var a = seg[0], b = seg[1]
+    if (a < 0 || a >= nv || b < 0 || b >= nv) _GfxLineConnErr.throw()
+    out.append(a)
+    out.append(b)
+  }
+
+  _asSegmentIndices(List conn, nv) { // Convert a List of pairs
+    var out = []
+    for (seg in conn) _appendSegment(out, seg, nv)
+    return out
+  }
+
+  _asSegmentIndices(Tuple conn, nv) { // Convert a Tuple of pairs
+    var out = []
+    for (seg in conn) _appendSegment(out, seg, nv)
+    return out
+  }
+
+  _asSegmentIndices(Sparse conn, nv) { // Convert Sparse connectivity matrix with each column defining one segment
+    var out = []
+    var nf = conn.dimensions()[1]
+    for (i in 0...nf) _appendSegment(out, conn.rowindices(i), nv)
+    return out
+  }
+
+  _polylineIndices(nv, closed) { // Construct connectivity for a successive polyline
+    var out = []
+    var nseg = closed ? nv : nv-1
+
+    if (nseg < 1) return out
+
+    for (i in 0...nseg) {
+      out.append(i)
+      out.append(mod(i+1, nv))
+    }
+
+    return out
+  }
+
+  _initGeometry(position, connectivity, closed=false) {
+    self.position = _asVertexMatrix(position)
+    var nv = self.position.dimensions()[1]
+
+    self.connectivity = isnil(connectivity)
+        ? _polylineIndices(nv, closed)
+        : _asSegmentIndices(connectivity, nv)
+
+    _checkColorCount(self.color, nv)
+  }
+
+  init(position, color=nil, closed=false) { // Polyline
+    super.init(color=color)
+    self._initGeometry(position, nil, closed=closed)
+  }
+
+  init(position, connectivity, color=nil) { // Explicit segments
+    super.init(color=color)
+    self._initGeometry(position, connectivity)
+  }
+}
+
+/* ----------------------------------------------------------------
+ * TriangleComplex
+ * 
+ * Simplicial complex:
+ *   TriangleComplex(position, normals, color, connectivity)
+ *   - position : Vertex positions in columns of a Matrix 
+ *   - normals : Normal vectors in columns of a Matrix
+ *   - color : either a solid color or a ColorTable 
+ *   - connectivity : Connectivity matrix; columns correspond to faces
+ * ---------------------------------------------------------------- */
+
 class TriangleComplex is GraphicsPrimitive {
   init(position, normals, color, connectivity, filter=nil, transmit=nil) {
     super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
-    self.position = position /* Vertex position matrix */
-    self.normals = normals /* Matrix of normal vectors */
-    self.connectivity = connectivity /* Connectivity matrix; columns are triangles */
-    _requireVertexColors(self.color, self.position.dimensions()[1])
+    self.position = position 
+    self.normals = normals 
+    self.connectivity = connectivity 
+    _checkColorCount(self.color, self.position.dimensions()[1])
   }
 
-  /** Vertex ids of face @p i. Sparse connectivity preserves winding via rowindices. */
+  // Helper to extract face i from the corresponding column of a connectivity matrix
+  _faceIds(Sparse conn, Int i) { return conn.rowindices(i) }
+  _faceIds(Matrix conn, Int i) {
+    var ids = [], nv = conn.dimensions()[0]
+    for (j in 0...nv) if (conn[j, i] != 0) ids.append(j)
+    return ids
+  }
+
+  // Obtain vertex ids for face i 
   faceIndices(Int i) { return _faceIds(self.connectivity, i) }
 }
 
+/* ----------------------------------------------------------------
+ * Text 
+ * 
+ * Represents text to be displayed. 
+ * Constructors:
+ *   Text(string, posn)
+ *   Text("Hello world", [0,0,0], dirn=[1,0,0], vertical=[0,0,1])
+ *   - string : string to display 
+ *   - posn : Starting point of text baseline
+ *   - dirn : direction of baseline
+ *   - vertical : vertical direction of text (must not be // to baseline)
+ *   - size, font : control the font
+ * ---------------------------------------------------------------- */
 
-/** Draws a cylinder
-  @param[in] start - start point
-  @param[in] end - end point
-  @param[in] aspectratio - aspect ratio
-  @param[in] n - number of faces to use
-  @param[in] color - Color of the cylinder */
-class Cylinder is GraphicsPrimitive {
-  init(start, end, aspectratio=0.1, n=10, color=nil, filter=nil, transmit=nil) {
+class Text is GraphicsPrimitive {
+  init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
+    self.posn = _asPosition(posn)
+    self.dirn = isnil(dirn) ? nil : _asPosition(dirn)
+    self.vertical = isnil(vertical) ? nil : _asPosition(vertical)
+    self.string = string
+    self.font = font
+    self.size = size
+  }
+
+  transformationMatrix() { // Compute the tranformation matrix needed to display the text
+    if (!(ismatrix(self.dirn) || ismatrix(self.vertical))) return nil 
+    var m = Matrix(4,4) 
+    for (i in 0..3) m[i,i]=1
+
+    if (!isnil(self.dirn)) for (i in 0..2) m[i,0]=self.dirn[i]
+    if (!isnil(self.vertical)) for (i in 0..2) m[i,1]=self.vertical[i]
+
+    // Now set the final direction to the cross product of the two 
+    var zp = cross3D(m.column(1), m.column(0)) 
+    for (i in 0..2) m[i,2]=zp[i]
+
+    if (!_orthonormalize(m)) _GfxTxtDrnVrtPrllErr.throw() 
+
+    return m.transpose() 
+  }
+
+}
+
+/* ----------------------------------------------------------------
+ * TriangleConvertibleMixin 
+ * 
+ * Mixin to denote primitives that can be reduced to a 
+ * TriangleComplex via the protocol:
+ * 
+ *    toTriangleComplex() -> TriangleComplex
+ * ---------------------------------------------------------------- */
+
+var _GfxTriCnvMxnErr = Error("_GfxTriCnvMxn", "GraphicsPrimitive must implement toTriangleComplex().")
+
+class TriangleConvertibleMixin {
+  toTriangleComplex() { _GfxTriCnvMxnErr.throw() }
+  
+    // Construct triangle i with vertex ids (a,b,c) in a connectivity matrix
+  _tri(conn, i, a, b, c) {
+    conn[a, i] = 1; conn[b, i] = 1; conn[c, i] = 1
+    conn.setrowindices(i, (a, b, c))
+  }
+}
+
+/* ----------------------------------------------------------------
+ * Cylinder 
+ * 
+ * Represents a cylinder as a surface rotated about a line:
+ *   Cylinder(start, end, aspectratio=0.1, n=10, color=Red)
+ *   - start, end : define the axis
+ *   - aspectratio : optional aspect ratio of the cylinder (r/|start - end|)
+ *   - radius : optionally specify a radius (overrides aspect ratio)
+ *   - n : optional number of segments drawn
+ *   - color : optional color
+ * ---------------------------------------------------------------- */
+
+class Cylinder is GraphicsPrimitive with TriangleConvertibleMixin {
+  init(start, end, aspectratio=0.1, radius=nil, n=10, color=nil, filter=nil, transmit=nil) {
     super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
     self.start = Matrix(start)
     self.end = Matrix(end)
     self.aspectratio = aspectratio
+    self.radius = radius 
     self.n = n
   }
 
-  /** @param unit if true, shaft along +z height 1 radius 1 (pose on Graphics entry). */
+  // Geometric parameters for the cylinder
+  _lineFrame(unit) {
+    if (unit) return self._unitFrame()
+    var x1 = self.start, x2 = self.end, dx = x2 - x1, length = dx.norm()
+    if (length < _epsDraw) return nil
+    var ndx = dx/length, px = _normalVector(dx), pxnorm = px.norm()
+    if (pxnorm < _epsNorm) return nil
+    var r = self.radius ? self.radius : length*self.aspectratio
+    return (x1, x2, dx, length, ndx, 0.5*r*px/pxnorm)
+  }
+
+  // Geometric parameters for the unit cylinder (from the origin to z=1 with unit radius)
+  _unitFrame() { 
+    return (Matrix([0, 0, 0]), Matrix([0, 0, 1]), Matrix([0, 0, 1]),
+              1, Matrix([0, 0, 1]), Matrix([1, 0, 0]))
+  }
+
+  // Construct an explict TriangleComplex representing the Cylinder. 
+  // If unit is true, the cylinder is unit length and unit radius.
   toTriangleComplex(unit=false) {
     var aspectratio = self.aspectratio, n = self.n, col = self.color
     var np = 2*n+2, nt = 4*n, dim = 3
-    var frame = _shaftFrame(unit, self.start, self.end, aspectratio)
+    var frame = _lineFrame(unit)
     if (isnil(frame)) return nil
     var x1 = frame[0], x2 = frame[1], dx = frame[2], length = frame[3]
     var ndx = frame[4], px = frame[5]
@@ -360,12 +396,12 @@ class Cylinder is GraphicsPrimitive {
 
     // Cap centers + outward unit normals. Ring verts are shared with the sidewall
     // and carry radial normals — caps can look slightly rounded under Neutral.
-    vertices.setcolumn(0, x1)
-    vertices.setcolumn(np-1, x2)
+    vertices.setcolumn(0, x1)    // Cap center at x1 
+    vertices.setcolumn(np-1, x2) // Cap center at 
     normals.setcolumn(0, -ndx)
     normals.setcolumn(np-1, ndx)
 
-    /* The cylinder is structured like so:
+    /* Vertices are ordered like this:
 
            [n+1...2n]
                       \
@@ -408,101 +444,26 @@ class Cylinder is GraphicsPrimitive {
 
 }
 
-/* Unit UV-sphere by level (cached). No meshtools. */
+/* ----------------------------------------------------------------
+ * Arrow 
+ * 
+ * Represents an arrow (a cylinder with a conical tip).
+ * here start and end are the tail and the tip respectively.
+ * ---------------------------------------------------------------- */
 
-var _sphereCache = Dictionary() // level → (verts, faces)
-
-/** Vertex index: poles are 0 / nv-1; else ring i∈1…st−1, slot j. */
-fn _sphereIx(i, j, st, sl, nv) {
-  if (i == 0) return 0
-  if (i == st) return nv - 1
-  return 1 + (i - 1) * sl + j
-}
-
-/** UV sphere: st / sl grow with level. Single north/south pole verts. */
-fn _uvSphere(level) {
-  if (_sphereCache.contains(level)) return _sphereCache[level]
-  var st = 6 + 4 * level, sl = 10 + 6 * level, nv = 2 + (st - 1) * sl
-  var v = Matrix(3, nv), tris = []
-  var dphi = Pi / st, dth = 2 * Pi / sl
-  for (phi, i in 0..Pi:dphi) {
-    var sp = sin(phi), cp = cos(phi)
-    for (th, j in 0..(2 * Pi - dth):dth) {
-      if (i == 0 || i == st) {
-        if (j == 0) v.setcolumn(_sphereIx(i, j, st, sl, nv), Matrix([0, 0, cp]))
-      } else {
-        v.setcolumn(_sphereIx(i, j, st, sl, nv), Matrix([sp * cos(th), sp * sin(th), cp]))
-      }
-      if (i < st) {
-        var jn = mod(j + 1, sl)
-        var a = _sphereIx(i, j, st, sl, nv), b = _sphereIx(i, jn, st, sl, nv)
-        var c = _sphereIx(i + 1, j, st, sl, nv), d = _sphereIx(i + 1, jn, st, sl, nv)
-        if (a == b || c == d) tris.append(a == b ? (a, c, d) : (a, c, b))
-        else { tris.append((a, c, b)); tris.append((b, c, d)) }
-      }
-    }
-  }
-  var f = Sparse(nv, tris.count())
-  for (tri, i in tris) { for (p in tri) f[p, i] = 1 }
-  for (tri, i in tris) f.setrowindices(i, tri)
-  _sphereCache[level] = (v, f)
-  return _sphereCache[level]
-}
-
-/** Draws a sphere */
-class Sphere is GraphicsPrimitive {
-  init(center, r, color=nil, maxrefine=3, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
-    self.center = center
-    self.r = r
-    self.maxrefine = maxrefine
-  }
-
-  _refinementLevel() { return self._refinementLevel(self.r) }
-
-  /** Level from effective display radius (entry.scale for unit spheres). */
-  _refinementLevel(effectiveradius) {
-    var n = 0, r = _effectiveRadius(effectiveradius)
-    while (r / (2^n) > 0.1 && n < self.maxrefine) n += 1
-    return n
-  }
-
-  /** @param scale false → unit ball at origin. @param radiusforrefine picks tessellation. */
-  toTriangleComplex(scale=true, radiusforrefine=nil) {
-    var col = self.color
-    var mesh = _uvSphere(self._refinementLevel(isnil(radiusforrefine) ? self.r : radiusforrefine))
-    var unit = mesh[0], v = unit.clone(), nv = v.dimensions()[1]
-    var x0 = scale ? _asPosition(self.center) : Matrix([0, 0, 0])
-    var r = scale ? self.r : 1
-    for (i in 0...nv) v.setcolumn(i, x0 + r * unit.column(i))
-    return TriangleComplex(v, unit.clone(), col, mesh[1].clone())
-  }
-}
-
-/** Draws an arrow
-  @param[in] start - start point
-  @param[in] end - end point
-  @param[in] aspectratio - aspect ratio of the arrow
-  @param[in] n - number of faces to use
-  @param[in] color - Color of the arrow */
-class Arrow is GraphicsPrimitive {
-  init(start, end, aspectratio=0.1, n=10, color=nil, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
-    self.start = Matrix(start)
-    self.end = Matrix(end)
-    self.aspectratio = aspectratio
-    self.n = n
-  }
-
-  /** @param unit if true, shaft along +z height 1 radius 1; tip fraction = aspectratio. */
+class Arrow is Cylinder {
   toTriangleComplex(unit=false) {
     var aspectratio = self.aspectratio, n = self.n, col = self.color
-    // Core 3n+2 (start, A, B, C, tip) plus 6n B-C annulus copies. Sparse
-    // rowindices is sorted, so shared B/C ids make one triangle of each
-    // annulus quad wind +Z; those verts are radial, so the viewer cannot
-    // repair. Consecutive copies with -shaft normals emit -Z winding.
+    /* The arrow is structured like so:
+
+           [n+1...2n]   C--[2n+1...3n]
+                      \ |\
+    [1..n] A------------B \
+           |               \
+           0<----- u --->   1 3n+1
+           <------ dx ------> */
     var nCore = 3*n+2, np = nCore + 6*n, nt = 6*n, dim = 3
-    var frame = _shaftFrame(unit, self.start, self.end, aspectratio)
+    var frame = _lineFrame(unit)
     if (isnil(frame)) return nil
     var x1 = frame[0], x2 = frame[1], dx = frame[2], length = frame[3]
     var ndx = frame[4], px = frame[5]
@@ -514,14 +475,6 @@ class Arrow is GraphicsPrimitive {
     normals.setcolumn(0, -ndx)
     normals.setcolumn(nCore-1, ndx)
 
-    /* The arrow is structured like so:
-
-           [n+1...2n]   C--[2n+1...3n]
-                      \ |\
-    [1..n] A------------B \
-           |               \
-           0<----- u --->   1 3n+1
-           <------ dx ------> */
     var u = (1-aspectratio)*dx
     if (unit) {
       for (i in 1..n) {
@@ -571,16 +524,115 @@ class Arrow is GraphicsPrimitive {
 
     return TriangleComplex(vertices, normals, col, conn)
   }
-
 }
 
-/** Draws a tube
-  @param[in] pts - list of points or a matrix with points as the columns
-  @param[in] rad - radius
-  @param[in] n - number of faces to use per point
-  @param[in] closed - whether to treat the point list as closed or not
-  @param[in] color - Color of the tube */
-class Tube is GraphicsPrimitive {
+/* ----------------------------------------------------------------
+ * Sphere
+ * 
+ * Represents a spherical shell of radius r about a center
+ * ---------------------------------------------------------------- */
+
+var _sphereCache = Dictionary() // Cache spheres by level -> (verts, faces)
+
+class Sphere is GraphicsPrimitive with TriangleConvertibleMixin {
+  init(center, r, color=nil, maxrefine=3, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
+    self.center = center
+    self.r = r
+    self.maxrefine = maxrefine
+  }
+
+  _refinementLevel() { return self._refinementLevel(self.r) }
+
+  // Level from effective display radius (entry.scale for unit spheres).
+  _refinementLevel(effectiveradius) {
+    var n = 0, r = self.effectiveRadius(effectiveradius)
+    while (r / (2^n) > 0.1 && n < self.maxrefine) n += 1
+    return n
+  }
+
+  // Compute vertex index given azimuthal and polar indices i, j
+  _sphereIx(i, j, st, sl, nv) {
+    if (i == 0) return 0 // top pole
+    if (i == st) return nv - 1 // bottom pole
+    return 1 + (i - 1) * sl + j // ring i in 1...st−1, slot j
+  }
+
+  _uvSphere(level) {
+    if (_sphereCache.contains(level)) return _sphereCache[level]
+    var st = 6 + 4 * level, sl = 10 + 6 * level, nv = 2 + (st - 1) * sl
+    var v = Matrix(3, nv), tris = []
+    var dphi = Pi / st, dth = 2 * Pi / sl
+    for (phi, i in 0..Pi:dphi) {
+      var sp = sin(phi), cp = cos(phi)
+      for (th, j in 0..(2 * Pi - dth):dth) {
+        if (i == 0 || i == st) {
+          if (j == 0) v.setcolumn(_sphereIx(i, j, st, sl, nv), Matrix([0, 0, cp]))
+        } else {
+          v.setcolumn(_sphereIx(i, j, st, sl, nv), Matrix([sp * cos(th), sp * sin(th), cp]))
+        }
+        if (i < st) {
+          var jn = mod(j + 1, sl)
+          var a = _sphereIx(i, j, st, sl, nv), b = _sphereIx(i, jn, st, sl, nv)
+          var c = _sphereIx(i + 1, j, st, sl, nv), d = _sphereIx(i + 1, jn, st, sl, nv)
+          if (a == b || c == d) tris.append(a == b ? (a, c, d) : (a, c, b))
+          else { tris.append((a, c, b)); tris.append((b, c, d)) }
+        }
+      }
+    }
+    var f = Sparse(nv, tris.count())
+    for (tri, i in tris) { for (p in tri) f[p, i] = 1 }
+    for (tri, i in tris) f.setrowindices(i, tri)
+    _sphereCache[level] = (v, f)
+    return _sphereCache[level]
+  }
+
+  // @param scale false → unit ball at origin. @param radiusforrefine picks tessellation. */
+  toTriangleComplex(scale=true, radiusforrefine=nil) {
+    var col = self.color
+    var mesh = _uvSphere(self._refinementLevel(isnil(radiusforrefine) ? self.r : radiusforrefine))
+    var unit = mesh[0], v = unit.clone(), nv = v.dimensions()[1]
+    var x0 = scale ? _asPosition(self.center) : Matrix([0, 0, 0])
+    var r = scale ? self.r : 1
+    for (i in 0...nv) v.setcolumn(i, x0 + r * unit.column(i))
+    return TriangleComplex(v, unit.clone(), col, mesh[1].clone())
+  }
+
+  // Scalar radius for sphere refine / mesh keys (max |component| if Matrix/list). 
+  effectiveRadius(Matrix scale) {
+    var m = abs(scale[0]), a1 = abs(scale[1]), a2 = abs(scale[2])
+    if (a1 > m) m = a1
+    if (a2 > m) m = a2
+    return m
+  }
+  effectiveRadius(List scale) { return effectiveRadius(Matrix(scale)) }
+  effectiveRadius(Tuple scale) { return effectiveRadius(Matrix(scale)) }
+  effectiveRadius(scale) { return isnil(scale) ? 1 : scale }
+}
+
+/* ----------------------------------------------------------------
+ * Tube
+ * 
+ * Represents tubes drawn around a sequence of points joined by
+ * line segments.
+ * Constructor: 
+ *   Tube(pts, rad, closed=true)
+ *   Tube([x0,x1,x2], 0.1) 
+ * - pts : The set of points to use 
+ * - rad : Radius of the tube
+ * - n : Number of faces to use per point 
+ * - closed : If the line segments close or not
+ * ---------------------------------------------------------------- */
+
+class Tube is GraphicsPrimitive with TriangleConvertibleMixin {
+  init(pts, rad, n=10, color=nil, closed=false, filter=nil, transmit=nil) {
+    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
+    self.pts = pts
+    self.radius = rad
+    self.n = n
+    self.closed = closed
+  }
+
   _shaftNormal(vec) { // no abs — unlike module _normalVector
     var order = [vec[0], vec[1], vec[2]].order()
     var out=vec.clone()
@@ -588,14 +640,6 @@ class Tube is GraphicsPrimitive {
     out[order[1]]=vec[order[2]]
     out[order[2]]=-vec[order[1]]
     return out
-  }
-
-  init(pts, rad, n=10, color=nil, closed=false, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
-    self.pts = pts
-    self.radius = rad
-    self.n = n
-    self.closed = closed
   }
 
   toTriangleComplex() {
@@ -684,132 +728,18 @@ class Tube is GraphicsPrimitive {
 
 }
 
-/* **************************************
- * Text
- **************************************** */
+/* ----------------------------------------------------------------
+ * Polygon
+ * 
+ * Represents a convex planar polygon. Vertex winding defines the 
+ * normal. 
+ * ---------------------------------------------------------------- */
 
-class Text is GraphicsPrimitive {
-  init(string, posn, dirn=nil, vertical=nil, size=10, font=nil, color=nil, filter=nil, transmit=nil) {
-    super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
-    self.posn = _asPosition(posn)
-    self.dirn = isnil(dirn) ? nil : _asPosition(dirn)
-    self.vertical = isnil(vertical) ? nil : _asPosition(vertical)
-    self.string = string
-    self.font = font
-    self.size = size
-  }
-
-  transformationMatrix() {
-    if (!(ismatrix(self.dirn) || ismatrix(self.vertical))) return nil 
-    var m = Matrix(4,4) 
-    for (i in 0..3) m[i,i]=1
-
-    if (!isnil(self.dirn)) for (i in 0..2) m[i,0]=self.dirn[i]
-    if (!isnil(self.vertical)) for (i in 0..2) m[i,1]=self.vertical[i]
-
-    // Now set the final direction to the cross product of the two 
-    var zp = cross3D(m.column(1), m.column(0)) 
-    for (i in 0..2) m[i,2]=zp[i]
-
-    _orthogonalize(m)
-
-    return m.transpose() 
-  }
-
-}
-
-/** Copy Text with origin posn — pose lives on the GraphicsEntry (Phase 5f). */
-fn _textAtOrigin(Text item) {
-  return Text(item.string, (0, 0, 0), dirn=item.dirn, vertical=item.vertical,
-              size=item.size, font=item.font, color=item.color)
-}
-
-/* **************************************
- * Point and line primitives (viewer `p` / `l`)
- **************************************** */
-
-/** Flat index list for GL_LINES from connectivity (nil → polyline). */
-fn _segIndices(List conn, nv, closed) {
-  var out = []
-  for (seg in conn) { out.append(seg[0]); out.append(seg[1]) }
-  return out
-}
-fn _segIndices(Tuple conn, nv, closed) {
-  var out = []
-  for (seg in conn) { out.append(seg[0]); out.append(seg[1]) }
-  return out
-}
-fn _segIndices(Sparse conn, nv, closed) {
-  var out = [], nf = conn.dimensions()[1]
-  for (i in 0...nf) {
-    var indx = conn.rowindices(i)
-    for (j in 0...indx.count()) out.append(indx[j])
-  }
-  return out
-}
-fn _segIndices(Matrix conn, nv, closed) {
-  var out = [], nf = conn.dimensions()[1], nvf = conn.dimensions()[0]
-  for (i in 0...nf) {
-    for (j in 0...nvf) if (conn[j, i] != 0) out.append(j)
-  }
-  return out
-}
-fn _segIndices(conn, nv, closed) {
-  // nil connectivity → successive polyline
-  var out = [], nseg = closed ? nv : nv - 1
-  if (nseg < 1) return out
-  for (i in 0...nseg) { out.append(i); out.append(mod(i + 1, nv)) }
-  return out
-}
-
-/** Point cloud — positions as Matrix columns (or list of points).
-  Optional uniform or per-vertex `color`. Emits viewer points (`p`), not spheres. */
-class PointCloud is GraphicsPrimitive {
+class Polygon is GraphicsPrimitive with TriangleConvertibleMixin {
   init(position, color=nil) {
     super.init(color=color)
     self.position = _asVertexMatrix(position)
-    _requireVertexColors(self.color, self.position.dimensions()[1])
-  }
-}
-
-/** Line set — vertices plus segments.
-  @param position - Matrix columns (or list of points)
-  @param connectivity - Sparse/Matrix with two vertices per column, or list of [i,j] pairs.
-    Omit for a polyline through successive vertices (use `closed=true` to loop).
-  Color and flags are keyword args (Morpho optionals are not positional). */
-class LineSet is GraphicsPrimitive {
-  // Polyline through successive vertices
-  init(position, color=nil, closed=false) {
-    super.init(color=color)
-    self.position = _asVertexMatrix(position)
-    self.connectivity = nil
-    self.closed = closed
-    _requireVertexColors(self.color, self.position.dimensions()[1])
-  }
-
-  // Explicit segments
-  init(position, connectivity, color=nil, closed=false) {
-    super.init(color=color)
-    self.position = _asVertexMatrix(position)
-    self.connectivity = connectivity
-    self.closed = closed
-    _requireVertexColors(self.color, self.position.dimensions()[1])
-  }
-
-  /** Flat index list for GL_LINES: i0 j0 i1 j1 ... */
-  _segmentIndices() {
-    return _segIndices(self.connectivity, self.position.dimensions()[1], self.closed)
-  }
-
-}
-
-/** Convex planar polygon. Vertex winding defines the face normal;
- *  reverse the vertices to flip it. Tessellates to a TriangleComplex fan. */
-class Polygon is GraphicsPrimitive {
-  init(position, color=nil) {
-    super.init(color=color)
-    self.position = _asVertexMatrix(position)
-    _requireVertexColors(self.color, self.position.dimensions()[1])
+    _checkColorCount(self.color, self.position.dimensions()[1])
     self._validate()
   }
 
@@ -818,7 +748,7 @@ class Polygon is GraphicsPrimitive {
     var p = self.position
     var n = cross3D(p.column(1)-p.column(0), p.column(2)-p.column(0))
     var nn = n.norm()
-    if (nn < _eps) _GfxPolyErr.throw()
+    if (nn < _epsNorm) _GfxPolyErr.throw()
     return n/nn
   }
 
@@ -845,7 +775,7 @@ class Polygon is GraphicsPrimitive {
     }
   }
 
-  toTriangleComplex() {
+  toTriangleComplex() { // Produce a fan of triangles
     var nv = self.position.dimensions()[1]
     var n = self.normal()
     var normals = Matrix(3, nv)
@@ -858,93 +788,232 @@ class Polygon is GraphicsPrimitive {
   }
 }
 
+/* ----------------------------------------------------------------
+ * Light
+ * 
+ * World-space point lamp. 
+ * Constructors: 
+ *   Light([1,0,0], color=Red)
+ *   Light([-1,0,0], intensity=0.2)
+ *   - position : location of point source
+ *   - color : color of the lamp
+ *   - intensity : relative intensity
+ * ---------------------------------------------------------------- */
+
+class Light {
+  init(position, color=nil, intensity=1) {
+    self.position = self._asLightPosition(position)
+    self.color = self._asLightColor(color)
+    self.intensity = intensity
+  }
+
+  clone() {
+    return Light(self.position.clone(), color=self.color, intensity=self.intensity)
+  }
+
+  _asLightPosition(p) { // Ensure a supplied Light position is a 3-vector
+    var m = _asPosition(p)
+    if (m.count() != 3) _GfxLightPosErr.throw()
+    return m
+  }
+
+  // Ensure a supplied Light color is a solid color
+  _asLightColor(Color c) { return Color(c.r, c.g, c.b) }
+  _asLightColor(Coloring c) { _GfxLightColorErr.throw() }
+  _asLightColor(Nil c) { return White }
+  _asLightColor(c) { return _asLightColor(asColoring(c)) }
+}
+
+/* ----------------------------------------------------------------
+ * Lighting
+ *
+ * Canonicalized lighting configuration for a Graphics object.
+ *
+ * Constructors:
+ *   Lighting()                        neutral lighting
+ *   Lighting("neutral")               or "threepoint" or "off"
+ *   Lighting(Light(...))
+ *   Lighting([x,y,z])                 one point light
+ *   Lighting([Light(...), ...])       collection of point lights
+ *   Lighting([[x,y,z], ...])          collection of point lights
+ *
+ * "auto" is accepted as an alias for "neutral".
+ * ---------------------------------------------------------------- */
+
+var _validUserLightingModes = ["auto", "neutral", "threepoint", "off"]
+
+class Lighting {
+  init() { self._setMode("neutral") } // Default 
+  init(Nil val) { self._setMode("neutral") }
+
+  init(String mode) { self._setMode(mode) }
+
+  init(Lighting lighting) {
+    self.mode = lighting.mode
+    self.lights = []
+    for (light in lighting.lights) self.lights.append(light.clone())
+  }
+
+  init(Light light) {
+    self._setCustom()
+    self._appendLight(light)
+  }
+
+  init(Matrix position) {
+    self._setCustom()
+    self._appendLight(position)
+  }
+
+  init(List lights) {
+    self._initSequence(lights)
+  }
+
+  init(Tuple lights) {
+    self._initSequence(lights)
+  }
+
+  init(val) {
+    _GfxLightValErr.throw()
+  }
+
+  _setMode(mode) {
+    if (!_validUserLightingModes.contains(mode)) _GfxLightNameErr.throw()
+    if (mode == "auto") mode = "neutral"
+
+    self.mode = mode
+    self.lights = []
+  }
+
+  _setCustom() {
+    self.mode = "custom"
+    self.lights = []
+  }
+
+  // A sequence of numbers is one position; otherwise a sequence of lamps.
+  _initSequence(seq) {
+    if (seq.count() == 0) {
+      self._setMode("neutral")
+      return
+    }
+
+    self._setCustom()
+
+    if (isnumber(seq[0])) { // List was just a single light in [x,y,z] form
+      self._appendLight(seq)
+      return
+    }
+
+    for (light in seq) self._appendLight(light)
+  }
+
+  _appendLight(Light light) {
+    if (self.lights.count() >= _LIGHT_MAX) _GfxLightNErr.throw()
+    self.lights.append(light.clone())
+  }
+
+  _appendLight(position) {
+    self._appendLight(Light(position))
+  }
+
+  addLight(Light light) { // Adding an explicit light replaces any named rig.
+    if (self.mode != "custom") self._setCustom()
+    self._appendLight(light)
+    return self
+  }
+
+  addLight(position, color=nil, intensity=1) {
+    return self.addLight(Light(position, color=color, intensity=intensity))
+  }
+
+  clone() { return Lighting(self) }
+}
+
 /* **************************************
- * Graphics class
+ * Random helpers
  **************************************** */
 
-/** One placed item in a Graphics: stable id + item + presentation SRT. */
+/** Angle-axis (phi, ax, ay, az) rotating unit @p from onto unit @p to.
+ *  Aligned → (0, 1, 0, 0) (so move can clear a prior tilt). */
+fn _axisAngleFromTo(from, to) {
+  var d = from.inner(to)
+  if (d > 1 - 1e-8) return (0, 1, 0, 0)
+  if (d < -1 + 1e-8) {
+    var ax = _normalVector(from)
+    var n = ax.norm()
+    if (n < _epsNorm) ax = Matrix([1, 0, 0])
+    else ax = ax/n
+    return (Pi, ax[0], ax[1], ax[2])
+  }
+  var axis = cross3D(from, to)
+  axis = axis/axis.norm()
+  var phi = acos(d)
+  return (phi, axis[0], axis[1], axis[2])
+}
+
+/** start→end + aspectratio → (position, scale Matrix(R,R,L), rotate); nil if degenerate.
+ *  Unit shaft is +z, height 1, radius 1; world radius = 0.5 * length * aspectratio. */
+fn segmentSRT(start, end, aspectratio) {
+  var x1 = _asPosition(start)
+  var x2 = _asPosition(end)
+  var dx = x2 - x1
+  var length = dx.norm()
+  if (!(length > 1e-8)) return nil
+  var R = 0.5*length*aspectratio
+  var rotate = _axisAngleFromTo(Matrix([0, 0, 1]), dx/length)
+  return (x1, Matrix([R, R, length]), rotate)
+}
+
+/** Copy Text with origin posn — pose lives on the GraphicsEntry (Phase 5f). */
+fn _textAtOrigin(Text item) {
+  return Text(item.string, (0, 0, 0), dirn=item.dirn, vertical=item.vertical,
+              size=item.size, font=item.font, color=item.color)
+}
+
+/* ----------------------------------------------------------------
+ * GraphicsEntry
+ * 
+ * Displaylist entry incorporating a stable id, the item to display
+ * and, optionally, pose information through position, scale and rotate.
+ * An override color can also be provided. 
+ * ---------------------------------------------------------------- */
+
 class GraphicsEntry {
   init(id, item, position=nil, scale=nil, rotate=nil, color=nil) {
     self.id = id
     self.item = item
     self.position = _asPosition(position)
-    self.scale = _asScale(scale)
+    self.scale = self._asScale(scale)
     self.rotate = rotate
-    self.color = _asEntryColor(color) // uniform presentation override; nil → item
-    self.flat = false              // unlit draw (set true for solid facet colors)
+    self.color = self._asEntryColor(color)
+    self.flat = false // Set true for solid facet colors
   }
 
-  /** Visible coloring: entry override if set, else the primitive's intrinsic color. */
+  // Return visible  Visible coloring: entry override if set, else the primitive's intrinsic color. */
   effectiveColor() { return isnil(self.color) ? self.item.color : self.color }
 
-  /** Axis-angle rotate → 3×3; nil if identity / missing. */
+  // Construct rotation matrix for this entry
   rotationMatrix() {
     var r = self.rotate
-    if (isnil(r) || abs(r[0]) < 1e-8) return nil
+    if (isnil(r) || abs(r[0]) < _epsDraw) return nil
     return _rotation(r[0], [r[1], r[2], r[3]])
   }
-}
 
-/** Events from Scene (Broadcaster). Typed subclasses enable multiple dispatch.
- *  Named GraphicsEvent* for continuity with the Graphics entry model. */
-class GraphicsEvent with BroadcastEvent {
-  init(id) {
-    self.id = id
+  /** Helpers to coerce a List or Matrix to a scale Matrix. */
+  _asScale(Matrix s) { return s.clone() }
+  _asScale(List s) { return Matrix(s) }
+  _asScale(Tuple s) { return Matrix(s) }
+  _asScale(s) { return isnil(s) ? 1 : s }
+
+  // Entry color is a uniform presentation override.
+  _asEntryColor(Coloring c) { return c }
+  _asEntryColor(ColorTable c) { // Reject ColorTable
+    _GfxEntryClrErr.throw()
+    return nil
   }
-}
-
-class GraphicsEventDefined is GraphicsEvent {}
-
-/** Merge `into.ids` into `prev`'s accumulating list (first-seen order, deduped).
- *  O(|into.ids|) per call via prev._seen — not a full rebuild. */
-fn _coalesceIds(into, prev) {
-  if (isnil(prev._seen)) {
-    prev._seen = Dictionary()
-    for (id in prev.ids) prev._seen[id] = true
+  _asEntryColor(c) { // Otherwise construct using asColoring
+    if (isnil(c)) return nil
+    return _asEntryColor(asColoring(c))
   }
-  for (id in into.ids) {
-    if (!prev._seen.contains(id)) {
-      prev._seen[id] = true
-      prev.ids.append(id)
-    }
-  }
-  into.ids = prev.ids
-  into._seen = prev._seen
-}
-
-/** Coalesces within a Broadcaster batch; `ids` accumulates every mover. */
-class GraphicsEventMoved is GraphicsEvent {
-  init(id) {
-    super.init(id)
-    self.ids = [id]
-    self._seen = nil // filled on first coalesce
-  }
-  batchKey() { return GraphicsEventMoved }
-  coalesce(prev) { _coalesceIds(self, prev) }
-}
-
-/** Coalesces within a Broadcaster batch; `ids` accumulates every recolor target. */
-class GraphicsEventRecolored is GraphicsEvent {
-  init(id) {
-    super.init(id)
-    self.ids = [id]
-    self._seen = nil
-  }
-  batchKey() { return GraphicsEventRecolored }
-  coalesce(prev) { _coalesceIds(self, prev) }
-}
-
-/** Entry removed from Scene (no coalesce — each id flushed). */
-class GraphicsEventRemoved is GraphicsEvent {}
-
-/** Entry item replaced (no coalesce — each id flushed). */
-class GraphicsEventReplaced is GraphicsEvent {}
-
-/** Scene lighting changed (`setLights` / `addLight` / `resetLights`). Last-write-wins in a batch. */
-class GraphicsEventLights is GraphicsEvent {
-  init() { super.init(0) }
-  batchKey() { return GraphicsEventLights }
-  coalesce(prev) { }
 }
 
 /** Unit Sphere for entry storage (pose lives on the GraphicsEntry). */
@@ -964,36 +1033,45 @@ fn _unitArrow(Arrow item) {
                color=item.color)
 }
 
-/** Static displaylist container. Accepted by Show / View.open / View.update.
- *  For live mutation (move / recolor / batch) use Scene. */
+/* ----------------------------------------------------------------
+ * Graphics
+ * 
+ * Static displaylist container. Interface:
+ *   findEntry - finds an entry from an id 
+ *   display(item) - adds a GraphicsPrimitive to the displaylist
+ *   display(item, posn) - adds a GraphicsPrimitive with posn 
+ *   setLights - sets the lighting
+ *   addLight - adds a Light
+ *   resetLights - resets 
+ * ---------------------------------------------------------------- */
+
 class Graphics {
   init(title = nil, background = nil, light = nil) {
     self.displaylist = [] // GraphicsEntry list
-    self._entryById = Dictionary()
+    self._entryById = Dictionary() 
     self._nextId = 1
     self.title = title
     if (!self.title) self.title="Morpho" // Title to show
-    self.background = isnil(background) ? Black : _asColoring(background)
+    self.background = isnil(background) ? Black : asColoring(background)
     if (isnil(self.background)) self.background = Black
-    self.light = asLighting(light)
+    self.light = Lighting(light)
   }
 
-  /** Look up an entry by Graphics-owned id; nil if missing. */
+  // Look up an entry by its id 
   findEntry(id) { return self._entryById.contains(id) ? self._entryById[id] : nil }
 
-  /** Allocate id and append a GraphicsEntry; returns the id. No events. */
+  // Appends an item to the displaylist, allocating and returning an id 
   _append(item, position=nil, scale=nil, rotate=nil, color=nil, flat=nil) {
     var id = self._nextId
     self._nextId += 1
-    var e = GraphicsEntry(id, item, position=position, scale=scale,
-                          rotate=rotate, color=color)
+    var e = GraphicsEntry(id, item, position=position, scale=scale, rotate=rotate, color=color)
     if (!isnil(flat)) e.flat = flat
     self.displaylist.append(e)
     self._entryById[id] = e
     return id
   }
 
-  /** Copy this displaylist into @p g (same ids); does not remap right-hand entries. */
+  // Copy this displaylist into a target
   _copyEntriesInto(g) {
     for (el in self.displaylist) {
       var e = GraphicsEntry(el.id, el.item, position=el.position, scale=el.scale,
@@ -1090,24 +1168,19 @@ class Graphics {
   display(LineSet item, color=nil, flat=nil) {
     return self._append(item, color=color, flat=isnil(flat) ? true : flat)
   }
+  
   display(LineSet item, position, scale=nil, rotate=nil, color=nil, flat=nil) {
     return self._append(item, position=position, scale=scale, rotate=rotate,
                         color=color, flat=isnil(flat) ? true : flat)
   }
 
-  /** Replace the whole lighting (same values as `Graphics.light` / `asLighting`). */
-  setLights(lights) {
-    self.light = asLighting(lights)
+  setLights(lights) { // Replace lights
+    self.light = Lighting(lights)
     return true
   }
 
-  /** Append a world-space point lamp. Named Neutral/`"threepoint"`/`"off"` become a new list. */
-  addLight(Light l) {
-    var lights = asLighting(self.light)
-    var out = islist(lights) ? lights : []
-    if (out.count() >= _LIGHT_MAX) _GfxLightNErr.throw()
-    out.append(l.clone())
-    self.light = out
+  addLight(Light light) {
+    self.light.addLight(light)
     return true
   }
 
@@ -1115,20 +1188,18 @@ class Graphics {
     return self.addLight(Light(position, color=color, intensity=intensity))
   }
 
-  /** Restore Neutral (`g.light = []`). */
-  resetLights() {
+  resetLights() { // Restore neutral lighting
     return self.setLights([])
   }
 
-  /** Copy title / background / light (not entries). */
-  _copyMetaInto(g) {
-    g.title = self.title
-    g.background = self.background
-    g.light = asLighting(self.light)
+  // Copy metadata to a target object
+  _copyMetaInto(target) {
+    target.title = self.title
+    target.background = self.background
+    target.light = self.light.clone()
   }
 
-  /** Union of two Graphics. Left-hand ids kept; right-hand ids remapped unique in the result.
-   *  Entry records are copied (item refs shared); no Defined notifications. */
+  // Combine two Graphics; right hand side is copied into the displaylist with new ids
   add(Graphics right) {
     var g = Graphics()
     self._copyMetaInto(g)
@@ -1140,19 +1211,80 @@ class Graphics {
     }
     return g
   }
-
-  /** In-place union (`+=`); also Morpho's right-hand `+` fallback. */
-  addr(Graphics right) {
-    for (el in right.displaylist) {
-      self._append(el.item, position=el.position, scale=el.scale, rotate=el.rotate,
-                   color=el.color, flat=el.flat)
-    }
-    return self
-  }
 }
 
-/** Live Graphics: Broadcaster + move / recolor / remove / replace / morph / batch.
- *  Call _broadcasterInit from Scene.init (mixins do not auto-init state). */
+/* ----------------------------------------------------------------
+ * GraphicsEvent
+ * 
+ * Class defining events that may be sent by Scene. Subclasses
+ * enable Listeners to process them using multiple dispatch.
+ * ---------------------------------------------------------------- */
+
+class GraphicsEvent with BroadcastEvent {
+  init(id) { self.id = id } // Retain the event id
+}
+
+// Sent when a new id is defined 
+class GraphicsEventDefined is GraphicsEvent {}
+
+// Coalesce same-type events across ids to reduce viewer traffic.
+fn _coalesceIds(into, prev) {
+  if (isnil(prev._seen)) { // Lazily create _seen Dictionary
+    prev._seen = Dictionary()
+    for (id in prev.ids) prev._seen[id] = true
+  }
+  for (id in into.ids) {
+    if (!prev._seen.contains(id)) {
+      prev._seen[id] = true
+      prev.ids.append(id)
+    }
+  }
+  into.ids = prev.ids // into must inherit accumulated state
+  into._seen = prev._seen
+}
+
+// Sent when an entry is moved 
+class GraphicsEventMoved is GraphicsEvent {
+  init(id) {
+    super.init(id)
+    self.ids = [id]
+    self._seen = nil // filled on first coalesce
+  }
+  batchKey() { return GraphicsEventMoved }
+  coalesce(prev) { _coalesceIds(self, prev) }
+}
+
+// Sent when an entry is recolored
+class GraphicsEventRecolored is GraphicsEvent {
+  init(id) {
+    super.init(id)
+    self.ids = [id]
+    self._seen = nil
+  }
+  batchKey() { return GraphicsEventRecolored }
+  coalesce(prev) { _coalesceIds(self, prev) }
+}
+
+// Sent when an entry is removed from the scene
+class GraphicsEventRemoved is GraphicsEvent {}
+
+// Sent when an entry is replaced
+class GraphicsEventReplaced is GraphicsEvent {}
+
+// Sent when lighting changes
+class GraphicsEventLights is GraphicsEvent {
+  init() { super.init(0) }
+  batchKey() { return GraphicsEventLights }
+  coalesce(prev) { }
+}
+
+/* ----------------------------------------------------------------
+ * Scene
+ * 
+ * Live, updatable container paralleling Graphics. Can inform others
+ * of updates using the Broadcaster/Listener protocol
+ * ---------------------------------------------------------------- */
+
 class Scene is Graphics with Broadcaster {
   init(title = nil, background = nil, light = nil) {
     super.init(title=title, background=background, light=light)
@@ -1171,7 +1303,7 @@ class Scene is Graphics with Broadcaster {
     return true
   }
 
-  /** Allocate id, append entry, optionally notify Defined. */
+  // Allocate id, append entry, optionally notify Defined.
   _append(item, position=nil, scale=nil, rotate=nil, color=nil, flat=nil, notify=true) {
     var id = super._append(item, position=position, scale=scale, rotate=rotate,
                            color=color, flat=flat)
@@ -1179,37 +1311,37 @@ class Scene is Graphics with Broadcaster {
     return id
   }
 
-  /** Update scale=/rotate= only; omitted kwargs leave that component unchanged. */
+  // Moves an entry, updating scale and rotate only if supplied
   move(id, scale=nil, rotate=nil) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    if (!isnil(scale)) e.scale = _asScale(scale)
+    if (!isnil(scale)) e.scale = e._asScale(scale)
     if (!isnil(rotate)) e.rotate = rotate
     self.notify(GraphicsEventMoved(id))
     return true
   }
 
-  /** Set position (always); scale=/rotate= only when provided. */
+  // Moves an entry, setting the position, and updates scale and rotate if supplied
   move(id, position, scale=nil, rotate=nil) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
     e.position = _asPosition(position)
-    if (!isnil(scale)) e.scale = _asScale(scale)
+    if (!isnil(scale)) e.scale = e._asScale(scale)
     if (!isnil(rotate)) e.rotate = rotate
     self.notify(GraphicsEventMoved(id))
     return true
   }
 
-  /** Set presentation color for an entry (viewer slot albedo via `C`). */
+  // Set presentation color for an entry 
   recolor(id, color) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    e.color = _asEntryColor(color)
+    e.color = e._asEntryColor(color)
     self.notify(GraphicsEventRecolored(id))
     return true
   }
 
-  /** Remove an entry by Graphics-owned id; notifies Removed. */
+  // Removes an entry 
   remove(id) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
@@ -1219,7 +1351,7 @@ class Scene is Graphics with Broadcaster {
     return true
   }
 
-  /** Replace entry item; SRT unchanged. Full redefine in the viewer (not same-length U V). */
+  // Replaces an entry item with the provided GraphicsPrimitive
   replace(id, GraphicsPrimitive item) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
@@ -1228,18 +1360,18 @@ class Scene is Graphics with Broadcaster {
     return true
   }
 
-  /** Store unit Sphere and refresh SRT from authored center/r (like display). */
+  // Sphere specific replace - store unit sphere and just refresh pose 
   replace(id, Sphere item) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
     e.item = _unitSphere(item)
     e.position = _asPosition(item.center)
-    e.scale = _asScale(item.r)
+    e.scale = e._asScale(item.r)
     self.notify(GraphicsEventReplaced(id))
     return true
   }
 
-  /** Store unit Cylinder and refresh SRT from authored start→end (like display). */
+  // Cylinder specific replace - store unit cylinder and just refresh pose
   replace(id, Cylinder item) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
@@ -1251,7 +1383,7 @@ class Scene is Graphics with Broadcaster {
     return true
   }
 
-  /** Store unit Arrow and refresh SRT from authored start→end (like display). */
+  // Arrow specific replace - store unit cylinder and just refresh pose
   replace(id, Arrow item) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
@@ -1263,7 +1395,7 @@ class Scene is Graphics with Broadcaster {
     return true
   }
 
-  /** Replace Text content/orientation; entry SRT unchanged (string/font via redefine). */
+  // Replace Text content/orientation
   replace(id, Text item) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
@@ -1272,8 +1404,7 @@ class Scene is Graphics with Broadcaster {
     return true
   }
 
-  /** Same-length mesh swap: set entry.item only. Pair with View.morph or View.refreshMesh.
-   *  Connectivity or layout changes (xn/xnc/xnca) need replace (`View.morph` falls back). */
+  // Special version of replace indicating only vertex positions have changed
   morph(id, GraphicsPrimitive item) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
@@ -1285,7 +1416,7 @@ class Scene is Graphics with Broadcaster {
 
   replace(id, item) { return false }
 
-  /** Union as Scene. Entry copies; no Defined notifications. */
+  // Support join operation with Graphics
   add(Graphics right) {
     var g = Scene()
     self._copyMetaInto(g)

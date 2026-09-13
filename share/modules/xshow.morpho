@@ -26,13 +26,13 @@ fn _mvEscape(s) {
 }
 
 fn _meshKey(Sphere item, entry) {
-  return "sphere:${item._refinementLevel(effectiveRadius(entry.scale))}"
+  return "sphere:${item._refinementLevel(item.effectiveRadius(entry.scale))}"
 }
 fn _meshKey(Cylinder item, entry) { return "cylinder:${item.n}" }
 fn _meshKey(Arrow item, entry) { return "arrow:${item.n}:${item.aspectratio}" }
 
 fn _unitTri(Sphere item, entry) {
-  return item.toTriangleComplex(scale=false, radiusforrefine=effectiveRadius(entry.scale))
+  return item.toTriangleComplex(scale=false, radiusforrefine=item.effectiveRadius(entry.scale))
 }
 fn _unitTri(Cylinder item, entry) { return item.toTriangleComplex(unit=true) }
 fn _unitTri(Arrow item, entry) { return item.toTriangleComplex(unit=true) }
@@ -187,33 +187,34 @@ class Show {
     self._writeL(graphic.light, out)
   }
 
-  /** Emit `L` after `G`. Empty → no line (viewer Neutral). Never a bare `L`. */
-  _writeL(val, out) {
-    var lights = asLighting(val)
-    if (islist(lights) && lights.count() == 0) return
-    if (isstring(lights)) {
-      out.write("L \"${lights}\"")
+  // Emits lighting specification
+  _writeL(Lighting lighting, out) {
+    if (lighting.mode == "neutral") return
+    if (lighting.mode != "custom") {
+      out.write("L \"${lighting.mode}\"")
       return
     }
-    var n = lights.count()
+
+    var n = lighting.lights.count()
+    if (n == 0) return // Emit nothing 
+
     var line = "L ${n} \"xc\""
-    for (i in 0...n) {
-      var p = lights[i].position
-      var rgb = (lights[i].intensity*lights[i].color).rgb(0)
+    for (light in lighting.lights) {
+      var p = light.position
+      var rgb = (light.intensity*light.color).rgb(0)
       line += " ${self.fmt(p[0])} ${self.fmt(p[1])} ${self.fmt(p[2])}"
       line += " ${self.fmt(rgb[0])} ${self.fmt(rgb[1])} ${self.fmt(rgb[2])}"
     }
+
     out.write(line)
   }
 
-  /** Live `L` replace. Empty list emits `L "neutral"` so the viewer drops prior lamps. */
-  writeLights(val, out) {
-    var lights = asLighting(val)
-    if (islist(lights) && lights.count() == 0) {
+  writeLights(Lighting lighting, out) { // 
+    if (lighting.mode == "neutral") { // Emit neutral so viewer drops prior lamps
       out.write("L \"neutral\"")
       return
     }
-    self._writeL(val, out)
+    self._writeL(lighting, out)
   }
 
   // 3 significant figures — enough for display; keeps ASCII small vs full doubles.
@@ -655,9 +656,8 @@ class Show {
 
   /** Define LineSet geometry (`o`/`v`/`l`); sets `_lastColorId`. Returns viewer id or nil. */
   defineLineSet(entry, item, out) {
-    var nv = item.position.dimensions()[1]
-    var segs = item._segmentIndices()
-    if (nv < 1 || segs.count() < 2) return nil
+    var segs = item.connectivity
+    if (segs.count() < 2) return nil
     var id = self.uid()
     var hasTable = self._stampUniformC(entry, item, out)
     out.write("o ${id}")
