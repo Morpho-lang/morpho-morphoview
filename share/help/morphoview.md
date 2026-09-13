@@ -114,7 +114,7 @@ A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (
 
 ### Methods
 
-* `move(id, position, scale=, rotate=)` — set position; omitted scale/rotate leave that component unchanged
+* `move(id, position, scale=, rotate=)` / `move(id, scale=, rotate=)` — set any supplied pose component; omitted ones are left unchanged
 * `recolor(id, color)` — set presentation color; `recolor(id, nil)` clears the override
 * `remove(id)` — remove the entry
 * `replace(id, item)` — swap the item; entry pose/color/flat are kept
@@ -130,8 +130,8 @@ Mutators return `true`/`false`. Prefer `View(Scene)` for live sessions.
 Graphical elements for `display` (from `xgraphics`):
 
 * `Sphere(center, r, color=, transmit=, filter=)`
-* `Cylinder(start, end, aspectratio=, radius=, n=, color=, …)`
-* `Arrow(start, end, aspectratio=, radius=, n=, color=, …)`
+* `Cylinder(start, end, aspectratio=, radius=, n=, color=, …)` — `radius=` is the shaft radius; otherwise `aspectratio × length`
+* `Arrow(start, end, aspectratio=, radius=, n=, color=, …)` — same shaft radius; `aspectratio=` is the tip length fraction
 * `Text(string, posn, font=, color=, …)` — draw-slot text; string/font via `replace`
 * `TriangleComplex(position, normals, color, connectivity, …)` — triangle mesh
 * `PointCloud` / `LineSet` — points and lines (unlit unless `flat=false`)

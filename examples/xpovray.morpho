@@ -18,10 +18,10 @@ for (i in 0...20) {
   g.display(Sphere(xx, 0.08*(1+random()), color=Color(random(), random(), random(), 0.85)))
 }
 
-g.display(Cylinder([-1,-1,-1], [1,1,1], aspectratio=0.01, color=Gray(0.3)))
-g.display(Arrow([-1,-1,-1], [-0.5,-1,-1], aspectratio=0.05, color=Red))
-g.display(Arrow([-1,-1,-1], [-1,-0.5,-1], aspectratio=0.05, color=Green))
-g.display(Arrow([-1,-1,-1], [-1,-1,-0.5], aspectratio=0.05, color=Blue))
+g.display(Cylinder([-1,-1,-1], [1,1,1], aspectratio=0.005, color=Gray(0.3)))
+g.display(Arrow([-1,-1,-1], [-0.5,-1,-1], aspectratio=0.025, color=Red))
+g.display(Arrow([-1,-1,-1], [-1,-0.5,-1], aspectratio=0.025, color=Green))
+g.display(Arrow([-1,-1,-1], [-1,-1,-0.5], aspectratio=0.025, color=Blue))
 
 var ring = []
 for (t in 0...2*Pi:2*Pi/40) ring.append([cos(t), sin(t), 0])

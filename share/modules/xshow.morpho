@@ -101,7 +101,7 @@ fn _meshKey(Cylinder item, entry) { return "cylinder:${item.n}" }
 fn _meshKey(Arrow item, entry) { return "arrow:${item.n}:${item.aspectratio}" }
 
 fn _unitTri(Sphere item, entry) {
-  return item.toTriangleComplex(scale=false, level=_sphereRefinementLevel(item, entry))
+  return item.toTriangleComplex(unit=true, level=_sphereRefinementLevel(item, entry))
 }
 fn _unitTri(Cylinder item, entry) { return item.toTriangleComplex(unit=true) }
 fn _unitTri(Arrow item, entry) { return item.toTriangleComplex(unit=true) }
@@ -153,7 +153,7 @@ fn _localModelMatrix(Sphere item) {
 fn _shaftLocalMatrix(Cylinder item) {
   if (_isDegenerateShaft(item)) return nil
   var x1 = item.start, dx = item.end - x1, length = dx.norm()
-  var Rxy = item._radialScale(length)
+  var Rxy = item._radius(length)
   var rotate = _axisFromTo(Matrix([0, 0, 1]), dx/length)
   var R3
   if (abs(rotate[0]) < 1e-8) {

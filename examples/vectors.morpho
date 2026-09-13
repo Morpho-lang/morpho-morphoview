@@ -16,7 +16,7 @@ var nFrames = 600
 var dt = 1/50
 var spacing = 0.32
 var tipFrac = 0.22   // Arrow tip length fraction (= aspectratio)
-var shaftAR = 0.12   // shaft radius = 0.5 * length * shaftAR
+var shaftAR = 0.06   // shaft radius = length * shaftAR
 var vxScale = 0.35   // tanh scale for x-projection → color
 var cmap = TundraMap()
 

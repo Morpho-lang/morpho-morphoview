@@ -46,15 +46,15 @@ var lv0 = Sphere([0, 0, 0], 1).toTriangleComplex(level=0)
 var lv5 = Sphere([0, 0, 0], 1).toTriangleComplex(level=5)
 expect(nv(lv0) < nv(lv3) && nv(lv3) < nv(lv5), "explicit level changes tessellation")
 
-/* ---- scale=false is a unit ball at the origin ---- */
-var unit = Sphere([4, 5, 6], 7).toTriangleComplex(scale=false, level=0)
+/* ---- unit=true is a unit ball at the origin ---- */
+var unit = Sphere([4, 5, 6], 7).toTriangleComplex(unit=true, level=0)
 var pole = unit.position.column(0)
 expect(abs(pole[0]) < 1e-9 && abs(pole[1]) < 1e-9 && abs(abs(pole[2]) - 1) < 1e-9,
        "unit mesh pole at origin ±z")
 
-var scaled = Sphere([1, 0, 0], 2).toTriangleComplex(scale=true, level=0)
+var scaled = Sphere([1, 0, 0], 2).toTriangleComplex(level=0)
 var p0 = scaled.position.column(0)
-expect(abs(p0[0] - 1) < 1e-9 && abs(abs(p0[2]) - 2) < 1e-9, "scaled mesh uses center and r")
+expect(abs(p0[0] - 1) < 1e-9 && abs(abs(p0[2]) - 2) < 1e-9, "authored mesh uses center and r")
 
 /* ---- Show: level from item.r × entry.scale ---- */
 // r_eff ≤ 0.1 → 0; (0.1, 0.2] → 1; (0.2, 0.4] → 2; > 0.4 → 3

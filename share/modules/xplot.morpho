@@ -857,7 +857,8 @@ class ScaleBar {
       var label = _tickLabel(t)
       var width = (0.6*label.count()*fsize/72)/2, height = fsize/72
       g.display(Cylinder(self.coords(1.2*self.radius, 0, x*self.length),
-                         self.coords(1.5*self.radius, 0, x*self.length), color=White))
+                         self.coords(1.5*self.radius, 0, x*self.length),
+                         aspectratio=0.05, color=White))
       g.display(Text(label,
         self.coords((1.8 + toffset)*self.radius, 0,
                     x*self.length - 0.25*height*tvert - width*toffset),
@@ -1131,7 +1132,7 @@ class Plot is Scene {
         var el = lines.rowindices(i)
         self._recordEntry("lines",
           self.display(Cylinder(vertMat.column(el[0]), vertMat.column(el[1]),
-                                aspectratio=0.05, color=_plotColorForElement(lcol, i))))
+                                aspectratio=0.025, color=_plotColorForElement(lcol, i))))
       }
       return
     }
@@ -1364,9 +1365,9 @@ fn plotfield(field, selection=nil, grade=nil, colormap=nil, style=nil, scale=tru
 fn plotaxes(xx0, size=1) {
   var x0 = islist(xx0) ? Matrix(xx0) : xx0
   var axes = Graphics()
-  axes.display(Arrow(x0, x0 + Matrix([size, 0, 0]), color=Red))
-  axes.display(Arrow(x0, x0 + Matrix([0, size, 0]), color=Green))
-  axes.display(Arrow(x0, x0 + Matrix([0, 0, size]), color=Blue))
+  axes.display(Arrow(x0, x0 + Matrix([size, 0, 0]), aspectratio=0.05, color=Red))
+  axes.display(Arrow(x0, x0 + Matrix([0, size, 0]), aspectratio=0.05, color=Green))
+  axes.display(Arrow(x0, x0 + Matrix([0, 0, size]), aspectratio=0.05, color=Blue))
   return axes
 }
 

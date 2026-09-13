@@ -31,7 +31,7 @@ expect(geom[2] > 0, "polygon geometric N is +Z")
 expect(approx(poly.normals.column(0)[2], 1), "polygon vertex normals +Z")
 
 /* ---- UV sphere: vertex normals are outward (unit positions) ---- */
-var sph = Sphere([0, 0, 0], 1).toTriangleComplex(scale=false)
+var sph = Sphere([0, 0, 0], 1).toTriangleComplex(unit=true)
 var nv = sph.position.dimensions()[1]
 var nbad = 0
 var poleZ = -2

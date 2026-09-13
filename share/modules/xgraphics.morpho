@@ -26,7 +26,7 @@ var _epsDraw = 1e-8  // Cutoff
 // Error messages
 var _GfxTxtDrnVrtPrllErr = Error("GfxTxtDrnVrtPrll", "Text direction and vertical are either zero length or parallel.")
 
-var _GfxEntryClrErr = Error("GfxEntryClr", "GraphicsEntry.color must be a Color.")
+var _GfxEntryClrErr = Error("GfxEntryClr", "GraphicsEntry.color must be a uniform Coloring.")
 var _GfxClrTblLenErr = Error("GfxClrTblLen", "ColorTable must provide one color per vertex.")
 var _GfxPolyErr = Error("GfxPoly", "Polygon must be convex and planar n-gon (n>=3).")
 var _GfxLightNameErr = Error("GfxLightName", "Graphics.light name must be \"neutral\", \"threepoint\", \"auto\", or \"off\".")
@@ -89,7 +89,7 @@ fn _orthonormalize(m) {
 }
 
 /** Helper to coerce a List or Matrix to a position 3-vector. */
-fn _asPosition(Matrix p) { return p.clone() }
+fn _asPosition(Matrix p) { return p }
 fn _asPosition(List p) { return Matrix(p) }
 fn _asPosition(Tuple p) { return Matrix(p) }
 fn _asPosition(p) { return isnil(p) ? Matrix([0, 0, 0]) : Matrix(p) } 
@@ -372,15 +372,15 @@ class TriangleConvertibleMixin {
 class Cylinder is GraphicsPrimitive with TriangleConvertibleMixin {
   init(start, end, aspectratio=0.1, radius=nil, n=10, color=nil, filter=nil, transmit=nil) {
     super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
-    self.start = Matrix(start)
-    self.end = Matrix(end)
+    self.start = _asPosition(start)
+    self.end = _asPosition(end)
     self.aspectratio = aspectratio
     self.radius = radius 
     self.n = n
   }
 
-  _radialScale(length) { // Compute radial scale (r/2) for the cylinder
-    return 0.5*(self.radius ? self.radius : length*self.aspectratio)
+  _radius(length) { // Use provided radius or aspectratio x length
+    return self.radius ? self.radius : length*self.aspectratio
   }
 
   // Geometric parameters for the cylinder
@@ -390,7 +390,7 @@ class Cylinder is GraphicsPrimitive with TriangleConvertibleMixin {
     if (length < _epsDraw) return nil
     var ndx = dx/length, px = _normalVector(dx), pxnorm = px.norm()
     if (pxnorm < _epsNorm) return nil
-    return (x1, x2, dx, length, ndx, self._radialScale(length)*px/pxnorm)
+    return (x1, x2, dx, length, ndx, self._radius(length)*px/pxnorm)
   }
 
   // Geometric parameters for the unit cylinder (from the origin to z=1 with unit radius)
@@ -399,10 +399,10 @@ class Cylinder is GraphicsPrimitive with TriangleConvertibleMixin {
               1, Matrix([0, 0, 1]), Matrix([1, 0, 0]))
   }
 
-  // Construct an explict TriangleComplex representing the Cylinder. 
+  // Construct an explicit TriangleComplex representing the Cylinder.
   // If unit is true, the cylinder is unit length and unit radius.
   toTriangleComplex(unit=false) {
-    var aspectratio = self.aspectratio, n = self.n, col = self.color
+    var n = self.n, col = self.color
     var np = 2*n+2, nt = 4*n, dim = 3
     var frame = _lineFrame(unit)
     if (isnil(frame)) return nil
@@ -412,9 +412,9 @@ class Cylinder is GraphicsPrimitive with TriangleConvertibleMixin {
     var vertices = Matrix(dim, np), normals = Matrix(dim, np)
 
     // Cap centers + outward unit normals. Ring verts are shared with the sidewall
-    // and carry radial normals — caps can look slightly rounded under Neutral.
-    vertices.setcolumn(0, x1)    // Cap center at x1 
-    vertices.setcolumn(np-1, x2) // Cap center at 
+
+    vertices.setcolumn(0, x1)    // Cap center at x1
+    vertices.setcolumn(np-1, x2) // Cap center at x2 
     normals.setcolumn(0, -ndx)
     normals.setcolumn(np-1, ndx)
 
@@ -426,7 +426,7 @@ class Cylinder is GraphicsPrimitive with TriangleConvertibleMixin {
            |            |
            0            1 2n+1
            <---- dx ----> */
-    // Unit +z shaft: ring offsets without 3×3 rotation matrices (mesh-cache hot path).
+    // Ring vertices are shared with the sidewall and therefore carry radial normals.
     if (unit) {
       for (i in 1..n) {
         var theta = 2*Pi*(i-1)/n, qx = Matrix([cos(theta), sin(theta), 0])
@@ -462,10 +462,16 @@ class Cylinder is GraphicsPrimitive with TriangleConvertibleMixin {
 }
 
 /* ----------------------------------------------------------------
- * Arrow 
- * 
- * Represents an arrow (a cylinder with a conical tip).
- * here start and end are the tail and the tip respectively.
+ * Arrow
+ *
+ * Represents an arrow from tail `start` to tip `end`.
+ *   Arrow(start, end, aspectratio=0.1, radius=nil, n=10, color=Red)
+ *   - start, end : tail and tip positions
+ *   - aspectratio : head length as a fraction of |end - start|;
+ *       if radius is omitted, also sets shaft radius = aspectratio × length
+ *   - radius : optional shaft radius; when set, aspectratio still controls
+ *       only the head proportions
+ *   - n, color : as Cylinder
  * ---------------------------------------------------------------- */
 
 class Arrow is Cylinder {
@@ -554,7 +560,7 @@ var _sphereCache = Dictionary() // Cache unit spheres by level -> (verts, faces)
 class Sphere is GraphicsPrimitive with TriangleConvertibleMixin {
   init(center, r, color=nil, filter=nil, transmit=nil) {
     super.init(color=color, filter=filter, transmit=transmit) // [Compatibility shim]
-    self.center = center
+    self.center = _asPosition(center)
     self.r = r
   }
 
@@ -594,15 +600,15 @@ class Sphere is GraphicsPrimitive with TriangleConvertibleMixin {
     return _sphereCache[level]
   }
 
-  // scale false → unit ball at origin. level is the requested tessellation.
-  toTriangleComplex(scale=true, level=3) {
+  // unit true → unit ball at origin. level is the requested tessellation.
+  toTriangleComplex(unit=false, level=3) {
     var col = self.color
     var mesh = _uvSphere(level)
-    var unit = mesh[0], v = unit.clone(), nv = v.dimensions()[1]
-    var x0 = scale ? _asPosition(self.center) : Matrix([0, 0, 0])
-    var r = scale ? self.r : 1
-    for (i in 0...nv) v.setcolumn(i, x0 + r * unit.column(i))
-    return TriangleComplex(v, unit.clone(), col, mesh[1].clone())
+    var uv = mesh[0], v = uv.clone(), nv = v.dimensions()[1]
+    var x0 = unit ? Matrix([0, 0, 0]) : self.center
+    var r = unit ? 1 : self.r
+    for (i in 0...nv) v.setcolumn(i, x0 + r * uv.column(i))
+    return TriangleComplex(v, uv.clone(), col, mesh[1].clone())
   }
 }
 
@@ -611,13 +617,13 @@ class Sphere is GraphicsPrimitive with TriangleConvertibleMixin {
  * 
  * Represents tubes drawn around a sequence of points joined by
  * line segments.
- * Constructor: 
- *   Tube(pts, rad, closed=true)
- *   Tube([x0,x1,x2], 0.1) 
- * - pts : The set of points to use 
+ * Constructor:
+ *   Tube(pts, rad, n=10, closed=false)
+ *   Tube([x0,x1,x2], 0.1)
+ * - pts : The set of points to use
  * - rad : Radius of the tube
- * - n : Number of faces to use per point 
- * - closed : If the line segments close or not
+ * - n : Number of faces to use per point
+ * - closed : whether the path closes (default false)
  * ---------------------------------------------------------------- */
 
 class Tube is GraphicsPrimitive with TriangleConvertibleMixin {
@@ -627,15 +633,6 @@ class Tube is GraphicsPrimitive with TriangleConvertibleMixin {
     self.radius = rad
     self.n = n
     self.closed = closed
-  }
-
-  _shaftNormal(vec) { // no abs — unlike module _normalVector
-    var order = [vec[0], vec[1], vec[2]].order()
-    var out=vec.clone()
-    out[order[0]]=0
-    out[order[1]]=vec[order[2]]
-    out[order[2]]=-vec[order[1]]
-    return out
   }
 
   toTriangleComplex() {
@@ -652,7 +649,7 @@ class Tube is GraphicsPrimitive with TriangleConvertibleMixin {
     // Separation vectors along the polyline
     for (k in 0..np-2) {
       var dx = mat.column(k+1)-mat.column(k), dlen = dx.norm()
-      if (!(dlen > 1e-8)) return nil
+      if (!(dlen > _epsDraw)) return nil
       sep[k] = dx/dlen
       ndx[k] += sep[k]
       ndx[k+1] += sep[k]
@@ -660,7 +657,7 @@ class Tube is GraphicsPrimitive with TriangleConvertibleMixin {
 
     if (self.closed) {
       var dx = mat.column(0)-mat.column(np-1), dlen = dx.norm()
-      if (!(dlen > 1e-8)) return nil
+      if (!(dlen > _epsDraw)) return nil
       sep[np-1] = dx/dlen
       ndx[np-1] += sep[np-1]
       ndx[0] += sep[np-1]
@@ -670,7 +667,7 @@ class Tube is GraphicsPrimitive with TriangleConvertibleMixin {
     for (k in 0...np) {
       var px
       if (k == 0) {
-        px = self._shaftNormal(ndx[k])
+        px = _normalVector(ndx[k])
       } else {
         var dx = vertices.column((k-1)*n)-mat.column(k-1)
         px = dx-dx.inner(ndx[k])*ndx[k]/ndx[k].norm()
@@ -678,7 +675,7 @@ class Tube is GraphicsPrimitive with TriangleConvertibleMixin {
       px = self.radius*px/px.norm()
 
       var x1 = mat.column(k), an = ndx[k].norm()
-      if (!(an > 1e-15)) return nil
+      if (!(an > _epsNorm)) return nil
       var axis = ndx[k]/an
       for (i in 0...n) {
         var theta = i*2*Pi/n, qx = _rotation(theta, axis)*px
@@ -929,21 +926,22 @@ class Lighting {
  * 
  * Displaylist entry incorporating a stable id, the item to display
  * and transformation information from model to world coordinates.
- * An override color can also be provided. 
+ * Optional color override. flat is nil (renderer default), true (unlit),
+ * or false (shaded).
  * ---------------------------------------------------------------- */
 
 class GraphicsEntry {
-  init(id, item, position=nil, scale=nil, rotate=nil, color=nil) {
+  init(id, item, position=nil, scale=nil, rotate=nil, color=nil, flat=nil) {
     self.id = id
     self.item = item
     self.position = _asPosition(position)
     self.scale = self._asScale(scale)
     self.rotate = rotate
     self.color = self._asEntryColor(color)
-    self.flat = nil // Override for unlit rendering
+    self.flat = flat // Rendering-mode override; nil means renderer default
   }
 
-  // Return visible  Visible coloring: entry override if set, else the primitive's intrinsic color. */
+  // Visible coloring: entry override if set, else the primitive's intrinsic color.
   effectiveColor() { return isnil(self.color) ? self.item.color : self.color }
 
   // Construct rotation matrix for this entry
@@ -954,7 +952,7 @@ class GraphicsEntry {
   }
 
   /** Helpers to coerce a List or Matrix to a scale Matrix. */
-  _asScale(Matrix s) { return s.clone() }
+  _asScale(Matrix s) { return s }
   _asScale(List s) { return Matrix(s) }
   _asScale(Tuple s) { return Matrix(s) }
   _asScale(s) { return isnil(s) ? 1 : s }
@@ -1002,8 +1000,8 @@ class Graphics {
   _append(item, position=nil, scale=nil, rotate=nil, color=nil, flat=nil) {
     var id = self._nextId
     self._nextId += 1
-    var e = GraphicsEntry(id, item, position=position, scale=scale, rotate=rotate, color=color)
-    e.flat = flat
+    var e = GraphicsEntry(id, item, position=position, scale=scale, rotate=rotate,
+                          color=color, flat=flat)
     self.displaylist.append(e)
     self._entryById[id] = e
     return id
@@ -1013,8 +1011,7 @@ class Graphics {
   _copyEntriesInto(g) {
     for (el in self.displaylist) {
       var e = GraphicsEntry(el.id, el.item, position=el.position, scale=el.scale,
-                            rotate=el.rotate, color=el.color)
-      e.flat = el.flat
+                            rotate=el.rotate, color=el.color, flat=el.flat)
       g.displaylist.append(e)
       g._entryById[e.id] = e
     }
@@ -1173,25 +1170,27 @@ class Scene is Graphics with Broadcaster {
     return id
   }
 
-  // Moves an entry, updating scale and rotate only if supplied
+  // Apply supplied pose components and notify. `position` nil leaves translation.
+  _move(e, position, scale, rotate) {
+    if (!isnil(position)) e.position = _asPosition(position)
+    if (!isnil(scale)) e.scale = e._asScale(scale)
+    if (!isnil(rotate)) e.rotate = rotate
+    self.notify(GraphicsEventMoved(e.id))
+    return true
+  }
+
+  // Leave position unchanged.
   move(id, scale=nil, rotate=nil) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    if (!isnil(scale)) e.scale = e._asScale(scale)
-    if (!isnil(rotate)) e.rotate = rotate
-    self.notify(GraphicsEventMoved(id))
-    return true
+    return self._move(e, nil, scale, rotate)
   }
 
   // Moves an entry, setting the position, and updates scale and rotate if supplied
   move(id, position, scale=nil, rotate=nil) {
     var e = self.findEntry(id)
     if (isnil(e)) return false
-    e.position = _asPosition(position)
-    if (!isnil(scale)) e.scale = e._asScale(scale)
-    if (!isnil(rotate)) e.rotate = rotate
-    self.notify(GraphicsEventMoved(id))
-    return true
+    return self._move(e, position, scale, rotate)
   }
 
   // Set presentation color for an entry 

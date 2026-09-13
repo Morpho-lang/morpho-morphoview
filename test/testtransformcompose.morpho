@@ -97,8 +97,8 @@ var cyl = Cylinder([0, 0, 0], [0, 0, 2], radius=0.4, n=8, color=Red)
 expect(cyl.radius == 0.4, "cylinder keeps radius")
 var tri = cyl.toTriangleComplex()
 var ring = tri.position.column(1)
-expect(abs(ring[0]*ring[0] + ring[1]*ring[1] - 0.2*0.2) < 1e-8,
-       "non-unit mesh radial distance is 0.5*radius")
+expect(abs(ring[0]*ring[0] + ring[1]*ring[1] - 0.4*0.4) < 1e-8,
+       "non-unit mesh radial distance is radius")
 var gc = Graphics()
 gc.display(cyl)
 var cbuf = Buf()
@@ -106,8 +106,8 @@ Show().write(gc, cbuf)
 var cmi = firstPrefix(cbuf.lines, "m ")
 expect(cmi >= 0, "cylinder local m")
 var ctok = cbuf.lines[cmi].split(" ")
-expect(ctok[1] == "0.2" && ctok[6] == "0.2" && ctok[11] == "2",
-       "m xy scale 0.5*radius, z scale length")
+expect(ctok[1] == "0.4" && ctok[6] == "0.4" && ctok[11] == "2",
+       "m xy scale radius, z scale length")
 
 var arr = Arrow([0, 0, 0], [0, 0, 2], radius=0.4, aspectratio=0.25, n=8, color=Blue)
 expect(arr.radius == 0.4, "arrow keeps radius")
@@ -118,7 +118,7 @@ Show().write(ga, abuf)
 var ami = firstPrefix(abuf.lines, "m ")
 expect(ami >= 0, "arrow local m")
 var atok = abuf.lines[ami].split(" ")
-expect(atok[1] == "0.2" && atok[11] == "2", "arrow radius scales xy, length scales z")
+expect(atok[1] == "0.4" && atok[11] == "2", "arrow radius scales xy, length scales z")
 
 /* ---- Sphere cache key uses item.r × entry.scale ---- */
 var gcache = Graphics()
