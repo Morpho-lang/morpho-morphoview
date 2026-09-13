@@ -111,10 +111,58 @@ class PointCloudSerializerMixin {
 }
 
 /* ----------------------------------------------------------------
+ * LineSetSerializerMixin
+ *
+ * Serialize a LineSet. Unlit unless flat=false.
+ * ---------------------------------------------------------------- */
+
+class LineSetSerializerMixin {
+  // Emit the vertex format string
+  _vertexFormat(LineSet item, Coloring color) { self._write("v \"x\"") }
+  _vertexFormat(LineSet item, ColorTable color) {
+    self._write(color.channels() >= 4 ? "v \"xca\"" : "v \"xc\"")
+  }
+
+  _lines(item, color) { // Emit lines
+    self._vertexFormat(item, color)
+    var x = item.position
+    var dim = x.dimensions()[0], nv = x.dimensions()[1]
+
+    for (i in 0...nv) {
+      var parts = []
+      for (j in 0...dim) parts.append("${self._fmt(x[j,i])} ")
+      self._vertexColor(parts, color, i)
+      self._write(parts)
+    }
+
+    var segs = item.connectivity
+    var parts = ["l"]
+    for (i in 0...segs.count()) parts.append(" ${segs[i]}")
+    self._write(parts)
+  }
+
+  // Define a line set
+  _define(GraphicsEntry entry, LineSet item) {
+    var flat = isnil(entry.flat) ? true : entry.flat
+    if (flat) self._write("M flat")
+    var cid = self._drawColor(entry, item.color)
+    var vid = self._uid()
+    self._write("o ${vid}")
+    _lines(item, item.color)
+    self._emitTransform(entry)
+    if (isnil(cid)) self._write("C")
+    else self._write("C ${cid}")
+    self._write("d ${entry.id} ${vid}")
+    if (flat) self._write("M shaded")
+    return vid
+  }
+}
+
+/* ----------------------------------------------------------------
  * GraphicsSerializer
  * ---------------------------------------------------------------- */
 
-class GraphicsSerializer with TriangleComplexSerializerMixin, PointCloudSerializerMixin {
+class GraphicsSerializer with TriangleComplexSerializerMixin, PointCloudSerializerMixin, LineSetSerializerMixin {
   init(Graphics graphic, out) {
     self.graphic = graphic
     self.out = out
@@ -132,6 +180,12 @@ class GraphicsSerializer with TriangleComplexSerializerMixin, PointCloudSerializ
   }
 
   _define(GraphicsEntry entry, item) { } // Null for entries that are not understood
+
+  _define(GraphicsEntry entry, TriangleConvertibleMixin item) { // Process anything that can be converted to a TriangleComplex
+    var tri = item.toTriangleComplex()
+    if (isnil(tri)) return
+    return self._define(entry, tri)
+  }
 
   // Emit lighting. Reset replaces lights already in the viewer.
   lights(reset=false) {
