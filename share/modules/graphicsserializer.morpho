@@ -5,6 +5,7 @@
  **************************************************************** */
 
 import color
+import constants
 import fonts
 import graphics
 
@@ -13,6 +14,7 @@ var _GsrFntNtFndErr = Error("GsrFntNtFnd", "Font not found.")
 
 var _I4 = IdentityMatrix(4)
 var _eps = 1e-8
+var _epsNorm = 1e-15
 
 var _sphereRefineThresh = 0.1 // Threshold for sphere refinement
 var _sphereRefineMax = 3 // Maximum number of refinement levels
@@ -57,7 +59,8 @@ class TriangleComplexSerializerMixin {
     }
   }
 
-  _defineObject(TriangleComplex item, color=item.color) {
+  _defineObject(TriangleComplex item, color=nil) {
+    if (isnil(color)) color = item.color
     var vid = self._uid()
     self._write("o ${vid}")
     _triangles(item, color)
@@ -279,6 +282,132 @@ class SphereSerializerMixin {
 }
 
 /* ----------------------------------------------------------------
+ * CylinderSerializerMixin
+ *
+ * Serialize Cylinder using cached unit-cylinder geometry.
+ * Arrow is a Cylinder; _object dispatches on the actual item.
+ * ---------------------------------------------------------------- */
+
+class CylinderSerializerMixin {
+  _normalVec(vec) {
+    var order = [abs(vec[0]), abs(vec[1]), abs(vec[2])].order()
+    var out = vec.clone()
+    out[order[0]] = 0
+    out[order[1]] = vec[order[2]]
+    out[order[2]] = -vec[order[1]]
+    return out
+  }
+
+  _rot3(theta, axis) {
+    var x = axis[0], y = axis[1], z = axis[2]
+    var ctheta = cos(theta), stheta = sin(theta), cc = 1-ctheta
+    return Matrix(
+      ((x*x*cc+ctheta,   x*y*cc-z*stheta, x*z*cc+y*stheta),
+       (x*y*cc+z*stheta, y*y*cc+ctheta,   y*z*cc-x*stheta),
+       (z*x*cc-y*stheta, y*z*cc+x*stheta, z*z*cc+ctheta))
+    )
+  }
+
+  _axisFromTo(from, to) {
+    var d = from.inner(to)
+    if (d > 1 - _eps) return (0, 1, 0, 0)
+    if (d < -1 + _eps) {
+      var ax = self._normalVec(from)
+      var n = ax.norm()
+      if (n < _epsNorm) ax = Matrix([1, 0, 0])
+      else ax = ax/n
+      return (Pi, ax[0], ax[1], ax[2])
+    }
+    var axis = cross3D(from, to)
+    axis = axis/axis.norm()
+    return (acos(d), axis[0], axis[1], axis[2])
+  }
+
+  _mat4LinearTranslate(linear, t) {
+    var m = Matrix(4, 4)
+    for (i in 0..2) {
+      for (j in 0..2) m[i,j] = linear[i,j]
+      m[i,3] = t[i]
+    }
+    m[3,3] = 1
+    return m.transpose()
+  }
+
+  _degenerate(Cylinder item) {
+    return (item.end - item.start).norm() < _eps
+  }
+
+  _localMatrix(Cylinder item) {
+    if (self._degenerate(item)) return nil
+
+    var x1 = item.start
+    var dx = item.end - x1
+    var length = dx.norm()
+    var radius = item._radius(length)
+
+    var rotate = self._axisFromTo(Matrix([0, 0, 1]), dx/length)
+    var R = abs(rotate[0]) < _eps ?
+      IdentityMatrix(3) :
+      self._rot3(rotate[0], [rotate[1], rotate[2], rotate[3]])
+
+    var S = Matrix(((radius, 0, 0),
+                    (0, radius, 0),
+                    (0, 0, length)))
+
+    return self._mat4LinearTranslate(R * S, x1)
+  }
+
+  // Cached unit cylinder for this facet count.
+  _object(Cylinder item) {
+    var cache = self._cache(CylinderSerializerMixin)
+    var key = item.n
+    if (cache.contains(key)) return cache[key]
+
+    var tri = item.toTriangleComplex(unit=true)
+    var vid = self._defineObject(tri, color=White)
+    cache[key] = vid
+    return vid
+  }
+
+  // Define a Cylinder draw using shared unit geometry.
+  _define(GraphicsEntry entry, Cylinder item) {
+    if (self._degenerate(item)) return
+
+    if (entry.flat) self._write("M flat")
+    var cid = self._defineColor(entry.effectiveColor())
+    var vid = self._object(item)
+
+    self._emitTransform(entry, item)
+    self._write("C ${cid}")
+    self._write("d ${entry.id} ${vid}")
+
+    if (entry.flat) self._write("M shaded")
+    return vid
+  }
+}
+
+/* ----------------------------------------------------------------
+ * ArrowSerializerMixin
+ *
+ * Serialize Arrow using cached unit-arrow geometry.
+ * ---------------------------------------------------------------- */
+
+class ArrowSerializerMixin is CylinderSerializerMixin {
+  // Cached unit arrow for this facet count and tip fraction.
+  _object(Arrow item) {
+    var cache = self._cache(ArrowSerializerMixin)
+    var key = (item.n, item.aspectratio)
+
+    if (cache.contains(key)) return cache[key]
+
+    var tri = item.toTriangleComplex(unit=true)
+    var vid = self._defineObject(tri, color=White)
+    cache[key] = vid
+    return vid
+  }
+}
+
+/* ----------------------------------------------------------------
  * GraphicsSerializer
  * ---------------------------------------------------------------- */
 
@@ -286,7 +415,8 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
                               PointCloudSerializerMixin, 
                               LineSetSerializerMixin, 
                               TextSerializerMixin, 
-                              SphereSerializerMixin {
+                              SphereSerializerMixin,
+                              ArrowSerializerMixin {
   init(Graphics graphic, out) {
     self.graphic = graphic
     self.out = out
@@ -301,7 +431,7 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
   }
 
   serialize(replace=false) { // Serialize the graphics
-    _preamble(replace)
+    _preamble(replace=replace)
     for (entry in self.graphic.displaylist) self.define(entry)
   }
 
