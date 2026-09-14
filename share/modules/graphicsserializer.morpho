@@ -5,7 +5,14 @@
  **************************************************************** */
 
 import color
+import fonts
 import graphics
+
+// Error messages
+var _GsrFntNtFndErr = Error("GsrFntNtFnd", "Font not found.")
+
+var _I4 = IdentityMatrix(4)
+var _eps = 1e-8
 
 /* ----------------------------------------------------------------
  * TriangleComplexSerializerMixin
@@ -54,7 +61,7 @@ class TriangleComplexSerializerMixin {
     var vid = self._uid()
     self._write("o ${vid}")
     _triangles(item, item.color)
-    self._emitTransform(entry)
+    self._emitTransform(entry, item)
     if (isnil(cid)) self._write("C")
     else self._write("C ${cid}")
     self._write("d ${entry.id} ${vid}")
@@ -101,7 +108,7 @@ class PointCloudSerializerMixin {
     var vid = self._uid()
     self._write("o ${vid}")
     _points(item, item.color)
-    self._emitTransform(entry)
+    self._emitTransform(entry, item)
     if (isnil(cid)) self._write("C")
     else self._write("C ${cid}")
     self._write("d ${entry.id} ${vid}")
@@ -149,7 +156,7 @@ class LineSetSerializerMixin {
     var vid = self._uid()
     self._write("o ${vid}")
     _lines(item, item.color)
-    self._emitTransform(entry)
+    self._emitTransform(entry, item)
     if (isnil(cid)) self._write("C")
     else self._write("C ${cid}")
     self._write("d ${entry.id} ${vid}")
@@ -159,15 +166,58 @@ class LineSetSerializerMixin {
 }
 
 /* ----------------------------------------------------------------
+ * TextSerializerMixin
+ *
+ * Serialize Text. Orientation is the item's local matrix.
+ * ---------------------------------------------------------------- */
+
+class TextSerializerMixin {
+  _localMatrix(Text item) { return item.transformationMatrix() }
+
+  _fontId(name, size) { // Font resource id for name and size
+    var fonts = self._cache(TextSerializerMixin)
+    var key = "${name}:${size}"
+
+    if (fonts.contains(key)) return fonts[key]
+
+    var path = FontFinder().find(name)
+    if (!path) _GsrFntNtFndErr.throw()
+
+    var id = self._uid()
+    fonts[key] = id
+    self._write("F ${id} \"${self._escape(path)}\" ${size}")
+    return id
+  }
+
+  // Define text
+  _define(GraphicsEntry entry, Text item) {
+    var font = item.font
+    if (isnil(font)) font = FontFinder().default()
+    var fid = self._fontId(font, item.size)
+    var cid = self._drawColor(entry, item.color)
+    self._emitTransform(entry, item)
+    self._write("C ${cid}")
+    self._write("T ${entry.id} ${fid} \"${self._escape(item.string)}\"")
+    return fid
+  }
+}
+
+/* ----------------------------------------------------------------
  * GraphicsSerializer
  * ---------------------------------------------------------------- */
 
-class GraphicsSerializer with TriangleComplexSerializerMixin, PointCloudSerializerMixin, LineSetSerializerMixin {
+class GraphicsSerializer with TriangleComplexSerializerMixin, PointCloudSerializerMixin, LineSetSerializerMixin, TextSerializerMixin {
   init(Graphics graphic, out) {
     self.graphic = graphic
     self.out = out
     self.uid = 0
     self.colorid = 0
+    self.caches = Dictionary()
+  }
+
+  _cache(owner) { // Lazily create a cache owned by a serializer mixin
+    if (!self.caches.contains(owner)) self.caches[owner] = Dictionary()
+    return self.caches[owner]
   }
 
   serialize(replace=false) { // Serialize the graphics
@@ -268,7 +318,11 @@ class GraphicsSerializer with TriangleComplexSerializerMixin, PointCloudSerializ
     if (color.channels() >= 4) parts.append("${_fmt(color.alpha(i))} ")
   }
 
-  _emitTransform(entry) { // Emit transformation instructions for an entry.
+  _localMatrix(item) { return nil }
+
+  _isIdentity4(m) { return (m - _I4).norm() < _eps }
+
+  _emitTransform(entry, item) { // Emit transformation instructions for an entry.
     _write("i") // Begin with identity matrix
     var scl = entry.scale
     if (ismatrix(scl)) {  // Emit scale factors
@@ -278,9 +332,15 @@ class GraphicsSerializer with TriangleComplexSerializerMixin, PointCloudSerializ
     }
     if (!isnil(entry.rotate)) { // Emit rotation
       var r = entry.rotate
-      if (!(abs(r[0]) < 1e-8)) {
+        if (!(abs(r[0]) < _eps)) {
         _write("r ${_fmt(r[0])} ${_fmt(r[1])} ${_fmt(r[2])} ${_fmt(r[3])}")
       }
+    }
+    var m = self._localMatrix(item) // Local model matrix
+    if (!isnil(m) && !_isIdentity4(m)) {
+      var parts = ["m"]
+      for (i in 0..3) for (j in 0..3) parts.append(" ${_fmt(m[i,j])}")
+      _write(parts)
     }
     var p = entry.position // Emit translation
     if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
