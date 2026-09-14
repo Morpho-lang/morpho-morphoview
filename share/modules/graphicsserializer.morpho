@@ -556,3 +556,70 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
     }
   }
 }
+
+/* ----------------------------------------------------------------
+ * SceneSerializer
+ *
+ * Serialize a Scene with dynamic update capabilities.
+ * ---------------------------------------------------------------- */
+
+class SceneSerializer is GraphicsSerializer {
+  init(Scene scene, out) {
+    super.init(scene, out)
+    self.objects = Dictionary()
+  }
+
+  serialize(replace=false) {
+    if (replace) {
+      self.objects = Dictionary()
+      self.caches = Dictionary()
+    }
+    super.serialize(replace=replace)
+  }
+
+  define(GraphicsEntry entry) {
+    var vid = super.define(entry)
+    self._record(entry, entry.item, vid)
+    return vid
+  }
+
+  pose(id) {
+    var entry = self.graphic.findEntry(id)
+    if (isnil(entry)) return false
+    self._emitTransform(entry, entry.item)
+    self._write("d ${id}")
+    return true
+  }
+
+  recolor(id) {
+    var entry = self.graphic.findEntry(id)
+    if (isnil(entry)) return false
+
+    var cid = self._drawColor(entry, entry.item.color)
+    if (isnil(cid)) self._write("C")
+    else self._write("C ${cid}")
+
+    self._write("d ${id}")
+    return true
+  }
+
+  remove(id) {
+    self._write("X D ${id}")
+    if (self.objects.contains(id)) self.objects.remove(id)
+    return true
+  }
+
+  replace(id) {
+    var entry = self.graphic.findEntry(id)
+    if (isnil(entry)) return false
+    self.remove(id)
+    self.define(entry)
+    return true
+  }
+
+  _record(GraphicsEntry entry, item, vid) {
+    if (!isnil(vid)) self.objects[entry.id] = vid
+  }
+
+  _record(GraphicsEntry entry, Text item, vid) { }
+}
