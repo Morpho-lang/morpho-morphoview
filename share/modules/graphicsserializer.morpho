@@ -1,7 +1,7 @@
 /* ***************************************************************
  * GraphicsSerializer
  * ==================
- * Serialize Graphics into morphoview ASCII IR
+ * Serialize Graphics and Scene into morphoview ASCII IR
  **************************************************************** */
 
 import color
@@ -39,8 +39,8 @@ class TriangleComplexSerializerMixin {
 
     for (i in 0...nv) {
       var parts = []
-      for (j in 0...dim) parts.append("${self._fmt(x[j,i])} ")
-      for (j in 0...dim) parts.append("${self._fmt(n[j,i])} ")
+      for (j in 0...dim) parts.append(self._fmt(x[j,i]))
+      for (j in 0...dim) parts.append(self._fmt(n[j,i]))
       self._vertexColor(parts, color, i)
       self._write(parts)
     }
@@ -54,7 +54,7 @@ class TriangleComplexSerializerMixin {
     for (i in 0...nf) {
       var indx = item.faceIndices(i)
       var parts = []
-      for (j in 0...indx.count()) parts.append("${indx[j]} ")
+      for (j in 0...indx.count()) parts.append(indx[j])
       self._write(parts)
     }
   }
@@ -101,13 +101,13 @@ class PointCloudSerializerMixin {
 
     for (i in 0...nv) {
       var parts = []
-      for (j in 0...dim) parts.append("${self._fmt(x[j,i])} ")
+      for (j in 0...dim) parts.append(self._fmt(x[j,i]))
       self._vertexColor(parts, color, i)
       self._write(parts)
     }
 
     var parts = ["p"]
-    for (i in 0...nv) parts.append(" ${i}")
+    for (i in 0...nv) parts.append(i)
     self._write(parts)
   }
 
@@ -148,14 +148,14 @@ class LineSetSerializerMixin {
 
     for (i in 0...nv) {
       var parts = []
-      for (j in 0...dim) parts.append("${self._fmt(x[j,i])} ")
+      for (j in 0...dim) parts.append(self._fmt(x[j,i]))
       self._vertexColor(parts, color, i)
       self._write(parts)
     }
 
     var segs = item.connectivity
     var parts = ["l"]
-    for (i in 0...segs.count()) parts.append(" ${segs[i]}")
+    for (i in 0...segs.count()) parts.append(segs[i])
     self._write(parts)
   }
 
@@ -462,12 +462,12 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
     var n = lighting.lights.count()
     if (n == 0) return
 
-    var parts = ["L ", n, " \"xc\""]
+    var parts = ["L", n, "\"xc\""]
     for (light in lighting.lights) {
       var p = light.position
       var rgb = (light.intensity*light.color).rgb(0)
-      parts.append(" ${_fmt(p[0])} ${_fmt(p[1])} ${_fmt(p[2])}")
-      parts.append(" ${_fmt(rgb[0])} ${_fmt(rgb[1])} ${_fmt(rgb[2])}")
+      parts.append("${_fmt(p[0])} ${_fmt(p[1])} ${_fmt(p[2])}")
+      parts.append("${_fmt(rgb[0])} ${_fmt(rgb[1])} ${_fmt(rgb[2])}")
     }
     _write(parts)
   }
@@ -482,10 +482,8 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
     self.lights()
   }
 
-  // Write to the output target; convenience concatenation for Lists
   _write(String s) { self.out.write(s) }
-  _write(List parts) { self.out.write(_concat(parts)) }
-  _concat(List parts) { return apply(String, parts) }
+  _write(List parts) { self.out.write(String.join(parts, " ")) }
 
   _fmt(x) { return Float(x).format("%0.3g") } // 3 significant figures
 
@@ -495,7 +493,7 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
       if (ch == "\\" || ch == "\"") parts.append("\\")
       parts.append(ch)
     }
-    return _concat(parts)
+    return String.join(parts)
   }
 
   _uid() { // Next object id
@@ -524,8 +522,8 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
   _vertexColor(parts, Coloring color, i) { } // No-op for uniform color
   _vertexColor(parts, ColorTable color, i) {
     var c = color.rgb(i)
-    parts.append("${_fmt(c[0])} ${_fmt(c[1])} ${_fmt(c[2])} ")
-    if (color.channels() >= 4) parts.append("${_fmt(color.alpha(i))} ")
+    parts.append("${_fmt(c[0])} ${_fmt(c[1])} ${_fmt(c[2])}")
+    if (color.channels() >= 4) parts.append("${_fmt(color.alpha(i))}")
   }
 
   _localMatrix(item) { return nil }
@@ -549,7 +547,7 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
     var m = self._localMatrix(item) // Local model matrix
     if (!isnil(m) && !_isIdentity4(m)) {
       var parts = ["m"]
-      for (i in 0..3) for (j in 0..3) parts.append(" ${_fmt(m[i,j])}")
+      for (i in 0..3) for (j in 0..3) parts.append(_fmt(m[i,j]))
       _write(parts)
     }
     var p = entry.position // Emit translation
