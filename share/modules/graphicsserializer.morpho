@@ -586,8 +586,30 @@ class SceneSerializer is GraphicsSerializer {
   pose(id) {
     var entry = self.graphic.findEntry(id)
     if (isnil(entry)) return false
-    self._emitTransform(entry, entry.item)
-    self._write("d ${id}")
+    return self._pose(entry, entry.item)
+  }
+
+  _pose(GraphicsEntry entry, item) {
+    self._emitTransform(entry, item)
+    self._write("d ${entry.id}")
+    return true
+  }
+
+  // Sphere mesh choice depends on refinement level
+  _pose(GraphicsEntry entry, Sphere item) {
+    var level = self._sphereRefinementLevel(entry, item)
+    var cache = self._cache(SphereSerializerMixin)
+
+    if (self.objects.contains(entry.id) &&
+        cache.contains(level) &&
+        self.objects[entry.id] == cache[level]) {
+      self._emitTransform(entry, item)
+      self._write("d ${entry.id}")
+      return true
+    }
+
+    self.remove(entry.id)
+    self.define(entry)
     return true
   }
 

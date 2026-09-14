@@ -1,0 +1,215 @@
+// SceneSerializer live updates: representation-aware Sphere pose,
+// generic pose, recolor/remove/replace, and serialize reset.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testsceneserializer.morpho
+
+import graphicsserializer
+import graphics
+import color
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn firstPrefix(lines, prefix) {
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (j in 0...prefix.count()) {
+        if (line[j] != prefix[j]) { ok = false; break }
+      }
+      if (ok) return line
+    }
+  }
+  return nil
+}
+
+fn lastDraw(lines) {
+  var found = nil
+  for (line in lines) {
+    if (line.count() >= 2 && line[0] == "d" && line[1] == " ") found = line
+  }
+  return found
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn poseOnly(lines, id) {
+  expect(countPrefix(lines, "X D") == 0, "pose must not remove")
+  expect(countPrefix(lines, "o ") == 0, "pose must not define geometry")
+  expect(lastDraw(lines) == "d ${id}", "pose draw is d <id>")
+}
+
+/* ---- 1. Sphere position-only move ---- */
+var g = Scene()
+var proto = Sphere([0, 0, 0], 1, color=Red)
+var id = g.display(proto, [0, 0, 0], scale=0.3)
+var buf = Buf()
+var ser = SceneSerializer(g, buf)
+ser.serialize()
+var vid = ser.objects[id]
+expect(!isnil(vid), "sphere is mapped")
+
+buf.lines = []
+g.move(id, [1, 2, 3])
+expect(ser.pose(id), "position pose")
+expect(ser.objects[id] == vid, "position keeps viewer object")
+poseOnly(buf.lines, id)
+expect(!isnil(firstPrefix(buf.lines, "t ")), "position pose emits translation")
+
+/* ---- 2. Sphere rotation-only move ---- */
+buf.lines = []
+g.move(id, rotate=[0.5, 0, 0, 1])
+expect(ser.pose(id), "rotation pose")
+expect(ser.objects[id] == vid, "rotation keeps viewer object")
+poseOnly(buf.lines, id)
+expect(!isnil(firstPrefix(buf.lines, "r ")), "rotation pose emits rotation")
+
+/* ---- 3. Sphere scale stays in the same refinement level ---- */
+var level = ser._sphereRefinementLevel(g.findEntry(id), proto)
+buf.lines = []
+g.move(id, scale=0.35)
+expect(ser._sphereRefinementLevel(g.findEntry(id), proto) == level,
+       "0.35 stays at the same refinement level as 0.3")
+expect(ser.pose(id), "same-level scale pose")
+expect(ser.objects[id] == vid, "same-level scale keeps viewer object")
+poseOnly(buf.lines, id)
+expect(!isnil(firstPrefix(buf.lines, "s ")), "scale pose emits scale")
+
+/* ---- 4. Sphere scale crosses a refinement threshold ---- */
+buf.lines = []
+g.move(id, scale=0.8)
+expect(ser._sphereRefinementLevel(g.findEntry(id), proto) != level,
+       "0.8 crosses to a new refinement level")
+expect(ser.pose(id), "cross-level scale pose")
+expect(countPrefix(buf.lines, "X D") == 1, "cross-level pose removes old draw")
+expect(countPrefix(buf.lines, "o ") == 1, "cross-level pose defines new unit mesh")
+expect(ser.objects[id] != vid, "objects[id] retargeted")
+expect(lastDraw(buf.lines) == "d ${id} ${ser.objects[id]}",
+       "redefine binds draw to the new viewer object")
+
+/* ---- 5. Cross into a refinement level already in the Sphere cache ---- */
+var g2 = Scene()
+var idLo = g2.display(proto, [0, 0, 0], scale=0.3)
+var idHi = g2.display(proto, [1, 0, 0], scale=0.8)
+var buf2 = Buf()
+var ser2 = SceneSerializer(g2, buf2)
+ser2.serialize()
+expect(countPrefix(buf2.lines, "o ") == 2, "two cached refinement levels")
+var vidLo = ser2.objects[idLo]
+var vidHi = ser2.objects[idHi]
+expect(vidLo != vidHi, "different levels have different objects")
+
+buf2.lines = []
+g2.move(idLo, scale=0.8)
+expect(ser2.pose(idLo), "pose onto a cached level")
+expect(countPrefix(buf2.lines, "X D") == 1, "old draw removed")
+expect(countPrefix(buf2.lines, "o ") == 0, "cached unit mesh is reused")
+expect(ser2.objects[idLo] == vidHi, "objects[id] retargeted to cached object")
+expect(ser2.objects[idHi] == vidHi, "sibling mapping unchanged")
+
+/* ---- 6. Generic pose for Text ---- */
+var gTxt = Scene()
+var tid = gTxt.display(Text("Hi", [0, 0, 0], color=White), [0, 0, 0])
+var bufT = Buf()
+var serT = SceneSerializer(gTxt, bufT)
+serT.serialize()
+expect(!serT.objects.contains(tid), "text is not in the object map")
+
+bufT.lines = []
+gTxt.move(tid, [2, 0, 0])
+expect(serT.pose(tid), "text pose")
+expect(!serT.objects.contains(tid), "text pose does not create an object map entry")
+poseOnly(bufT.lines, tid)
+expect(!isnil(firstPrefix(bufT.lines, "t ")), "text pose emits translation")
+
+/* ---- 7a. Recolor ---- */
+var gC = Scene()
+var cid = gC.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var bufC = Buf()
+var serC = SceneSerializer(gC, bufC)
+serC.serialize()
+bufC.lines = []
+gC.recolor(cid, Blue)
+expect(serC.recolor(cid), "recolor")
+expect(!isnil(firstPrefix(bufC.lines, "C ")), "recolor emits C")
+expect(lastDraw(bufC.lines) == "d ${cid}", "recolor restamps d <id>")
+expect(countPrefix(bufC.lines, "o ") == 0, "recolor does not redefine geometry")
+
+/* ---- 7b. Remove ---- */
+var gR = Scene()
+var rid = gR.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var bufR = Buf()
+var serR = SceneSerializer(gR, bufR)
+serR.serialize()
+expect(serR.objects.contains(rid), "mapped before remove")
+bufR.lines = []
+gR.remove(rid)
+expect(serR.remove(rid), "remove")
+expect(bufR.lines.count() == 1 && bufR.lines[0] == "X D ${rid}", "remove emits X D only")
+expect(!serR.objects.contains(rid), "mapping cleared")
+
+/* ---- 7c. Correctness-first replace ---- */
+var tc = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+var tc2 = TriangleComplex(
+  Matrix([[0, 2, 0], [0, 0, 2], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[0, 0, 0], [1, 1, 1], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+var gRep = Scene()
+var pid = gRep.display(tc, [0, 0, 0], scale=2)
+var bufP = Buf()
+var serP = SceneSerializer(gRep, bufP)
+serP.serialize()
+var oldVid = serP.objects[pid]
+bufP.lines = []
+gRep.replace(pid, tc2)
+expect(serP.replace(pid), "replace")
+expect(countPrefix(bufP.lines, "X D") == 1, "replace removes old draw")
+expect(countPrefix(bufP.lines, "o ") == 1, "replace redefines geometry")
+expect(serP.objects.contains(pid), "replace remaps entry")
+expect(serP.objects[pid] != oldVid, "replace allocates a new viewer object")
+
+/* ---- 7d. serialize(replace=true) invalidates viewer ids ---- */
+var gS = Scene()
+var sid = gS.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var bufS = Buf()
+var serS = SceneSerializer(gS, bufS)
+serS.serialize()
+var nO = countPrefix(bufS.lines, "o ")
+var oldSid = serS.objects[sid]
+bufS.lines = []
+serS.serialize(replace=true)
+expect(firstPrefix(bufS.lines, "U S") == "U S 1", "replace scene starts with U S")
+expect(countPrefix(bufS.lines, "o ") == nO, "caches cleared; unit geometry re-emitted")
+expect(serS.objects.contains(sid), "objects rebuilt")
+expect(serS.objects[sid] != oldSid, "viewer ids are not reused across reset")
+
+print "ok"
