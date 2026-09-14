@@ -14,6 +14,9 @@ var _GsrFntNtFndErr = Error("GsrFntNtFnd", "Font not found.")
 var _I4 = IdentityMatrix(4)
 var _eps = 1e-8
 
+var _sphereRefineThresh = 0.1 // Threshold for sphere refinement
+var _sphereRefineMax = 3 // Maximum number of refinement levels
+
 /* ----------------------------------------------------------------
  * TriangleComplexSerializerMixin
  *
@@ -54,13 +57,18 @@ class TriangleComplexSerializerMixin {
     }
   }
 
+  _defineObject(TriangleComplex item, color=item.color) {
+    var vid = self._uid()
+    self._write("o ${vid}")
+    _triangles(item, color)
+    return vid
+  }
+
   // Define a triangle complex
   _define(GraphicsEntry entry, TriangleComplex item) {
     if (entry.flat) self._write("M flat")
     var cid = self._drawColor(entry, item.color)
-    var vid = self._uid()
-    self._write("o ${vid}")
-    _triangles(item, item.color)
+    var vid = self._defineObject(item)
     self._emitTransform(entry, item)
     if (isnil(cid)) self._write("C")
     else self._write("C ${cid}")
@@ -203,10 +211,82 @@ class TextSerializerMixin {
 }
 
 /* ----------------------------------------------------------------
+ * SphereSerializerMixin
+ *
+ * Serialize Sphere using cached unit-sphere geometry.
+ * ---------------------------------------------------------------- */
+
+class SphereSerializerMixin {
+  _sphereEntryScale(entry) { // Largest scale applied by the entry
+    var scale = entry.scale
+    if (!ismatrix(scale)) return abs(scale)
+
+    var s = abs(scale[0])
+    if (abs(scale[1]) > s) s = abs(scale[1])
+    if (abs(scale[2]) > s) s = abs(scale[2])
+    return s
+  }
+
+  // Select sphere refinement level
+  _sphereRefinementLevel(entry, Sphere item) {
+    var radius = abs(item.r) * self._sphereEntryScale(entry)
+    var level = 0
+    while (radius / (2^level) > _sphereRefineThresh &&
+           level < _sphereRefineMax) level += 1
+    return level
+  }
+
+  // Local transform from the cached unit sphere to the authored sphere.
+  _localMatrix(Sphere item) {
+    var c = item.center
+    var r = item.r
+
+    if (r == 1 && c[0] == 0 && c[1] == 0 && c[2] == 0) return nil
+
+    return Matrix(((r, 0, 0, c[0]),
+                   (0, r, 0, c[1]),
+                   (0, 0, r, c[2]),
+                   (0, 0, 0, 1))).transpose()
+  }
+
+  // Get or define the cached unit sphere for this refinement level.
+  _sphereObject(entry, Sphere item) {
+    var level = self._sphereRefinementLevel(entry, item)
+    var cache = self._cache(SphereSerializerMixin)
+
+    if (cache.contains(level)) return cache[level]
+
+    var tri = item.toTriangleComplex(unit=true, level=level)
+    var vid = self._defineObject(tri, color=White)
+    cache[level] = vid
+    return vid
+  }
+
+  // Define a Sphere draw using shared unit geometry.
+  _define(GraphicsEntry entry, Sphere item) {
+    if (entry.flat) self._write("M flat")
+
+    var cid = self._defineColor(entry.effectiveColor())
+    var vid = self._sphereObject(entry, item)
+
+    self._emitTransform(entry, item)
+    self._write("C ${cid}")
+    self._write("d ${entry.id} ${vid}")
+
+    if (entry.flat) self._write("M shaded")
+    return vid
+  }
+}
+
+/* ----------------------------------------------------------------
  * GraphicsSerializer
  * ---------------------------------------------------------------- */
 
-class GraphicsSerializer with TriangleComplexSerializerMixin, PointCloudSerializerMixin, LineSetSerializerMixin, TextSerializerMixin {
+class GraphicsSerializer with TriangleComplexSerializerMixin, 
+                              PointCloudSerializerMixin, 
+                              LineSetSerializerMixin, 
+                              TextSerializerMixin, 
+                              SphereSerializerMixin {
   init(Graphics graphic, out) {
     self.graphic = graphic
     self.out = out
