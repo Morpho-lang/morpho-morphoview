@@ -20,14 +20,7 @@
 
 import morphoviewclient
 
-// Error messages (also defined in morphoviewclient for MorphoViewView)
-var _vwopnfl = Error("VwOpnFl", "View failed to open morphoview session.")
-var _vwemitfl = Error("VwEmitFl", "View failed to emit commands to morphoview.")
-var _vwalrdy = Error("VwAlrdy", "View already open.")
-var _vwerr = Error("VwErr", "View reported an error.")
-var _vwtmout = Error("VwTmout", "Timed out waiting for ok.")
-
-var _mvbin = nil
+// Error messages
 var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command); please upgrade morphopm.")
 
 /* ----------------------------------------------------------------
@@ -35,6 +28,8 @@ var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command)
  *
  * Find the morphoview executable.
  * ---------------------------------------------------------------- */
+
+var _mvbin = nil
 
 fn findMorphoViewBin() { // Path to the morphoview executable
   if (!isnil(_mvbin)) return _mvbin

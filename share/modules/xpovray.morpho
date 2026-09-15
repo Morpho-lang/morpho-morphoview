@@ -12,6 +12,7 @@ import graphics
 import color
 import fonts
 
+// Error messages
 var _PovExecErr = Error("PovExec", "Could not run POV-Ray.")
 var _PovLightRig = Error("PovLightRig",
   "Could not form a camera frame for named lighting; emitting no lights (ambient only).")
