@@ -4,7 +4,7 @@
  *  - `Show(g)`    — fire-and-forget (temp file + morphoview -t)
  *  - `show.write(g, out)` — emit ASCII commands to any `out.write(...)` sink
  *
- * Live View sessions live in morphoview.morpho (Listener over ZMQ).
+ * Live View sessions live in morphoview.morpho.
  */
 
 import graphics
@@ -923,3 +923,4 @@ class Show {
     if (flat) out.write("M shaded")
   }
 }
+

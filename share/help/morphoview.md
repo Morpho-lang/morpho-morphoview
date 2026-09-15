@@ -9,7 +9,7 @@ The `morphoview` package provides interactive 3D visualization through the exter
 
     import morphoview
 
-There are two ways to display graphics. Static `Show` does not need ZeroMQ (`import xshow` is enough); `import morphoview` pulls `Show` via `xshow` plus live `View`.
+There are two ways to display graphics. Static `Show` serializes with `GraphicsSerializer` and launches morphoview (`-t`). Live `View` keeps a duplex ZeroMQ session.
 
 * **Display only** — build a `Graphics` object and call `Show(g)`. The viewer opens, then exits when you close the window.
 * **Live session** — build a `Scene`, open a `View`, and update with `move` / `recolor` / etc. The viewer stays connected over ZeroMQ.
@@ -31,7 +31,7 @@ Requires `morpho-zeromq` package. Low-level viewer ASCII commands are documented
 ## Show
 [tagshow]: # (Show)
 
-`Show` (module `xshow`) launches morphoview with a temporary draw file (`-t`). Use it for one-shot display:
+`Show` launches morphoview with a temporary draw file (`-t`). Use it for one-shot display:
 
     var g = Graphics()
     g.display(Sphere([0,0,0], 1, color=Red))
@@ -40,9 +40,8 @@ Requires `morpho-zeromq` package. Low-level viewer ASCII commands are documented
 You can also serialize without launching:
 
     var show = Show()
-    show.write(g, out)   // any object with write(line)
-
-Set `show.replace = true` so the preamble emits `U S` (in-place scene replace) instead of `S` — used by `View.update(Graphics)`.
+    show.write(g, out)                 // any object with write(line)
+    show.write(g, out, replace=true)   // preamble emits U S instead of S
 
 ## View
 [tagView]: # (View)
@@ -59,8 +58,8 @@ View makes use of the `Listener` protocol to track changes in a `Scene`.
 
 * `open(commands)` / `open(Graphics)` / `open(Scene)` — bind, spawn viewer, send first chunk, wait for `ok`. Parse failures come back as `err` plus a line/char message; `lastErr` holds the reportable string. The `View(g)` constructor throws `VwOpnFl` with that detail.
 * `update(commands)` / `update(Graphics)` / `update(Scene)` — send another chunk (`Graphics` uses full `U S` replace)
-* `morph(id, item)` — same-layout vertex push (`U V` for `xn`/`xnc`/`xnca`); a layout change falls back to a full replace
-* `refreshMesh(id)` — push `U V` for an existing TriangleComplex entry
+* `morph(id, item)` — update the item in place when the vertex layout matches; otherwise replace
+* `refreshMesh(id)` — redefine viewer geometry from the current model
 * `redraw(commands)` — clear draws (`D`) and re-issue draw ASCII (tests / escape hatch)
 * `write(line)` — File-compatible sink for `Show.write`
 * `poll(timeoutms=0)` — one reply, or `nil` on timeout

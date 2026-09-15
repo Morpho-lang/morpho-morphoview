@@ -3,7 +3,7 @@
 //
 //   cd test && morpho6 testshowcolora.morpho
 
-import morphoview
+import xshow
 import graphics
 import color
 

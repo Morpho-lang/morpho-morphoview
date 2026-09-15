@@ -5,11 +5,10 @@
 //   cd test && morpho6 testxviewlife.morpho
 
 import graphicsserializer
-import morphoviewclient
+import morphoview
 import graphics
 import color
 import broadcast
-import zeromq
 
 class Buf {
   init() { self.lines = [] }
@@ -175,11 +174,10 @@ fn contains(s, needle) {
 /* ---- timeout waiting for ok detaches ---- */
 var vT = View(connecttimeout=80, pollms=40)
 vT.closed = false
-vT._bind()
-vT.poller = ZMQPoller(vT.sock)
+vT._transportBind()
 expect(!vT._waitOk(), "timeout waiting for ok")
 expect(vT.closed, "timeout shuts down")
-expect(isnil(vT.sock), "sock nil after timeout")
+expect(!vT._transportReady(), "transport closed after timeout")
 expect(isnil(vT.graphics), "graphics nil after timeout")
 
 /* ---- parse error shuts down ---- */
@@ -189,7 +187,7 @@ expect(!isnil(vErr.lastErr), "lastErr is set")
 expect(contains(vErr.lastErr, "line"), "reports line")
 expect(contains(vErr.lastErr, "char"), "reports char")
 expect(vErr.closed, "parse error shuts down")
-expect(isnil(vErr.sock), "sock nil after parse error")
+expect(!vErr._transportReady(), "transport closed after parse error")
 
 /* ---- live: close detaches; reopen; Scene A -> B; Scene -> Graphics ---- */
 print "opening View life..."
@@ -232,7 +230,7 @@ expect(gD.listeners.contains(v), "listening after Graphics -> Scene")
 v.close()
 expect(v.closed, "closed")
 expect(isnil(v.graphics), "graphics nil after close")
-expect(isnil(v.sock), "sock nil after close")
+expect(!v._transportReady(), "transport closed after close")
 expect(!gD.listeners.contains(v), "detached D after close")
 
 var gC = Scene()
@@ -255,7 +253,7 @@ gQ.title = "life-Q"
 gQ.display(tri(), [0, 0, 0])
 var vQ = View(gQ)
 expect(gQ.listeners.contains(vQ), "listening before viewer close")
-vQ._send("Q")
+vQ._transportSend("Q")
 var waitedQ = 0
 while (!vQ.closed && waitedQ < 5000) {
   vQ.poll(timeoutms=50)
@@ -264,5 +262,5 @@ while (!vQ.closed && waitedQ < 5000) {
 expect(vQ.closed, "window.closed shuts down")
 expect(!gQ.listeners.contains(vQ), "detached after viewer close")
 expect(isnil(vQ.graphics), "graphics nil after viewer close")
-expect(isnil(vQ.sock), "sock nil after viewer close")
+expect(!vQ._transportReady(), "transport closed after viewer close")
 print "ok"

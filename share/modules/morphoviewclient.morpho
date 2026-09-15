@@ -5,7 +5,6 @@
  **************************************************************** */
 
 import graphicsserializer
-import xshow
 import broadcast
 import zeromq
 import graphics
@@ -38,6 +37,48 @@ class MorphoViewShow {
 }
 
 /* ----------------------------------------------------------------
+ * ZMQPairTransportMixin
+ *
+ * Generic transport: bind, send, poll, receive, and close.
+ * This implementation uses a ZeroMQ PAIR socket.
+ * ---------------------------------------------------------------- */
+
+class ZMQPairTransportMixin {
+  _transportInit() { // Empty transport
+    self._zmqSocket = nil
+    self._zmqPoller = nil
+    self._zmqEndpoint = nil
+  }
+
+  _transportBind(address="tcp://127.0.0.1:!") { // Bind a local PAIR socket
+    self._zmqSocket = ZMQPair()
+    self._zmqSocket.bind(address)
+    self._zmqEndpoint = self._zmqSocket.endpoint()
+    self._zmqPoller = ZMQPoller(self._zmqSocket)
+  }
+
+  _transportReady() { return !isnil(self._zmqSocket) } // Is the transport bound?
+
+  _transportEndpoint() { return self._zmqEndpoint } // Connection endpoint
+
+  _transportSend(message) { self._zmqSocket.send(message) } // Send a message
+
+  _transportPoll(timeoutms) { // Wait for a message
+    if (isnil(self._zmqPoller)) return false
+    return self._zmqPoller.wait(timeoutms)
+  }
+
+  _transportReceive() { return self._zmqSocket.receive() } // Receive a message
+
+  _transportClose() { // Unbind and drop the socket
+    if (!isnil(self._zmqSocket)) self._zmqSocket.unbind()
+    self._zmqSocket = nil
+    self._zmqPoller = nil
+    self._zmqEndpoint = nil
+  }
+}
+
+/* ----------------------------------------------------------------
  * MorphoViewView
  *
  * Template for an interactive viewer session.
@@ -55,13 +96,11 @@ class MorphoViewShow {
  * Subclasses must provide _spawn and _kill methods.
  * ---------------------------------------------------------------- */
 
-class MorphoViewView with Listener {
+class MorphoViewView with Listener, ZMQPairTransportMixin {
   init(connecttimeout=5000, pollms=100) {
     self.connecttimeout = connecttimeout
     self.pollms = pollms
-    self.sock = nil
-    self.ep = nil
-    self.poller = nil
+    self._transportInit()
     self.closed = true
     self.gotOk = false
     self.lastErr = nil
@@ -87,29 +126,28 @@ class MorphoViewView with Listener {
   }
 
   _process() { // Process pending messages
-    if (isnil(self.poller) || self.closed) return
-    while (!self.closed && self.poller.wait(0)) {
-      self._handle(self.sock.receive())
+    if (!self._transportReady() || self.closed) return
+    while (!self.closed && self._transportPoll(0)) {
+      self._handle(self._transportReceive())
     }
   }
 
   _sendWait(commands) { // Send commands and wait for ok
     self._process()
-    if (self.closed || isnil(self.sock)) return false
+    if (self.closed || !self._transportReady()) return false
     self.gotOk = false
-    self._send(commands)
+    self._transportSend(commands)
     return self._waitOk()
   }
 
   open(String commands) { // Open a morphoview session
-    if (!isnil(self.sock)) {
+    if (self._transportReady()) {
       _vwalrdy.warning()
       return false
     }
     self.lastErr = nil
-    self._bind()
+    self._transportBind()
     self._spawn()
-    self.poller = ZMQPoller(self.sock)
     self.closed = false
     return self._sendWait(commands)
   }
@@ -278,11 +316,11 @@ class MorphoViewView with Listener {
   }
 
   poll(timeoutms=nil) { // Wait for a viewer message
-    if (self.closed || isnil(self.poller)) return nil
+    if (self.closed || !self._transportReady()) return nil
     var t = self.pollms
     if (!isnil(timeoutms)) t = timeoutms
-    if (!self.poller.wait(t)) return nil
-    return self._handle(self.sock.receive())
+    if (!self._transportPoll(t)) return nil
+    return self._handle(self._transportReceive())
   }
 
   wait(sessiontimeout=0) { // Wait until the viewer closes
@@ -301,8 +339,8 @@ class MorphoViewView with Listener {
   }
 
   close() { // Close the viewer
-    if (!isnil(self.sock) && !self.closed) {
-      self._send("Q")
+    if (self._transportReady() && !self.closed) {
+      self._transportSend("Q")
       var waited = 0
       while (!self.closed && waited < self.connecttimeout) {
         self.poll(timeoutms=self.pollms)
@@ -323,20 +361,9 @@ class MorphoViewView with Listener {
 
   _resetTransport() { // Reset the connection
     self.closed = true
-    if (!isnil(self.sock)) self.sock.unbind()
-    self.sock = nil
-    self.ep = nil
-    self.poller = nil
+    self._transportClose()
     self.cmdLines = []
   }
-
-  _bind() { // Bind a local socket
-    self.sock = ZMQPair()
-    self.sock.bind("tcp://127.0.0.1:!")
-    self.ep = self.sock.endpoint()
-  }
-
-  _send(commands) { self.sock.send(commands) }
 
   _waitOk() { // Wait for the viewer's ok
     var waited = 0
@@ -374,66 +401,5 @@ class MorphoViewView with Listener {
       self._shutdown()
     }
     return msg
-  }
-}
-
-/* ----------------------------------------------------------------
- * Show
- *
- * Launch morphoview-glfw passing the serialized graphic to a temporary file.
- * ---------------------------------------------------------------- */
-
-class Show is MorphoViewShow {
-  _launch(g) { // Write a temp file and open GLFW morphoview
-    var isWindows = System.platform()=="windows"
-    var tempFolder = isWindows ?
-      "${System.homefolder()}/AppData/Local/Temp" : "/tmp"
-    var fname = self._randomAlphanumString(10)
-    var path = Folder.normalizePath("${tempFolder}/morpho${fname}.draw")
-    var out = File(path, "w")
-    var bin = findMorphoViewBin()
-
-    self.write(g, out)
-    out.close()
-
-    if (isWindows) {
-      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}'\"")
-    } else {
-      system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
-    }
-  }
-
-  _randomAlphanumString(n) { // Random filename fragment
-    var alpha="abcdefghijklmnopqrstuvwxyz0123456789"
-    var name=[]
-    var nalpha = alpha.count()
-    for (i in 1..n) name.append(alpha[randomint(nalpha)])
-    return String.join(name)
-  }
-}
-
-/* ----------------------------------------------------------------
- * View
- *
- * Launch morphoview-glfw in interactive mode.
- * ---------------------------------------------------------------- */
-
-class View is MorphoViewView {
-  _spawn() { // Start GLFW morphoview
-    var bin = findMorphoViewBin()
-    if (System.platform()=="windows") {
-      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-c', '${self.ep}'\"")
-    } else {
-      system("\"${bin}\" -c \"${self.ep}\" > /dev/null 2>&1 &")
-    }
-  }
-
-  _kill() { // Kill the morphoview process
-    if (isnil(self.ep)) return
-    if (System.platform()=="windows") {
-      system("powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'morphoview' -and $_.CommandLine -like '*-c*${self.ep}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"")
-    } else {
-      system("pkill -9 -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
-    }
   }
 }

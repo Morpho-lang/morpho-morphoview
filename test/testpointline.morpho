@@ -3,7 +3,7 @@
 //
 //   cd test && morpho6 testpointline.morpho
 
-import morphoview
+import xshow
 import graphics
 import color
 

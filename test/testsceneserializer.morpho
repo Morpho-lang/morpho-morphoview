@@ -5,7 +5,7 @@
 //   cd test && morpho6 testsceneserializer.morpho
 
 import graphicsserializer
-import morphoviewclient
+import morphoview
 import graphics
 import color
 
