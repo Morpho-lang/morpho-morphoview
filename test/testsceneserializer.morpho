@@ -5,6 +5,7 @@
 //   cd test && morpho6 testsceneserializer.morpho
 
 import graphicsserializer
+import morphoviewclient
 import graphics
 import color
 
@@ -392,28 +393,47 @@ gX.replace(x1, Sphere([0, 0, 0], 1, color=Blue))
 expect(serX.replace(x1), "TC -> Sphere")
 expect(serX.objects.contains(x1), "TC -> Sphere remaps")
 expect(countPrefix(bufX.lines, "X D") == 1, "TC -> Sphere removes")
+expect(countPrefix(bufX.lines, "X O") == 1, "TC -> Sphere reclaims unique o")
+
+bufX.lines = []
+gX.replace(x1, triMesh())
+expect(serX.replace(x1), "Sphere -> TC")
+expect(serX.objects.contains(x1), "Sphere -> TC remaps")
+expect(countPrefix(bufX.lines, "X O") == 0, "Sphere -> TC keeps unit mesh")
+expect(countPrefix(bufX.lines, "o ") == 1, "Sphere -> TC defines unique mesh")
 
 bufX.lines = []
 gX.replace(x2, Text("Z", [0, 0, 0], color=White))
 expect(serX.replace(x2), "Sphere -> Text")
 expect(!serX.objects.contains(x2), "Sphere -> Text leaves the object map")
 expect(countPrefix(bufX.lines, "T ") == 1, "Sphere -> Text defines T")
+expect(countPrefix(bufX.lines, "X O") == 0, "Sphere -> Text keeps unit mesh")
 
 bufX.lines = []
 gX.replace(x3, triMesh())
 expect(serX.replace(x3), "Text -> TC")
 expect(serX.objects.contains(x3), "Text -> TC enters the object map")
 expect(countPrefix(bufX.lines, "o ") == 1, "Text -> TC defines geometry")
+expect(countPrefix(bufX.lines, "X O") == 0, "Text -> TC has no o to reclaim")
+
+bufX.lines = []
+gX.replace(x2, LineSet([[0, 0, 0], [1, 0, 0]], color=White))
+expect(serX.replace(x2), "Text -> LineSet")
+expect(serX.objects.contains(x2), "Text -> LineSet maps")
+expect(countPrefix(bufX.lines, "X O") == 0, "Text -> LineSet no X O")
+expect(countPrefix(bufX.lines, "o ") == 1, "Text -> LineSet defines")
 
 bufX.lines = []
 gX.replace(x4, Arrow([0, 0, 0], [0, 1, 0], n=6, color=Blue))
 expect(serX.replace(x4), "Cylinder -> Arrow")
 expect(serX.objects.contains(x4), "Cylinder -> Arrow remaps")
+expect(countPrefix(bufX.lines, "X O") == 0, "Cylinder -> Arrow keeps unit meshes")
 
 bufX.lines = []
 gX.replace(x5, Text("P", [0, 0, 0], color=White))
 expect(serX.replace(x5), "PointCloud -> Text")
 expect(!serX.objects.contains(x5), "PointCloud -> Text leaves the object map")
+expect(countPrefix(bufX.lines, "X O") == 1, "PointCloud -> Text reclaims unique o")
 
 /* ---- lights ---- */
 fn hasL(lines) {
@@ -491,5 +511,320 @@ var eFalse = gFlat.findEntry(pcFalse)
 eFalse.flat = false
 serF.replace(pcFalse)
 expect(!hasExact(bufF.lines, "M flat"), "flat=false PointCloud is shaded, not M flat")
+
+fn xnMesh() {
+  return TriangleComplex(
+    Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Red,
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn xnMeshMoved() {
+  return TriangleComplex(
+    Matrix([[0, 2, 0], [0, 0, 2], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Blue,
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn xncMesh() {
+  return TriangleComplex(
+    Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn xncMeshMoved() {
+  return TriangleComplex(
+    Matrix([[0, 2, 0], [0, 0, 2], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    ColorTable(Matrix([[0, 1, 0], [0, 0, 1], [1, 0, 0]])),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn xncaMesh() {
+  return TriangleComplex(
+    Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.4, 0.5, 0.6]])),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn xncaMeshMoved() {
+  return TriangleComplex(
+    Matrix([[0, 2, 0], [0, 0, 2], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    ColorTable(Matrix([[0, 1, 0], [0, 0, 1], [1, 0, 0], [0.5, 0.5, 0.5]])),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn fourVertXn() {
+  return TriangleComplex(
+    Matrix([[0, 1, 0, 1], [0, 0, 1, 1], [0, 0, 0, 0]]),
+    Matrix([[0, 0, 0, 0], [0, 0, 0, 0], [1, 1, 1, 1]]),
+    Green,
+    Matrix([[1, 1], [1, 1], [1, 1]])
+  )
+}
+
+fn uvOnly(lines, vid, nverts) {
+  expect(lines[0] == "U V ${vid}", "U V names the viewer object")
+  expect(countPrefix(lines, "v ") == 0, "U V does not redeclare format")
+  expect(countPrefix(lines, "f") == 0, "U V does not emit faces")
+  expect(countPrefix(lines, "X D") == 0, "U V does not remove")
+  expect(countPrefix(lines, "o ") == 0, "U V does not define geometry")
+  expect(lines.count() == nverts + 1, "U V is header plus vertex rows")
+}
+
+/* ---- U V: same-layout TriangleComplex ---- */
+var gUV = Scene()
+var idXn = gUV.display(xnMesh())
+var idXnc = gUV.display(xncMesh())
+var idXnca = gUV.display(xncaMesh())
+var idOver = gUV.display(xncMesh(), color=Blue)
+var bufUV = Buf()
+var serUV = SceneSerializer(gUV, bufUV)
+serUV.serialize()
+var vidXn = serUV.objects[idXn]
+var vidXnc = serUV.objects[idXnc]
+var vidXnca = serUV.objects[idXnca]
+var vidOver = serUV.objects[idOver]
+
+expect(serUV._vertexLayout(xnMesh()) == "xn", "Coloring layout is xn")
+expect(serUV._vertexLayout(xncMesh()) == "xnc", "ColorTable RGB is xnc")
+expect(serUV._vertexLayout(xncaMesh()) == "xnca", "ColorTable RGBA is xnca")
+
+expect(serUV.canUpdateVertices(idXn, xnMesh(), xnMeshMoved()), "xn -> xn")
+bufUV.lines = []
+expect(serUV.updateVertices(idXn, xnMeshMoved()), "emit xn U V")
+uvOnly(bufUV.lines, vidXn, 3)
+
+expect(serUV.canUpdateVertices(idXnc, xncMesh(), xncMeshMoved()), "xnc -> xnc")
+bufUV.lines = []
+expect(serUV.updateVertices(idXnc, xncMeshMoved()), "emit xnc U V")
+uvOnly(bufUV.lines, vidXnc, 3)
+
+expect(serUV.canUpdateVertices(idXnca, xncaMesh(), xncaMeshMoved()), "xnca -> xnca")
+bufUV.lines = []
+expect(serUV.updateVertices(idXnca, xncaMeshMoved()), "emit xnca U V")
+uvOnly(bufUV.lines, vidXnca, 3)
+
+expect(serUV.canUpdateVertices(idOver, xncMesh(), xncMeshMoved()),
+       "entry override does not block U V")
+expect(!serUV.canUpdateVertices(idXn, xnMesh(), fourVertXn()), "count change falls back")
+expect(!serUV.canUpdateVertices(idXn, xnMesh(), xncMesh()), "xn -> xnc falls back")
+expect(!serUV.canUpdateVertices(idXnc, xncMesh(), xncaMesh()), "xnc -> xnca falls back")
+expect(!serUV.canUpdateVertices(idXn, xnMesh(), Sphere([0, 0, 0], 1)),
+       "TC -> other type falls back")
+expect(!serUV.canUpdateVertices(idXn, Sphere([0, 0, 0], 1), xnMesh()),
+       "other type -> TC falls back")
+expect(!serUV.canUpdateVertices(999, xnMesh(), xnMeshMoved()), "unmapped id falls back")
+
+/* ---- unique object reclamation ---- */
+var gU = Scene()
+var uTC = gU.display(xnMesh())
+var uPC = gU.display(PointCloud([[0, 0, 0], [1, 0, 0]], color=Red))
+var uLS = gU.display(LineSet([[0, 0, 0], [1, 0, 0]], color=White))
+var uSpA = gU.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var uSpB = gU.display(Sphere([0, 0, 0], 1, color=Blue), [1, 0, 0], scale=0.3)
+var uCy = gU.display(Cylinder([0, 0, 0], [0, 1, 0], n=6, color=Green))
+var uAr = gU.display(Arrow([0, 0, 0], [0, 1, 0], n=6, color=Yellow))
+var uTx = gU.display(Text("Hi", [0, 0, 0], color=White))
+var bufU = Buf()
+var serU = SceneSerializer(gU, bufU)
+serU.serialize()
+var vidTC = serU.objects[uTC]
+var vidPC = serU.objects[uPC]
+var vidLS = serU.objects[uLS]
+var vidSp = serU.objects[uSpA]
+expect(serU.objects[uSpB] == vidSp, "shared sphere object")
+var sphCache = serU._cache(SphereSerializerMixin)
+expect(serU._isCachedObject(vidSp), "sphere unit mesh is cached")
+
+bufU.lines = []
+gU.remove(uTC)
+expect(serU.remove(uTC), "remove unique TC")
+expect(countPrefix(bufU.lines, "X D") == 1, "unique TC X D")
+expect(bufU.lines[1] == "X O ${vidTC}", "unique TC X O")
+
+bufU.lines = []
+gU.remove(uPC)
+expect(serU.remove(uPC), "remove PointCloud")
+expect(bufU.lines[1] == "X O ${vidPC}", "PointCloud X O")
+
+bufU.lines = []
+gU.remove(uLS)
+expect(serU.remove(uLS), "remove LineSet")
+expect(bufU.lines[1] == "X O ${vidLS}", "LineSet X O")
+
+bufU.lines = []
+gU.remove(uSpA)
+expect(serU.remove(uSpA), "remove first shared sphere")
+expect(countPrefix(bufU.lines, "X O") == 0, "shared sphere keeps object")
+expect(serU.objects[uSpB] == vidSp, "sibling still mapped")
+
+bufU.lines = []
+gU.remove(uSpB)
+expect(serU.remove(uSpB), "remove last shared sphere")
+expect(countPrefix(bufU.lines, "X O") == 0, "cached sphere not reclaimed")
+var stillCached = false
+for (k in sphCache) if (sphCache[k] == vidSp) stillCached = true
+expect(stillCached, "sphere cache retains unit mesh")
+
+bufU.lines = []
+var uSpC = gU.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+serU.define(gU.findEntry(uSpC))
+expect(countPrefix(bufU.lines, "o ") == 0, "cached sphere reuses o")
+expect(serU.objects[uSpC] == vidSp, "new sphere maps to cached o")
+
+bufU.lines = []
+gU.remove(uCy)
+expect(serU.remove(uCy), "remove last cylinder")
+expect(countPrefix(bufU.lines, "X O") == 0, "cached cylinder not reclaimed")
+
+bufU.lines = []
+gU.remove(uAr)
+expect(serU.remove(uAr), "remove last arrow")
+expect(countPrefix(bufU.lines, "X O") == 0, "cached arrow not reclaimed")
+
+bufU.lines = []
+gU.remove(uTx)
+expect(serU.remove(uTx), "remove Text")
+expect(countPrefix(bufU.lines, "X O") == 0, "Text never emits X O")
+
+var gRepU = Scene()
+var rOld = gRepU.display(xnMesh())
+var bufRepU = Buf()
+var serRepU = SceneSerializer(gRepU, bufRepU)
+serRepU.serialize()
+var oldU = serRepU.objects[rOld]
+bufRepU.lines = []
+gRepU.replace(rOld, xnMeshMoved())
+expect(serRepU.replace(rOld), "replace unique TC")
+expect(countPrefix(bufRepU.lines, "X D") == 1, "replace X D")
+expect(countPrefix(bufRepU.lines, "X O") == 1, "replace reclaims old o")
+expect(serRepU.objects[rOld] != oldU, "replace allocates a new o")
+
+bufU.lines = []
+serU.serialize(replace=true)
+expect(firstPrefix(bufU.lines, "U S") == "U S 1", "reset starts with U S")
+expect(serU.objects.contains(uSpC), "reset rebuilds objects")
+
+/* ---- live color interning ---- */
+var gInt = Scene()
+var iA = gInt.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var iB = gInt.display(Sphere([0, 0, 0], 1, color=Red), [1, 0, 0], scale=0.3)
+var iC = gInt.display(xnMesh(), color=Red)
+var bufInt = Buf()
+var serInt = SceneSerializer(gInt, bufInt)
+serInt.serialize()
+expect(countPrefix(bufInt.lines, "c ") == 1, "same uniform color -> one c")
+
+var gStat = Graphics()
+gStat.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+gStat.display(Sphere([0, 0, 0], 1, color=Red), [1, 0, 0], scale=0.3)
+var bufStat = Buf()
+GraphicsSerializer(gStat, bufStat).serialize()
+expect(countPrefix(bufStat.lines, "c ") == 2, "static GraphicsSerializer does not intern")
+
+bufInt.lines = []
+gInt.recolor(iA, Green)
+expect(serInt.recolor(iA), "recolor to Green")
+expect(countPrefix(bufInt.lines, "c ") == 1, "new color allocates c")
+
+bufInt.lines = []
+gInt.recolor(iA, Red)
+expect(serInt.recolor(iA), "recolor A -> B -> A")
+expect(countPrefix(bufInt.lines, "c ") == 0, "restored Red reuses interned id")
+expect(!isnil(firstPrefix(bufInt.lines, "C ")), "recolor stamps C")
+
+bufInt.lines = []
+gInt.recolor(iB, Color(1, 0, 0, 0.5))
+expect(serInt.recolor(iB), "different alpha")
+expect(countPrefix(bufInt.lines, "c ") == 1, "alpha is a distinct resource")
+
+var idTbl = gInt.display(xncMesh())
+serInt.define(gInt.findEntry(idTbl))
+bufInt.lines = []
+expect(serInt.recolor(idTbl), "ColorTable intrinsic")
+expect(hasExact(bufInt.lines, "C"), "restored ColorTable is bare C")
+expect(countPrefix(bufInt.lines, "c ") == 0, "ColorTable restore does not intern")
+
+var redId = serInt.colors["1 0 0 1"]
+bufInt.lines = []
+serInt.serialize(replace=true)
+expect(countPrefix(bufInt.lines, "c ") >= 1, "reset redefines colors")
+expect(serInt.colors["1 0 0 1"] != redId, "reset does not reuse old intern ids")
+expect(serInt.colors.count() == countPrefix(bufInt.lines, "c "),
+       "rebuilt scene still interns identical colors")
+
+/* ---- empty PointCloud / LineSet ---- */
+var gE = Scene()
+var emptyPC = PointCloud(Matrix(3, 0))
+var emptyLS = LineSet([[0, 0, 0]])
+var ePC = gE.display(emptyPC)
+var eLS = gE.display(emptyLS)
+var eKeep = gE.display(xnMesh())
+var bufE = Buf()
+var serE = SceneSerializer(gE, bufE)
+serE.serialize()
+expect(!serE.objects.contains(ePC), "empty PointCloud is not mapped")
+expect(!serE.objects.contains(eLS), "empty LineSet is not mapped")
+expect(serE.objects.contains(eKeep), "non-empty entry is mapped")
+expect(countPrefix(bufE.lines, "o ") == 1, "empty primitives emit no object")
+
+bufE.lines = []
+expect(isnil(serE.define(gE.findEntry(ePC))), "live define empty PointCloud is nil")
+expect(bufE.lines.count() == 0, "empty PointCloud emits nothing")
+bufE.lines = []
+expect(isnil(serE.define(gE.findEntry(eLS))), "live define empty LineSet is nil")
+expect(bufE.lines.count() == 0, "empty LineSet emits nothing")
+
+bufE.lines = []
+gE.replace(eKeep, emptyPC)
+expect(serE.replace(eKeep), "replace with empty PointCloud")
+expect(!serE.objects.contains(eKeep), "empty replace leaves objects")
+expect(countPrefix(bufE.lines, "X D") == 1, "empty replace still removes the draw")
+expect(countPrefix(bufE.lines, "o ") == 0, "empty replace does not define")
+
+bufE.lines = []
+gE.replace(eKeep, xnMesh())
+expect(serE.replace(eKeep), "empty -> nonempty")
+expect(serE.objects.contains(eKeep), "nonempty replace remaps")
+expect(countPrefix(bufE.lines, "o ") == 1, "empty -> nonempty defines")
+
+/* ---- cache inspect does not create caches ---- */
+var gIns = Scene()
+var bufIns = Buf()
+var serIns = SceneSerializer(gIns, bufIns)
+expect(!serIns.caches.contains(SphereSerializerMixin), "no sphere cache yet")
+expect(!serIns._isCachedObject(1), "unknown vid is not cached")
+expect(!serIns.caches.contains(SphereSerializerMixin), "inspect did not create a cache")
+expect(!serIns.caches.contains(CylinderSerializerMixin), "inspect did not create cylinder cache")
+expect(!serIns.caches.contains(ArrowSerializerMixin), "inspect did not create arrow cache")
+
+/* ---- refreshMesh is full replace, never U V ---- */
+var gRf = Scene()
+var rfId = gRf.display(xnMesh())
+var bufRf = Buf()
+var vRf = View()
+vRf.closed = false
+vRf.graphics = gRf
+var serRf = SceneSerializer(gRf, bufRf)
+serRf.serialize()
+vRf.serializer = serRf
+bufRf.lines = []
+expect(!vRf.refreshMesh(rfId), "refreshMesh send fails without a socket")
+expect(countPrefix(bufRf.lines, "U V") == 0, "refreshMesh does not emit U V")
+expect(countPrefix(bufRf.lines, "X D") == 1, "refreshMesh removes the draw")
+expect(countPrefix(bufRf.lines, "o ") == 1, "refreshMesh redefines")
 
 print "ok"

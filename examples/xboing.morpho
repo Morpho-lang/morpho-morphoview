@@ -1,10 +1,10 @@
-// Boing on GraphicsSerializer / XView (prototype live path).
+// Boing on View / SceneSerializer (prototype live path).
 //
 //   morpho6 examples/xboing.morpho
 //
 // Close the viewer window (or wait for the run to finish) to exit.
 
-import graphicsserializer
+import morphoviewclient
 import graphics
 import color
 import constants
@@ -168,7 +168,7 @@ g.display(wireRoom(roomHalf, roomTiles, wallH))
 var ball = g.display(checkerSphere(nLat, nLon), bp, scale=ballR, rotate=[angle, 0, 1, 0],
                      flat=true)
 
-var v = XView(g, connecttimeout=10000)
+var v = View(g, connecttimeout=10000)
 
 for (frame in 1...nFrames) {
   if (v.closed) break

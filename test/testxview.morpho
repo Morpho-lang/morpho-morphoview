@@ -1,10 +1,11 @@
-// Live XView session: SceneSerializer over ZMQ.
+// Live View session: SceneSerializer over ZMQ.
 // Expect: a morphoview window, then "ok".
 // Requires: morphoview on PATH, morpho-zeromq, display.
 //
 //   cd test && morpho6 testxview.morpho
 
 import graphicsserializer
+import morphoviewclient
 import graphics
 import color
 
@@ -25,19 +26,19 @@ fn tri() {
 }
 
 var g = Scene()
-g.title = "XView"
+g.title = "View"
 var idSph = g.display(Sphere([0, 0, 0], 1, color=Red), [-0.8, 0.4, 0], scale=0.25)
 var idCyl = g.display(Cylinder([0, 0, 0], [0, 0.6, 0], n=8, color=Green), [0.2, 0, 0])
 var idArr = g.display(Arrow([0, 0, 0], [0.5, 0, 0], n=8, color=Blue), [0, -0.5, 0])
 var idTri = g.display(tri(), [0.8, 0.3, 0], scale=0.6)
-var idTxt = g.display(Text("XView", [0, 0, 0], color=White), [0, 0.7, 0])
+var idTxt = g.display(Text("View", [0, 0, 0], color=White), [0, 0.7, 0])
 var idPC = g.display(PointCloud([[0, 0, 0], [0.15, 0, 0], [0, 0.15, 0]], color=Yellow),
                     [-0.6, -0.5, 0])
 var idLS = g.display(LineSet([[0, 0, 0], [0.4, 0, 0]], color=White), [0.4, -0.6, 0])
 
-print "opening XView..."
-var v = XView(g)
-expect(!v.closed, "XView opened")
+print "opening View..."
+var v = View(g)
+expect(!v.closed, "View opened")
 expect(!isnil(v.serializer), "SceneSerializer bound")
 
 for (i in 1...12) {
@@ -75,7 +76,7 @@ System.sleep(0.2)
 v.poll(timeoutms=0)
 expect(!v.closed, "open after Text replace")
 
-g.title = "XView reset"
+g.title = "View reset"
 expect(v.update(g), "update(Scene) rebuild")
 expect(!v.closed, "open after update")
 expect(!isnil(v.serializer), "serializer rebound")

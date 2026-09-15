@@ -8,9 +8,6 @@ import color
 import constants
 import fonts
 import graphics
-import xshow
-import broadcast
-import zeromq
 
 // Error messages
 var _GsrFntNtFndErr = Error("GsrFntNtFnd", "Font not found.")
@@ -29,14 +26,21 @@ var _sphereRefineMax = 3 // Maximum number of refinement levels
  * ---------------------------------------------------------------- */
 
 class TriangleComplexSerializerMixin {
-  // Emit the vertex format string
-  _vertexFormat(TriangleComplex item, Coloring color) { self._write("v \"xn\"") }
+  _vertexLayout(TriangleComplex item) { // Format string for the color model
+    return self._vertexLayout(item, item.color)
+  }
+  _vertexLayout(TriangleComplex item, Coloring color) { return "xn" }
+  _vertexLayout(TriangleComplex item, ColorTable color) {
+    return color.channels() >= 4 ? "xnca" : "xnc"
+  }
+  _vertexLayout(TriangleComplex item, color) { return "xn" }
+
+  _vertexFormat(TriangleComplex item, Coloring color) { self._write("v \"xn\"") } // Emit the vertex format string
   _vertexFormat(TriangleComplex item, ColorTable color) {
     self._write(color.channels() >= 4 ? "v \"xnca\"" : "v \"xnc\"")
   }
 
-  _triangles(item, color) { // Emit triangles
-    self._vertexFormat(item, color)
+  _vertexRows(item, color) { // Position, normal, and optional per-vertex color
     var x = item.position, n = item.normals
     var dim = x.dimensions()[0], nv = x.dimensions()[1]
 
@@ -47,7 +51,11 @@ class TriangleComplexSerializerMixin {
       self._vertexColor(parts, color, i)
       self._write(parts)
     }
+  }
 
+  _triangles(item, color) { // Emit the mesh
+    self._vertexFormat(item, color)
+    self._vertexRows(item, color)
     self._faces(item)
   }
 
@@ -62,7 +70,7 @@ class TriangleComplexSerializerMixin {
     }
   }
 
-  _defineObject(TriangleComplex item, color=nil) {
+  _defineObject(TriangleComplex item, color=nil) { // Define a viewer object
     if (isnil(color)) color = item.color
     var vid = self._uid()
     self._write("o ${vid}")
@@ -70,8 +78,7 @@ class TriangleComplexSerializerMixin {
     return vid
   }
 
-  // Define a triangle complex
-  _define(GraphicsEntry entry, TriangleComplex item) {
+  _define(GraphicsEntry entry, TriangleComplex item) { // Define a triangle complex
     if (entry.flat) self._write("M flat")
     var cid = self._drawColor(entry, item.color)
     var vid = self._defineObject(item)
@@ -91,8 +98,7 @@ class TriangleComplexSerializerMixin {
  * ---------------------------------------------------------------- */
 
 class PointCloudSerializerMixin {
-  // Emit the vertex format string
-  _vertexFormat(PointCloud item, Coloring color) { self._write("v \"x\"") }
+  _vertexFormat(PointCloud item, Coloring color) { self._write("v \"x\"") } // Emit the vertex format string
   _vertexFormat(PointCloud item, ColorTable color) {
     self._write(color.channels() >= 4 ? "v \"xca\"" : "v \"xc\"")
   }
@@ -114,8 +120,8 @@ class PointCloudSerializerMixin {
     self._write(parts)
   }
 
-  // Define a point cloud
-  _define(GraphicsEntry entry, PointCloud item) {
+  _define(GraphicsEntry entry, PointCloud item) { // Define a point cloud
+    if (item.position.dimensions()[1] < 1) return nil
     var flat = isnil(entry.flat) ? true : entry.flat
     if (flat) self._write("M flat")
     var cid = self._drawColor(entry, item.color)
@@ -138,8 +144,7 @@ class PointCloudSerializerMixin {
  * ---------------------------------------------------------------- */
 
 class LineSetSerializerMixin {
-  // Emit the vertex format string
-  _vertexFormat(LineSet item, Coloring color) { self._write("v \"x\"") }
+  _vertexFormat(LineSet item, Coloring color) { self._write("v \"x\"") } // Emit the vertex format string
   _vertexFormat(LineSet item, ColorTable color) {
     self._write(color.channels() >= 4 ? "v \"xca\"" : "v \"xc\"")
   }
@@ -162,8 +167,8 @@ class LineSetSerializerMixin {
     self._write(parts)
   }
 
-  // Define a line set
-  _define(GraphicsEntry entry, LineSet item) {
+  _define(GraphicsEntry entry, LineSet item) { // Define a line set
+    if (item.connectivity.count() < 2) return nil
     var flat = isnil(entry.flat) ? true : entry.flat
     if (flat) self._write("M flat")
     var cid = self._drawColor(entry, item.color)
@@ -186,9 +191,9 @@ class LineSetSerializerMixin {
  * ---------------------------------------------------------------- */
 
 class TextSerializerMixin {
-  _localMatrix(Text item) { return item.transformationMatrix() }
+  _localMatrix(Text item) { return item.transformationMatrix() } // Local orientation of the text
 
-  _fontId(name, size) { // Font resource id for name and size
+  _fontId(name, size) { // Font id for this face and size
     var fonts = self._cache(TextSerializerMixin)
     var key = "${name}:${size}"
 
@@ -203,8 +208,7 @@ class TextSerializerMixin {
     return id
   }
 
-  // Define text
-  _define(GraphicsEntry entry, Text item) {
+  _define(GraphicsEntry entry, Text item) { // Define text
     var font = item.font
     if (isnil(font)) font = FontFinder().default()
     var fid = self._fontId(font, item.size)
@@ -233,8 +237,7 @@ class SphereSerializerMixin {
     return s
   }
 
-  // Select sphere refinement level
-  _sphereRefinementLevel(entry, Sphere item) {
+  _sphereRefinementLevel(entry, Sphere item) { // Select sphere refinement level
     var radius = abs(item.r) * self._sphereEntryScale(entry)
     var level = 0
     while (radius / (2^level) > _sphereRefineThresh &&
@@ -242,8 +245,7 @@ class SphereSerializerMixin {
     return level
   }
 
-  // Local transform from the cached unit sphere to the authored sphere.
-  _localMatrix(Sphere item) {
+  _localMatrix(Sphere item) { // Transform from the unit sphere to this sphere
     var c = item.center
     var r = item.r
 
@@ -255,8 +257,7 @@ class SphereSerializerMixin {
                    (0, 0, 0, 1))).transpose()
   }
 
-  // Get or define the cached unit sphere for this refinement level.
-  _sphereObject(entry, Sphere item) {
+  _sphereObject(entry, Sphere item) { // Get or define the cached unit sphere
     var level = self._sphereRefinementLevel(entry, item)
     var cache = self._cache(SphereSerializerMixin)
 
@@ -268,8 +269,7 @@ class SphereSerializerMixin {
     return vid
   }
 
-  // Define a Sphere draw using shared unit geometry.
-  _define(GraphicsEntry entry, Sphere item) {
+  _define(GraphicsEntry entry, Sphere item) { // Define a Sphere using shared unit geometry
     if (entry.flat) self._write("M flat")
 
     var cid = self._defineColor(entry.effectiveColor())
@@ -292,7 +292,7 @@ class SphereSerializerMixin {
  * ---------------------------------------------------------------- */
 
 class CylinderSerializerMixin {
-  _normalVec(vec) {
+  _normalVec(vec) { // A vector perpendicular to vec
     var order = [abs(vec[0]), abs(vec[1]), abs(vec[2])].order()
     var out = vec.clone()
     out[order[0]] = 0
@@ -301,7 +301,7 @@ class CylinderSerializerMixin {
     return out
   }
 
-  _rot3(theta, axis) {
+  _rot3(theta, axis) { // 3x3 rotation by theta about axis
     var x = axis[0], y = axis[1], z = axis[2]
     var ctheta = cos(theta), stheta = sin(theta), cc = 1-ctheta
     return Matrix(
@@ -311,7 +311,7 @@ class CylinderSerializerMixin {
     )
   }
 
-  _axisFromTo(from, to) {
+  _axisFromTo(from, to) { // Rotation taking unit vector from onto to
     var d = from.inner(to)
     if (d > 1 - _eps) return (0, 1, 0, 0)
     if (d < -1 + _eps) {
@@ -326,7 +326,7 @@ class CylinderSerializerMixin {
     return (acos(d), axis[0], axis[1], axis[2])
   }
 
-  _mat4LinearTranslate(linear, t) {
+  _mat4LinearTranslate(linear, t) { // 4x4 matrix from a 3x3 linear part and translation t
     var m = Matrix(4, 4)
     for (i in 0..2) {
       for (j in 0..2) m[i,j] = linear[i,j]
@@ -336,11 +336,11 @@ class CylinderSerializerMixin {
     return m.transpose()
   }
 
-  _degenerate(Cylinder item) {
+  _degenerate(Cylinder item) { // True if the shaft has zero length
     return (item.end - item.start).norm() < _eps
   }
 
-  _localMatrix(Cylinder item) {
+  _localMatrix(Cylinder item) { // Transform from the unit cylinder to this cylinder
     if (self._degenerate(item)) return nil
 
     var x1 = item.start
@@ -360,8 +360,7 @@ class CylinderSerializerMixin {
     return self._mat4LinearTranslate(R * S, x1)
   }
 
-  // Cached unit cylinder for this facet count.
-  _object(Cylinder item) {
+  _object(Cylinder item) { // Get or define the cached unit cylinder
     var cache = self._cache(CylinderSerializerMixin)
     var key = item.n
     if (cache.contains(key)) return cache[key]
@@ -372,8 +371,7 @@ class CylinderSerializerMixin {
     return vid
   }
 
-  // Define a Cylinder draw using shared unit geometry.
-  _define(GraphicsEntry entry, Cylinder item) {
+  _define(GraphicsEntry entry, Cylinder item) { // Define a Cylinder using shared unit geometry
     if (self._degenerate(item)) return nil
 
     if (entry.flat) self._write("M flat")
@@ -396,8 +394,7 @@ class CylinderSerializerMixin {
  * ---------------------------------------------------------------- */
 
 class ArrowSerializerMixin is CylinderSerializerMixin {
-  // Cached unit arrow for this facet count and tip fraction.
-  _object(Arrow item) {
+  _object(Arrow item) { // Get or define the cached unit arrow
     var cache = self._cache(ArrowSerializerMixin)
     var key = (item.n, item.aspectratio)
 
@@ -428,7 +425,7 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
     self.caches = Dictionary()
   }
 
-  _cache(owner) { // Lazily create a cache owned by a serializer mixin
+  _cache(owner) { // Get or create a cache for this mixin
     if (!self.caches.contains(owner)) self.caches[owner] = Dictionary()
     return self.caches[owner]
   }
@@ -450,8 +447,7 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
     return self._define(entry, tri)
   }
 
-  // Emit lighting. Reset replaces lights already in the viewer.
-  lights(reset=false) {
+  lights(reset=false) { // Emit lighting
     var lighting = self.graphic.light
     if (lighting.mode == "neutral") {
       if (reset) _write("L \"neutral\"")
@@ -476,10 +472,10 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
   }
 
   _preamble(replace=false) { // Emit the preamble
-    _write(replace ? "U S 1" : "S 1 3") // Begin scene
-    _write("W \"${_escape(self.graphic.title)}\"") // Scene title
+    _write(replace ? "U S 1" : "S 1 3")
+    _write("W \"${_escape(self.graphic.title)}\"")
 
-    var bg = self.graphic.background.rgb(0) // Background color
+    var bg = self.graphic.background.rgb(0)
     _write("G ${_fmt(bg[0])} ${_fmt(bg[1])} ${_fmt(bg[2])}")
 
     self.lights()
@@ -504,8 +500,7 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
     return self.uid
   }
 
-  // Define a color resource; returns its id.
-  _defineColor(Coloring color) {
+  _defineColor(Coloring color) { // Define a color resource; returns its id
     var id = self.colorid
     self.colorid += 1
     var rgba = color.rgba(0)
@@ -515,45 +510,43 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
     return id
   }
 
-  // Draw-slot color, or nil to keep vertex colors.
-  _drawColor(entry, Coloring color) { return _defineColor(entry.effectiveColor()) }
+  _drawColor(entry, Coloring color) { return _defineColor(entry.effectiveColor()) } // Color used when drawing
   _drawColor(entry, ColorTable color) {
     return isnil(entry.color) ? nil : _defineColor(entry.color)
   }
 
-  // Emit a vertex color
   _vertexColor(parts, Coloring color, i) { } // No-op for uniform color
-  _vertexColor(parts, ColorTable color, i) {
+  _vertexColor(parts, ColorTable color, i) { // Emit a vertex color
     var c = color.rgb(i)
     parts.append("${_fmt(c[0])} ${_fmt(c[1])} ${_fmt(c[2])}")
     if (color.channels() >= 4) parts.append("${_fmt(color.alpha(i))}")
   }
 
-  _localMatrix(item) { return nil }
+  _localMatrix(item) { return nil } // Local transform for the item, if any
 
   _isIdentity4(m) { return (m - _I4).norm() < _eps }
 
-  _emitTransform(entry, item) { // Emit transformation instructions for an entry.
-    _write("i") // Begin with identity matrix
+  _emitTransform(entry, item) { // Emit transformation instructions for an entry
+    _write("i")
     var scl = entry.scale
-    if (ismatrix(scl)) {  // Emit scale factors
+    if (ismatrix(scl)) {
       _write("s ${_fmt(scl[0])} ${_fmt(scl[1])} ${_fmt(scl[2])}")
-    } else if (scl != 1) { // Or a homogenous scale
+    } else if (scl != 1) {
       _write("s ${_fmt(scl)}")
     }
-    if (!isnil(entry.rotate)) { // Emit rotation
+    if (!isnil(entry.rotate)) {
       var r = entry.rotate
-        if (!(abs(r[0]) < _eps)) {
+      if (!(abs(r[0]) < _eps)) {
         _write("r ${_fmt(r[0])} ${_fmt(r[1])} ${_fmt(r[2])} ${_fmt(r[3])}")
       }
     }
-    var m = self._localMatrix(item) // Local model matrix
+    var m = self._localMatrix(item)
     if (!isnil(m) && !_isIdentity4(m)) {
       var parts = ["m"]
       for (i in 0..3) for (j in 0..3) parts.append(_fmt(m[i,j]))
       _write(parts)
     }
-    var p = entry.position // Emit translation
+    var p = entry.position
     if (!(p[0] == 0 && p[1] == 0 && p[2] == 0)) {
       _write("t ${_fmt(p[0])} ${_fmt(p[1])} ${_fmt(p[2])}")
     }
@@ -563,43 +556,58 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
 /* ----------------------------------------------------------------
  * SceneSerializer
  *
- * Serialize a Scene with dynamic update capabilities.
+ * Live counterpart to GraphicsSerializer.
  * ---------------------------------------------------------------- */
 
 class SceneSerializer is GraphicsSerializer {
   init(Scene scene, out) {
     super.init(scene, out)
-    self.objects = Dictionary()
+    self.objects = Dictionary() // Entry id -> viewer object
+    self.colors = Dictionary()  // Color -> viewer color id
   }
 
-  serialize(replace=false) {
+  serialize(replace=false) { // Serialize the scene
     if (replace) {
       self.objects = Dictionary()
       self.caches = Dictionary()
+      self.colors = Dictionary()
     }
     super.serialize(replace=replace)
   }
 
-  define(GraphicsEntry entry) {
+  _defineColor(Coloring color) { // Reuse color ids for identical colors
+    var rgba = color.rgba(0)
+    var r = _fmt(rgba[0]), g = _fmt(rgba[1]), b = _fmt(rgba[2]), a = _fmt(rgba[3])
+    var key = "${r} ${g} ${b} ${a}"
+    if (self.colors.contains(key)) return self.colors[key]
+
+    var id = self.colorid
+    self.colorid += 1
+    if (rgba[3] < 0.999) _write("c ${id} ${r} ${g} ${b} ${a}")
+    else _write("c ${id} ${r} ${g} ${b}")
+    self.colors[key] = id
+    return id
+  }
+
+  define(GraphicsEntry entry) { // Define an entry and record its object
     var vid = super.define(entry)
     self._record(entry, entry.item, vid)
     return vid
   }
 
-  pose(id) {
+  pose(id) { // Update an entry's transform
     var entry = self.graphic.findEntry(id)
     if (isnil(entry)) return false
     return self._pose(entry, entry.item)
   }
 
-  _pose(GraphicsEntry entry, item) {
+  _pose(GraphicsEntry entry, item) { // Apply transform and redraw
     self._emitTransform(entry, item)
     self._write("d ${entry.id}")
     return true
   }
 
-  // Sphere mesh choice depends on refinement level
-  _pose(GraphicsEntry entry, Sphere item) {
+  _pose(GraphicsEntry entry, Sphere item) { // Update a sphere, redefining if needed
     var level = self._sphereRefinementLevel(entry, item)
     var cache = self._cache(SphereSerializerMixin)
 
@@ -616,7 +624,7 @@ class SceneSerializer is GraphicsSerializer {
     return true
   }
 
-  recolor(id) {
+  recolor(id) { // Update an entry's color
     var entry = self.graphic.findEntry(id)
     if (isnil(entry)) return false
 
@@ -628,13 +636,18 @@ class SceneSerializer is GraphicsSerializer {
     return true
   }
 
-  remove(id) {
+  remove(id) { // Remove an entry
+    var vid = nil
+    if (self.objects.contains(id)) vid = self.objects[id]
     self._write("X D ${id}")
     if (self.objects.contains(id)) self.objects.remove(id)
+    if (!isnil(vid) && self._users(vid) == 0 && !self._isCachedObject(vid)) {
+      self._write("X O ${vid}")
+    }
     return true
   }
 
-  replace(id) {
+  replace(id) { // Remove and redefine an entry
     var entry = self.graphic.findEntry(id)
     if (isnil(entry)) return false
     self.remove(id)
@@ -642,396 +655,51 @@ class SceneSerializer is GraphicsSerializer {
     return true
   }
 
-  _record(GraphicsEntry entry, item, vid) {
-    if (!isnil(vid)) self.objects[entry.id] = vid
-  }
+  canUpdateVertices(id, oldItem, newItem) { return false } // Can this object be updated in place?
 
-  _record(GraphicsEntry entry, Text item, vid) { }
-}
-
-/* ----------------------------------------------------------------
- * XShow / XView
- *
- * Prototype static and live viewers wired to GraphicsSerializer /
- * SceneSerializer. Temporary: live here until the design settles, then
- * migrate out. Show and View remain the public reference path.
- * ---------------------------------------------------------------- */
-
-var _xvwopnfl = Error("XVwOpnFl", "XView failed to open morphoview session.")
-var _xvwemitfl = Error("XVwEmitFl", "XView failed to emit commands to morphoview.")
-
-class XShow {
-  init() { }
-
-  init(g) {
-    self.init()
-    self._launch(g)
-  }
-
-  write(graphic, out, replace=false) {
-    GraphicsSerializer(graphic, out).serialize(replace=replace)
-  }
-
-  _launch(g) {
-    var isWindows = System.platform()=="windows"
-    var tempFolder = isWindows ?
-      "${System.homefolder()}/AppData/Local/Temp" : "/tmp"
-    var fname = self._randomAlphanumString(10)
-    var path = Folder.normalizePath("${tempFolder}/morpho${fname}.draw")
-    var out = File(path, "w")
-    var bin = findMorphoViewBin()
-
-    self.write(g, out)
-    out.close()
-
-    if (isWindows) {
-      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}'\"")
-    } else {
-      system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
-    }
-  }
-
-  _randomAlphanumString(n) {
-    var alpha="abcdefghijklmnopqrstuvwxyz0123456789"
-    var name=""
-    var nalpha = alpha.count()
-    for (i in 1..n) {
-      var k = Int(random()*nalpha)
-      if (k >= nalpha) k = nalpha-1
-      name+=alpha[k]
-    }
-    return name
-  }
-}
-
-class XView with Listener {
-  init(connecttimeout=5000, pollms=100) {
-    self.connecttimeout = connecttimeout
-    self.pollms = pollms
-    self.sock = nil
-    self.ep = nil
-    self.poller = nil
-    self.closed = true
-    self.gotOk = false
-    self.lastErr = nil
-    self.cmdLines = []
-    self.graphics = nil
-    self.serializer = nil
-  }
-
-  init(Graphics g, connecttimeout=5000, pollms=100) {
-    self.init(connecttimeout=connecttimeout, pollms=pollms)
-    if (!self.open(g)) {
-      if (!isnil(self.lastErr)) _xvwopnfl.throw(self.lastErr)
-      else _xvwopnfl.throw()
-    }
-  }
-
-  write(line) { self.cmdLines.append("${line}\n") }
-
-  _takeCommands() {
-    var s = String.join(self.cmdLines)
-    self.cmdLines = []
-    return s
-  }
-
-  _process() {
-    if (isnil(self.poller) || self.closed) return
-    while (!self.closed && self.poller.wait(0)) {
-      self._handle(self.sock.receive())
-    }
-  }
-
-  _sendWait(commands) {
-    self._process()
-    if (self.closed || isnil(self.sock)) return false
-    self.gotOk = false
-    self._send(commands)
-    return self._waitOk()
-  }
-
-  open(String commands) {
-    if (!isnil(self.sock)) {
-      print "morphoview: XView already open"
+  canUpdateVertices(id, TriangleComplex oldItem, TriangleComplex newItem) {
+    if (!self.objects.contains(id)) return false
+    if (oldItem.position.dimensions()[1] != newItem.position.dimensions()[1]) {
       return false
     }
-    self.lastErr = nil
-    self._bind()
-    self._spawn()
-    self.poller = ZMQPoller(self.sock)
-    self.closed = false
-    return self._sendWait(commands)
+    return self._vertexLayout(oldItem) == self._vertexLayout(newItem)
   }
 
-  open(Graphics g) { return self._applyModel(g) }
+  updateVertices(id, item) { return false } // Update vertex data on an existing object
 
-  open(Scene g) {
-    var ok = self._applyModel(g)
-    if (ok) self.listen(g)
-    return ok
-  }
-
-  update(String commands) {
-    if (self.closed) return false
-    return self._sendWait(commands)
-  }
-
-  update(Graphics g) { return self._applyModel(g, replace=true) }
-
-  update(Scene g) {
-    var ok = self._applyModel(g, replace=true)
-    if (ok) self.listen(g)
-    return ok
-  }
-
-  _applyModel(Graphics g, replace=false) {
-    return self._commit(GraphicsSerializer(g, self), g, replace)
-  }
-
-  _applyModel(Scene g, replace=false) {
-    return self._commit(SceneSerializer(g, self), g, replace)
-  }
-
-  _commit(ser, g, replace) {
-    if (replace && self.closed) return false
-    self.cmdLines = []
-    ser.serialize(replace=replace)
-    var ok = false
-    if (replace) ok = self.update(self._takeCommands())
-    else ok = self.open(self._takeCommands())
-    if (ok) {
-      if (!isnil(self.graphics)) self._detach(self.graphics)
-      self.serializer = ser
-      self.graphics = g
-    }
-    return ok
-  }
-
-  _detach(Graphics g) { }
-  _detach(Scene g) { self.ignore(g) }
-
-  redraw(commands) {
-    if (self.closed) return false
-    var body = commands
-    if (isnil(body)) body = ""
-    if (body.count() == 0 || body[0] != "D") body = "D\n${body}"
-    return self._sendWait(body)
-  }
-
-  _live() {
-    self._process()
-    return !self.closed && !isnil(self.serializer)
-  }
-
-  _ids(ev) {
-    if (isnil(ev.ids) || ev.ids.count() == 0) return [ev.id]
-    return ev.ids
-  }
-
-  receive(Graphics g, GraphicsEventDefined ev) {
-    if (!self._live()) return
-    var entry = g.findEntry(ev.id)
-    if (isnil(entry)) return
-    self._tryEmit("defined id ${ev.id}", fn () { self.serializer.define(entry) })
-  }
-
-  receive(Graphics g, GraphicsEventMoved ev) {
-    if (!self._live()) return
-    self._tryEmit("moved", fn () {
-      for (id in self._ids(ev)) self.serializer.pose(id)
-    })
-  }
-
-  receive(Graphics g, GraphicsEventRecolored ev) {
-    if (!self._live()) return
-    self._tryEmit("recolored", fn () {
-      for (id in self._ids(ev)) self.serializer.recolor(id)
-    })
-  }
-
-  receive(Graphics g, GraphicsEventLights ev) {
-    if (!self._live()) return
-    self._tryEmit("lights", fn () { self.serializer.lights(reset=true) })
-  }
-
-  receive(Graphics g, GraphicsEventRemoved ev) {
-    if (!self._live()) return
-    self._tryEmit("removed id ${ev.id}", fn () { self.serializer.remove(ev.id) })
-  }
-
-  receive(Graphics g, GraphicsEventReplaced ev) {
-    if (!self._live()) return
-    self._tryEmit("replaced id ${ev.id}", fn () {
-      if (!self.serializer.replace(ev.id)) return
-    })
-  }
-
-  _tryEmit(label, emit) {
-    self.cmdLines = []
-    emit()
-    if (self.cmdLines.count() == 0) return
-    if (!self._sendWait(self._takeCommands())) {
-      if (!self.closed) {
-        _xvwemitfl.warning("failed to emit ${label}")
-        self._shutdown()
-      }
-    }
-  }
-
-  _emitAndWait(emit) {
-    self.cmdLines = []
-    emit()
-    if (self.cmdLines.count() == 0) return false
-    return self._sendWait(self._takeCommands())
-  }
-
-  // v1: redefine rather than U V. Roll back the Scene item if emit fails.
-  morph(graphicsId, item) {
-    if (self.closed || isnil(self.graphics) || isnil(self.serializer)) return false
-
-    var g = self.graphics
-    if (!g.respondsto("morph")) return false
-
-    var entry = g.findEntry(graphicsId)
-    if (isnil(entry)) return false
-
-    var prev = entry.item
-    if (!g.morph(graphicsId, item)) return false
-
-    var ok = self._emitAndWait(fn () {
-        if (!self.serializer.replace(graphicsId)) return
-    })
-
-    if (!ok) {
-        g.morph(graphicsId, prev)
-        return false
-    }
+  updateVertices(id, TriangleComplex item) {
+    if (!self.objects.contains(id)) return false
+    self._write("U V ${self.objects[id]}")
+    self._vertexRows(item, item.color)
     return true
   }
 
-  refreshMesh(graphicsId) {
-    if (self.closed || isnil(self.serializer) || isnil(self.graphics)) return false
-    if (isnil(self.graphics.findEntry(graphicsId))) return false
-    return self._emitAndWait(fn () {
-      if (!self.serializer.replace(graphicsId)) return
-    })
-  }
-
-  poll(timeoutms=nil) {
-    if (self.closed || isnil(self.poller)) return nil
-    var t = self.pollms
-    if (!isnil(timeoutms)) t = timeoutms
-    if (!self.poller.wait(t)) return nil
-    return self._handle(self.sock.receive())
-  }
-
-  wait(sessiontimeout=0) {
-    var waited = 0
-    while (!self.closed) {
-      self.poll(timeoutms=self.pollms)
-      if (self.closed) break
-      if (sessiontimeout > 0) {
-        waited += self.pollms
-        if (waited >= sessiontimeout) {
-          self.close()
-          break
-        }
-      }
+  _users(vid) { // How many entries share this object
+    var n = 0
+    for (id in self.objects) {
+      if (self.objects[id] == vid) n += 1
     }
+    return n
   }
 
-  close() {
-    if (!isnil(self.sock) && !self.closed) {
-      self._send("Q")
-      var waited = 0
-      while (!self.closed && waited < self.connecttimeout) {
-        self.poll(timeoutms=self.pollms)
-        if (self.closed) break
-        waited += self.pollms
-      }
-      if (!self.closed) self._kill()
+  _cacheHasVid(owner, vid) { // Is this object in the mixin's cache?
+    if (!self.caches.contains(owner)) return false
+    var cache = self.caches[owner]
+    for (k in cache) {
+      if (cache[k] == vid) return true
     }
-    self._shutdown()
+    return false
   }
 
-  // Terminal cleanup: detach listener, drop serializer, tear down transport.
-  _shutdown() {
-    if (!isnil(self.graphics)) self._detach(self.graphics)
-    self.graphics = nil
-    self.serializer = nil
-    self._resetTransport()
+  _isCachedObject(vid) { // Is this a cached unit mesh?
+    return self._cacheHasVid(SphereSerializerMixin, vid) ||
+           self._cacheHasVid(CylinderSerializerMixin, vid) ||
+           self._cacheHasVid(ArrowSerializerMixin, vid)
   }
 
-  _resetTransport() {
-    self.closed = true
-    if (!isnil(self.sock)) self.sock.unbind()
-    self.sock = nil
-    self.ep = nil
-    self.poller = nil
-    self.cmdLines = []
+  _record(GraphicsEntry entry, item, vid) { // Record the viewer object for this entry
+    if (!isnil(vid)) self.objects[entry.id] = vid
   }
 
-  _bind() {
-    self.sock = ZMQPair()
-    self.sock.bind("tcp://127.0.0.1:!")
-    self.ep = self.sock.endpoint()
-  }
-
-  _spawn() {
-    var bin = findMorphoViewBin()
-    if (System.platform()=="windows") {
-      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-c', '${self.ep}'\"")
-    } else {
-      system("\"${bin}\" -c \"${self.ep}\" > /dev/null 2>&1 &")
-    }
-  }
-
-  _send(commands) { self.sock.send(commands) }
-
-  _waitOk() {
-    var waited = 0
-    while (!self.closed && !self.gotOk) {
-      self.poll(timeoutms=self.pollms)
-      if (self.gotOk) {
-        self._process()
-        return true
-      }
-      if (self.closed) return false
-      waited += self.pollms
-      if (waited >= self.connecttimeout) {
-        print "morphoview: timed out waiting for ok"
-        self._kill()
-        self._shutdown()
-        return false
-      }
-    }
-    return self.gotOk
-  }
-
-  _handle(msg) {
-    if (!isstring(msg)) {
-      self._shutdown()
-      return nil
-    }
-    if (msg == "ok") {
-      self.gotOk = true
-    } else if (msg == "window.closed") {
-      self._shutdown()
-    } else if (msg.count() >= 4 && msg.substring(0, 4) == "err ") {
-      self.lastErr = msg.substring(4, msg.count())
-      print "morphoview: ${self.lastErr}"
-      self._kill()
-      self._shutdown()
-    }
-    return msg
-  }
-
-  _kill() {
-    if (isnil(self.ep)) return
-    if (System.platform()=="windows") {
-      system("powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'morphoview' -and $_.CommandLine -like '*-c*${self.ep}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"")
-    } else {
-      system("pkill -9 -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
-    }
-  }
+  _record(GraphicsEntry entry, Text item, vid) { } // Text has no viewer object
 }

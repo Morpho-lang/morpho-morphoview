@@ -1,0 +1,439 @@
+/* ***************************************************************
+ * MorphoViewClient
+ * ================
+ * Abstract classes to support launching morphoview viewer sessions.
+ **************************************************************** */
+
+import graphicsserializer
+import xshow
+import broadcast
+import zeromq
+import graphics
+
+// Error messages
+var _vwopnfl = Error("VwOpnFl", "View failed to open morphoview session.")
+var _vwemitfl = Error("VwEmitFl", "View failed to emit commands to morphoview.")
+var _vwalrdy = Error("VwAlrdy", "View already open.")
+var _vwerr = Error("VwErr", "View reported an error.")
+var _vwtmout = Error("VwTmout", "Timed out waiting for ok.")
+
+/* ----------------------------------------------------------------
+ * MorphoViewShow
+ *
+ * Template for launching a non-interactive viewer session.
+ * Subclasses must provide _launch method.
+ * ---------------------------------------------------------------- */
+
+class MorphoViewShow {
+  init() { }
+
+  init(g) { // Show a graphic
+    self.init()
+    self._launch(g)
+  }
+
+  write(graphic, out, replace=false) { // Serialize a graphic
+    GraphicsSerializer(graphic, out).serialize(replace=replace)
+  }
+}
+
+/* ----------------------------------------------------------------
+ * MorphoViewView
+ *
+ * Template for an interactive viewer session.
+ *
+ *    var v = View(scene)            // Open and connect
+ *    v.open(commands)               // Open with commands
+ *    scene.move(id, ...)            // move item id
+ *    scene.recolor(id, ...)         // recolor item id
+ *    v.morph(id, item)              // update item id in place
+ *    v.refreshMesh(id)              // redefine from the model
+ *    v.poll(timeoutms=0)            // poll for messages
+ *    v.wait(sessiontimeout=1500)    // wait for the session to close
+ *    v.close()                      // close the session
+ * 
+ * Subclasses must provide _spawn and _kill methods.
+ * ---------------------------------------------------------------- */
+
+class MorphoViewView with Listener {
+  init(connecttimeout=5000, pollms=100) {
+    self.connecttimeout = connecttimeout
+    self.pollms = pollms
+    self.sock = nil
+    self.ep = nil
+    self.poller = nil
+    self.closed = true
+    self.gotOk = false
+    self.lastErr = nil
+    self.cmdLines = []
+    self.graphics = nil
+    self.serializer = nil
+  }
+
+  init(Graphics g, connecttimeout=5000, pollms=100) { // Open a graphic in morphoview
+    self.init(connecttimeout=connecttimeout, pollms=pollms)
+    if (!self.open(g)) {
+      if (!isnil(self.lastErr)) _vwopnfl.throw(self.lastErr)
+      else _vwopnfl.throw()
+    }
+  }
+
+  write(line) { self.cmdLines.append("${line}\n") } // Buffer a command line
+
+  _takeCommands() { // Collect buffered commands
+    var s = String.join(self.cmdLines)
+    self.cmdLines = []
+    return s
+  }
+
+  _process() { // Process pending messages
+    if (isnil(self.poller) || self.closed) return
+    while (!self.closed && self.poller.wait(0)) {
+      self._handle(self.sock.receive())
+    }
+  }
+
+  _sendWait(commands) { // Send commands and wait for ok
+    self._process()
+    if (self.closed || isnil(self.sock)) return false
+    self.gotOk = false
+    self._send(commands)
+    return self._waitOk()
+  }
+
+  open(String commands) { // Open a morphoview session
+    if (!isnil(self.sock)) {
+      _vwalrdy.warning()
+      return false
+    }
+    self.lastErr = nil
+    self._bind()
+    self._spawn()
+    self.poller = ZMQPoller(self.sock)
+    self.closed = false
+    return self._sendWait(commands)
+  }
+
+  open(Graphics g) { return self._applyModel(g) } // Open a graphic
+
+  open(Scene g) { // Open a scene and listen for events
+    var ok = self._applyModel(g)
+    if (ok) self.listen(g)
+    return ok
+  }
+
+  update(String commands) { // Send commands to an open viewer
+    if (self.closed) return false
+    return self._sendWait(commands)
+  }
+
+  update(Graphics g) { return self._applyModel(g, replace=true) } // Replace the displayed graphic
+
+  update(Scene g) { // Replace the displayed scene
+    var ok = self._applyModel(g, replace=true)
+    if (ok) self.listen(g)
+    return ok
+  }
+
+  _applyModel(Graphics g, replace=false) { // Apply a graphic
+    return self._commit(GraphicsSerializer(g, self), g, replace)
+  }
+
+  _applyModel(Scene g, replace=false) { // Apply a scene
+    return self._commit(SceneSerializer(g, self), g, replace)
+  }
+
+  _commit(ser, g, replace) { // Send serialized commands and keep the serializer
+    if (replace && self.closed) return false
+    self.cmdLines = []
+    ser.serialize(replace=replace)
+    var ok = false
+    if (replace) ok = self.update(self._takeCommands())
+    else ok = self.open(self._takeCommands())
+    if (ok) {
+      if (!isnil(self.graphics)) self._detach(self.graphics)
+      self.serializer = ser
+      self.graphics = g
+    }
+    return ok
+  }
+
+  _detach(Graphics g) { }
+  _detach(Scene g) { self.ignore(g) } // Stop listening to this Scene
+
+  redraw(commands) { // Force a redraw
+    if (self.closed) return false
+    var body = commands
+    if (isnil(body)) body = ""
+    if (body.count() == 0 || body[0] != "D") body = "D\n${body}"
+    return self._sendWait(body)
+  }
+
+  _live() { // Is the viewer still connected?
+    self._process()
+    return !self.closed && !isnil(self.serializer)
+  }
+
+  _ids(ev) { // Ids from this event
+    if (isnil(ev.ids) || ev.ids.count() == 0) return [ev.id]
+    return ev.ids
+  }
+
+  receive(Graphics g, GraphicsEventDefined ev) {
+    if (!self._live()) return
+    var entry = g.findEntry(ev.id)
+    if (isnil(entry)) return
+    self._tryEmit("defined id ${ev.id}", fn () { self.serializer.define(entry) })
+  }
+
+  receive(Graphics g, GraphicsEventMoved ev) {
+    if (!self._live()) return
+    self._tryEmit("moved", fn () {
+      for (id in self._ids(ev)) self.serializer.pose(id)
+    })
+  }
+
+  receive(Graphics g, GraphicsEventRecolored ev) {
+    if (!self._live()) return
+    self._tryEmit("recolored", fn () {
+      for (id in self._ids(ev)) self.serializer.recolor(id)
+    })
+  }
+
+  receive(Graphics g, GraphicsEventLights ev) {
+    if (!self._live()) return
+    self._tryEmit("lights", fn () { self.serializer.lights(reset=true) })
+  }
+
+  receive(Graphics g, GraphicsEventRemoved ev) {
+    if (!self._live()) return
+    self._tryEmit("removed id ${ev.id}", fn () { self.serializer.remove(ev.id) })
+  }
+
+  receive(Graphics g, GraphicsEventReplaced ev) {
+    if (!self._live()) return
+    self._tryEmit("replaced id ${ev.id}", fn () {
+      if (!self.serializer.replace(ev.id)) return
+    })
+  }
+
+  _tryEmit(label, emit) { // Emit commands, shutting down on failure
+    self.cmdLines = []
+    emit()
+    if (self.cmdLines.count() == 0) return
+    if (!self._sendWait(self._takeCommands())) {
+      if (!self.closed) {
+        _vwemitfl.warning("failed to emit ${label}")
+        self._shutdown()
+      }
+    }
+  }
+
+  _emitAndWait(emit) { // Emit commands and wait for ok
+    self.cmdLines = []
+    emit()
+    if (self.cmdLines.count() == 0) return false
+    return self._sendWait(self._takeCommands())
+  }
+
+  morph(graphicsId, item) { // Update an item, replacing it if the layout changed
+    if (self.closed || isnil(self.graphics) || isnil(self.serializer)) return false
+
+    var g = self.graphics
+    var ser = self.serializer
+    if (!g.respondsto("morph")) return false
+
+    var entry = g.findEntry(graphicsId)
+    if (isnil(entry)) return false
+
+    var prev = entry.item
+    var sameLayout = ser.canUpdateVertices(graphicsId, prev, item)
+    if (!g.morph(graphicsId, item)) return false
+
+    var ok
+    if (sameLayout) {
+      ok = self._emitAndWait(fn () {
+        if (!ser.updateVertices(graphicsId, item)) return
+      })
+    } else {
+      ok = self._emitAndWait(fn () {
+        if (!ser.replace(graphicsId)) return
+      })
+    }
+
+    if (!ok) {
+      g.morph(graphicsId, prev)
+      return false
+    }
+    return true
+  }
+
+  refreshMesh(graphicsId) { // Redefine geometry from the current model
+    if (self.closed || isnil(self.serializer) || isnil(self.graphics)) return false
+    if (isnil(self.graphics.findEntry(graphicsId))) return false
+
+    return self._emitAndWait(fn () {
+      if (!self.serializer.replace(graphicsId)) return
+    })
+  }
+
+  poll(timeoutms=nil) { // Wait for a viewer message
+    if (self.closed || isnil(self.poller)) return nil
+    var t = self.pollms
+    if (!isnil(timeoutms)) t = timeoutms
+    if (!self.poller.wait(t)) return nil
+    return self._handle(self.sock.receive())
+  }
+
+  wait(sessiontimeout=0) { // Wait until the viewer closes
+    var waited = 0
+    while (!self.closed) {
+      self.poll(timeoutms=self.pollms)
+      if (self.closed) break
+      if (sessiontimeout > 0) {
+        waited += self.pollms
+        if (waited >= sessiontimeout) {
+          self.close()
+          break
+        }
+      }
+    }
+  }
+
+  close() { // Close the viewer
+    if (!isnil(self.sock) && !self.closed) {
+      self._send("Q")
+      var waited = 0
+      while (!self.closed && waited < self.connecttimeout) {
+        self.poll(timeoutms=self.pollms)
+        if (self.closed) break
+        waited += self.pollms
+      }
+      if (!self.closed) self._kill()
+    }
+    self._shutdown()
+  }
+
+  _shutdown() { // Clean up the session
+    if (!isnil(self.graphics)) self._detach(self.graphics)
+    self.graphics = nil
+    self.serializer = nil
+    self._resetTransport()
+  }
+
+  _resetTransport() { // Reset the connection
+    self.closed = true
+    if (!isnil(self.sock)) self.sock.unbind()
+    self.sock = nil
+    self.ep = nil
+    self.poller = nil
+    self.cmdLines = []
+  }
+
+  _bind() { // Bind a local socket
+    self.sock = ZMQPair()
+    self.sock.bind("tcp://127.0.0.1:!")
+    self.ep = self.sock.endpoint()
+  }
+
+  _send(commands) { self.sock.send(commands) }
+
+  _waitOk() { // Wait for the viewer's ok
+    var waited = 0
+    while (!self.closed && !self.gotOk) {
+      self.poll(timeoutms=self.pollms)
+      if (self.gotOk) {
+        self._process()
+        return true
+      }
+      if (self.closed) return false
+      waited += self.pollms
+      if (waited >= self.connecttimeout) {
+        _vwtmout.warning()
+        self._kill()
+        self._shutdown()
+        return false
+      }
+    }
+    return self.gotOk
+  }
+
+  _handle(msg) { // Handle a viewer message
+    if (!isstring(msg)) {
+      self._shutdown()
+      return nil
+    }
+    if (msg == "ok") {
+      self.gotOk = true
+    } else if (msg == "window.closed") {
+      self._shutdown()
+    } else if (msg.count() >= 4 && msg.substring(0, 4) == "err ") {
+      self.lastErr = msg.substring(4, msg.count())
+      _vwerr.warning(self.lastErr)
+      self._kill()
+      self._shutdown()
+    }
+    return msg
+  }
+}
+
+/* ----------------------------------------------------------------
+ * Show
+ *
+ * Launch morphoview-glfw passing the serialized graphic to a temporary file.
+ * ---------------------------------------------------------------- */
+
+class Show is MorphoViewShow {
+  _launch(g) { // Write a temp file and open GLFW morphoview
+    var isWindows = System.platform()=="windows"
+    var tempFolder = isWindows ?
+      "${System.homefolder()}/AppData/Local/Temp" : "/tmp"
+    var fname = self._randomAlphanumString(10)
+    var path = Folder.normalizePath("${tempFolder}/morpho${fname}.draw")
+    var out = File(path, "w")
+    var bin = findMorphoViewBin()
+
+    self.write(g, out)
+    out.close()
+
+    if (isWindows) {
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}'\"")
+    } else {
+      system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
+    }
+  }
+
+  _randomAlphanumString(n) { // Random filename fragment
+    var alpha="abcdefghijklmnopqrstuvwxyz0123456789"
+    var name=[]
+    var nalpha = alpha.count()
+    for (i in 1..n) name.append(alpha[randomint(nalpha)])
+    return String.join(name)
+  }
+}
+
+/* ----------------------------------------------------------------
+ * View
+ *
+ * Launch morphoview-glfw in interactive mode.
+ * ---------------------------------------------------------------- */
+
+class View is MorphoViewView {
+  _spawn() { // Start GLFW morphoview
+    var bin = findMorphoViewBin()
+    if (System.platform()=="windows") {
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-c', '${self.ep}'\"")
+    } else {
+      system("\"${bin}\" -c \"${self.ep}\" > /dev/null 2>&1 &")
+    }
+  }
+
+  _kill() { // Kill the morphoview process
+    if (isnil(self.ep)) return
+    if (System.platform()=="windows") {
+      system("powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'morphoview' -and $_.CommandLine -like '*-c*${self.ep}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"")
+    } else {
+      system("pkill -9 -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
+    }
+  }
+}

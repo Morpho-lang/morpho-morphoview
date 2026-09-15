@@ -21,6 +21,9 @@ import broadcast
 
 var _vwopnfl = Error("VwOpnFl", "View failed to open morphoview session.")
 var _vwemitfl = Error("VwEmitFl", "View failed to emit commands to morphoview.")
+var _vwalrdy = Error("VwAlrdy", "View already open.")
+var _vwerr = Error("VwErr", "View reported an error.")
+var _vwtmout = Error("VwTmout", "Timed out waiting for ok.")
 
 /** Pairwise-merge join — O(n log n) copies vs O(n²) for repeated String +=. */
 fn _joinLines(lines) {
@@ -97,7 +100,7 @@ class View with Listener {
   /** Bind, spawn viewer, send first chunk, wait for ok. */
   open(String commands) {
     if (!isnil(self.sock)) {
-      print "morphoview: View already open"
+      _vwalrdy.warning()
       return false
     }
     self.lastErr = nil
@@ -349,7 +352,7 @@ class View with Listener {
       if (self.closed) return false
       waited += self.pollms
       if (waited >= self.connecttimeout) {
-        print "morphoview: timed out waiting for ok"
+        _vwtmout.warning()
         self._kill()
         self._resetTransport()
         return false
@@ -369,7 +372,7 @@ class View with Listener {
       self._resetTransport()
     } else if (msg.count() >= 4 && msg.substring(0, 4) == "err ") {
       self.lastErr = msg.substring(4, msg.count())
-      print "morphoview: ${self.lastErr}"
+      _vwerr.warning(self.lastErr)
       self._kill()
       self._resetTransport()
     }
