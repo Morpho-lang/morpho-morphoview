@@ -8,6 +8,9 @@ import color
 import constants
 import fonts
 import graphics
+import xshow
+import broadcast
+import zeromq
 
 // Error messages
 var _GsrFntNtFndErr = Error("GsrFntNtFnd", "Font not found.")
@@ -371,7 +374,7 @@ class CylinderSerializerMixin {
 
   // Define a Cylinder draw using shared unit geometry.
   _define(GraphicsEntry entry, Cylinder item) {
-    if (self._degenerate(item)) return
+    if (self._degenerate(item)) return nil
 
     if (entry.flat) self._write("M flat")
     var cid = self._defineColor(entry.effectiveColor())
@@ -439,11 +442,11 @@ class GraphicsSerializer with TriangleComplexSerializerMixin,
     return self._define(entry, entry.item)
   }
 
-  _define(GraphicsEntry entry, item) { } // Null for entries that are not understood
+  _define(GraphicsEntry entry, item) { return nil } // Null for entries that are not understood
 
   _define(GraphicsEntry entry, TriangleConvertibleMixin item) { // Process anything that can be converted to a TriangleComplex
     var tri = item.toTriangleComplex()
-    if (isnil(tri)) return
+    if (isnil(tri)) return nil
     return self._define(entry, tri)
   }
 
@@ -644,4 +647,391 @@ class SceneSerializer is GraphicsSerializer {
   }
 
   _record(GraphicsEntry entry, Text item, vid) { }
+}
+
+/* ----------------------------------------------------------------
+ * XShow / XView
+ *
+ * Prototype static and live viewers wired to GraphicsSerializer /
+ * SceneSerializer. Temporary: live here until the design settles, then
+ * migrate out. Show and View remain the public reference path.
+ * ---------------------------------------------------------------- */
+
+var _xvwopnfl = Error("XVwOpnFl", "XView failed to open morphoview session.")
+var _xvwemitfl = Error("XVwEmitFl", "XView failed to emit commands to morphoview.")
+
+class XShow {
+  init() { }
+
+  init(g) {
+    self.init()
+    self._launch(g)
+  }
+
+  write(graphic, out, replace=false) {
+    GraphicsSerializer(graphic, out).serialize(replace=replace)
+  }
+
+  _launch(g) {
+    var isWindows = System.platform()=="windows"
+    var tempFolder = isWindows ?
+      "${System.homefolder()}/AppData/Local/Temp" : "/tmp"
+    var fname = self._randomAlphanumString(10)
+    var path = Folder.normalizePath("${tempFolder}/morpho${fname}.draw")
+    var out = File(path, "w")
+    var bin = findMorphoViewBin()
+
+    self.write(g, out)
+    out.close()
+
+    if (isWindows) {
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}'\"")
+    } else {
+      system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
+    }
+  }
+
+  _randomAlphanumString(n) {
+    var alpha="abcdefghijklmnopqrstuvwxyz0123456789"
+    var name=""
+    var nalpha = alpha.count()
+    for (i in 1..n) {
+      var k = Int(random()*nalpha)
+      if (k >= nalpha) k = nalpha-1
+      name+=alpha[k]
+    }
+    return name
+  }
+}
+
+class XView with Listener {
+  init(connecttimeout=5000, pollms=100) {
+    self.connecttimeout = connecttimeout
+    self.pollms = pollms
+    self.sock = nil
+    self.ep = nil
+    self.poller = nil
+    self.closed = true
+    self.gotOk = false
+    self.lastErr = nil
+    self.cmdLines = []
+    self.graphics = nil
+    self.serializer = nil
+  }
+
+  init(Graphics g, connecttimeout=5000, pollms=100) {
+    self.init(connecttimeout=connecttimeout, pollms=pollms)
+    if (!self.open(g)) {
+      if (!isnil(self.lastErr)) _xvwopnfl.throw(self.lastErr)
+      else _xvwopnfl.throw()
+    }
+  }
+
+  write(line) { self.cmdLines.append("${line}\n") }
+
+  _takeCommands() {
+    var s = String.join(self.cmdLines)
+    self.cmdLines = []
+    return s
+  }
+
+  _process() {
+    if (isnil(self.poller) || self.closed) return
+    while (!self.closed && self.poller.wait(0)) {
+      self._handle(self.sock.receive())
+    }
+  }
+
+  _sendWait(commands) {
+    self._process()
+    if (self.closed || isnil(self.sock)) return false
+    self.gotOk = false
+    self._send(commands)
+    return self._waitOk()
+  }
+
+  open(String commands) {
+    if (!isnil(self.sock)) {
+      print "morphoview: XView already open"
+      return false
+    }
+    self.lastErr = nil
+    self._bind()
+    self._spawn()
+    self.poller = ZMQPoller(self.sock)
+    self.closed = false
+    return self._sendWait(commands)
+  }
+
+  open(Graphics g) { return self._applyModel(g) }
+
+  open(Scene g) {
+    var ok = self._applyModel(g)
+    if (ok) self.listen(g)
+    return ok
+  }
+
+  update(String commands) {
+    if (self.closed) return false
+    return self._sendWait(commands)
+  }
+
+  update(Graphics g) { return self._applyModel(g, replace=true) }
+
+  update(Scene g) {
+    var ok = self._applyModel(g, replace=true)
+    if (ok) self.listen(g)
+    return ok
+  }
+
+  _applyModel(Graphics g, replace=false) {
+    return self._commit(GraphicsSerializer(g, self), g, replace)
+  }
+
+  _applyModel(Scene g, replace=false) {
+    return self._commit(SceneSerializer(g, self), g, replace)
+  }
+
+  _commit(ser, g, replace) {
+    if (replace && self.closed) return false
+    self.cmdLines = []
+    ser.serialize(replace=replace)
+    var ok = false
+    if (replace) ok = self.update(self._takeCommands())
+    else ok = self.open(self._takeCommands())
+    if (ok) {
+      if (!isnil(self.graphics)) self._detach(self.graphics)
+      self.serializer = ser
+      self.graphics = g
+    }
+    return ok
+  }
+
+  _detach(Graphics g) { }
+  _detach(Scene g) { self.ignore(g) }
+
+  redraw(commands) {
+    if (self.closed) return false
+    var body = commands
+    if (isnil(body)) body = ""
+    if (body.count() == 0 || body[0] != "D") body = "D\n${body}"
+    return self._sendWait(body)
+  }
+
+  _live() {
+    self._process()
+    return !self.closed && !isnil(self.serializer)
+  }
+
+  _ids(ev) {
+    if (isnil(ev.ids) || ev.ids.count() == 0) return [ev.id]
+    return ev.ids
+  }
+
+  receive(Graphics g, GraphicsEventDefined ev) {
+    if (!self._live()) return
+    var entry = g.findEntry(ev.id)
+    if (isnil(entry)) return
+    self._tryEmit("defined id ${ev.id}", fn () { self.serializer.define(entry) })
+  }
+
+  receive(Graphics g, GraphicsEventMoved ev) {
+    if (!self._live()) return
+    self._tryEmit("moved", fn () {
+      for (id in self._ids(ev)) self.serializer.pose(id)
+    })
+  }
+
+  receive(Graphics g, GraphicsEventRecolored ev) {
+    if (!self._live()) return
+    self._tryEmit("recolored", fn () {
+      for (id in self._ids(ev)) self.serializer.recolor(id)
+    })
+  }
+
+  receive(Graphics g, GraphicsEventLights ev) {
+    if (!self._live()) return
+    self._tryEmit("lights", fn () { self.serializer.lights(reset=true) })
+  }
+
+  receive(Graphics g, GraphicsEventRemoved ev) {
+    if (!self._live()) return
+    self._tryEmit("removed id ${ev.id}", fn () { self.serializer.remove(ev.id) })
+  }
+
+  receive(Graphics g, GraphicsEventReplaced ev) {
+    if (!self._live()) return
+    self._tryEmit("replaced id ${ev.id}", fn () {
+      if (!self.serializer.replace(ev.id)) return
+    })
+  }
+
+  _tryEmit(label, emit) {
+    self.cmdLines = []
+    emit()
+    if (self.cmdLines.count() == 0) return
+    if (!self._sendWait(self._takeCommands())) {
+      if (!self.closed) {
+        _xvwemitfl.warning("failed to emit ${label}")
+        self._shutdown()
+      }
+    }
+  }
+
+  _emitAndWait(emit) {
+    self.cmdLines = []
+    emit()
+    if (self.cmdLines.count() == 0) return false
+    return self._sendWait(self._takeCommands())
+  }
+
+  // v1: redefine rather than U V. Roll back the Scene item if emit fails.
+  morph(graphicsId, item) {
+    if (self.closed || isnil(self.graphics) || isnil(self.serializer)) return false
+
+    var g = self.graphics
+    if (!g.respondsto("morph")) return false
+
+    var entry = g.findEntry(graphicsId)
+    if (isnil(entry)) return false
+
+    var prev = entry.item
+    if (!g.morph(graphicsId, item)) return false
+
+    var ok = self._emitAndWait(fn () {
+        if (!self.serializer.replace(graphicsId)) return
+    })
+
+    if (!ok) {
+        g.morph(graphicsId, prev)
+        return false
+    }
+    return true
+  }
+
+  refreshMesh(graphicsId) {
+    if (self.closed || isnil(self.serializer) || isnil(self.graphics)) return false
+    if (isnil(self.graphics.findEntry(graphicsId))) return false
+    return self._emitAndWait(fn () {
+      if (!self.serializer.replace(graphicsId)) return
+    })
+  }
+
+  poll(timeoutms=nil) {
+    if (self.closed || isnil(self.poller)) return nil
+    var t = self.pollms
+    if (!isnil(timeoutms)) t = timeoutms
+    if (!self.poller.wait(t)) return nil
+    return self._handle(self.sock.receive())
+  }
+
+  wait(sessiontimeout=0) {
+    var waited = 0
+    while (!self.closed) {
+      self.poll(timeoutms=self.pollms)
+      if (self.closed) break
+      if (sessiontimeout > 0) {
+        waited += self.pollms
+        if (waited >= sessiontimeout) {
+          self.close()
+          break
+        }
+      }
+    }
+  }
+
+  close() {
+    if (!isnil(self.sock) && !self.closed) {
+      self._send("Q")
+      var waited = 0
+      while (!self.closed && waited < self.connecttimeout) {
+        self.poll(timeoutms=self.pollms)
+        if (self.closed) break
+        waited += self.pollms
+      }
+      if (!self.closed) self._kill()
+    }
+    self._shutdown()
+  }
+
+  // Terminal cleanup: detach listener, drop serializer, tear down transport.
+  _shutdown() {
+    if (!isnil(self.graphics)) self._detach(self.graphics)
+    self.graphics = nil
+    self.serializer = nil
+    self._resetTransport()
+  }
+
+  _resetTransport() {
+    self.closed = true
+    if (!isnil(self.sock)) self.sock.unbind()
+    self.sock = nil
+    self.ep = nil
+    self.poller = nil
+    self.cmdLines = []
+  }
+
+  _bind() {
+    self.sock = ZMQPair()
+    self.sock.bind("tcp://127.0.0.1:!")
+    self.ep = self.sock.endpoint()
+  }
+
+  _spawn() {
+    var bin = findMorphoViewBin()
+    if (System.platform()=="windows") {
+      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-c', '${self.ep}'\"")
+    } else {
+      system("\"${bin}\" -c \"${self.ep}\" > /dev/null 2>&1 &")
+    }
+  }
+
+  _send(commands) { self.sock.send(commands) }
+
+  _waitOk() {
+    var waited = 0
+    while (!self.closed && !self.gotOk) {
+      self.poll(timeoutms=self.pollms)
+      if (self.gotOk) {
+        self._process()
+        return true
+      }
+      if (self.closed) return false
+      waited += self.pollms
+      if (waited >= self.connecttimeout) {
+        print "morphoview: timed out waiting for ok"
+        self._kill()
+        self._shutdown()
+        return false
+      }
+    }
+    return self.gotOk
+  }
+
+  _handle(msg) {
+    if (!isstring(msg)) {
+      self._shutdown()
+      return nil
+    }
+    if (msg == "ok") {
+      self.gotOk = true
+    } else if (msg == "window.closed") {
+      self._shutdown()
+    } else if (msg.count() >= 4 && msg.substring(0, 4) == "err ") {
+      self.lastErr = msg.substring(4, msg.count())
+      print "morphoview: ${self.lastErr}"
+      self._kill()
+      self._shutdown()
+    }
+    return msg
+  }
+
+  _kill() {
+    if (isnil(self.ep)) return
+    if (System.platform()=="windows") {
+      system("powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'morphoview' -and $_.CommandLine -like '*-c*${self.ep}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"")
+    } else {
+      system("pkill -9 -f \"morphoview -c ${self.ep}\" > /dev/null 2>&1")
+    }
+  }
 }

@@ -1214,11 +1214,7 @@ bool command_parseobject(parser *p, void *out) {
 
     PARSE_CHECK(command_parseinteger(p, &id));
 
-    if (!ctx->has_scene) {
-        parse_error(p, true, COMMAND_NOSCENE);
-        return false;
-    }
-
+    /* Apply-time scene only — live Defined has no S in-chunk (ok-before-apply). */
     mv_cmd_object *cmd = command_new(MVCMD_OBJECT, sizeof(mv_cmd_object));
     if (!cmd) {
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
@@ -1233,7 +1229,8 @@ bool command_parsevertices(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
     char *format=NULL;
 
-    if (!ctx->has_scene || !ctx->has_object) {
+    /* In-chunk `o` / `U O` / `X O`; sticky scene at apply (no parse-time has_scene). */
+    if (!ctx->has_object) {
         parse_error(p, true, COMMAND_NOOBJECT);
         return false;
     }
@@ -1277,7 +1274,7 @@ bool command_parsevertices(parser *p, void *out) {
 bool command_parseindex(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
 
-    if (!ctx->has_scene || !ctx->has_object) {
+    if (!ctx->has_object) {
         parse_error(p, true, COMMAND_NOOBJECT);
         return false;
     }
@@ -1648,10 +1645,8 @@ bool command_parselight(parser *p, void *out) {
         return false;
     }
 
-    if (!ctx->has_scene) {
-        parse_error(p, true, COMMAND_NOSCENE);
-        return false;
-    }
+    /* Sticky scene at apply; follow-up L batches have no S in-chunk. */
+    (void) ctx;
 
     mv_cmd_light *cmd = command_new(MVCMD_LIGHT, sizeof(mv_cmd_light));
     if (!cmd) {
@@ -1667,18 +1662,14 @@ bool command_parselight(parser *p, void *out) {
 
 /** `G <r> <g> <b>` — scene clear / background color. */
 bool command_parsebackground(parser *p, void *out) {
-    command_parsectx *ctx = (command_parsectx *) out;
+    (void) out;
     float rgb[3];
 
     for (int i=0; i<3; i++) {
         PARSE_CHECK(command_parsefloat(p, &rgb[i]));
     }
 
-    if (!ctx->has_scene) {
-        parse_error(p, true, COMMAND_NOSCENE);
-        return false;
-    }
-
+    /* Sticky scene at apply; follow-up G batches have no S in-chunk. */
     mv_cmd_background *cmd = command_new(MVCMD_BACKGROUND, sizeof(mv_cmd_background));
     if (!cmd) {
         parse_error(p, true, ERROR_ALLOCATIONFAILED);

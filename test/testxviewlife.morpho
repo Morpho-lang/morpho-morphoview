@@ -1,0 +1,234 @@
+// XView lifecycle: detach on shutdown, fail-closed emit, morph rollback,
+// model switch, close/reopen. Live parts need morphoview + display.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testxviewlife.morpho
+
+import graphicsserializer
+import graphics
+import color
+import broadcast
+import zeromq
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+class MorphSink with Listener {
+  init() { self.n = 0 }
+  receive(g, GraphicsEventReplaced ev) { self.n += 1 }
+  receive(g, GraphicsEventDefined ev) { self.n += 1 }
+  receive(g, GraphicsEventMoved ev) { self.n += 1 }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn tri() {
+  return TriangleComplex(
+    Matrix([[-0.5, 0.5, 0], [-0.5, -0.5, 0.5], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Matrix([[1, 1, 1], [0.4, 0.4, 0.4], [0.1, 0.1, 0.1]]),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn tri2() {
+  return TriangleComplex(
+    Matrix([[-0.4, 0.4, 0], [-0.4, -0.4, 0.4], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Matrix([[0.2, 0.8, 0.2], [0.2, 0.8, 0.2], [0.2, 0.8, 0.2]]),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+/* ---- _ids coalesces Moved/Recolored ---- */
+var vIds = XView()
+var evM = GraphicsEventMoved(3)
+evM.ids = [3, 7]
+var ids = vIds._ids(evM)
+expect(ids.count() == 2 && ids[0] == 3 && ids[1] == 7, "coalesced event.ids")
+var ev1 = GraphicsEventMoved(5)
+expect(vIds._ids(ev1).count() == 1 && vIds._ids(ev1)[0] == 5, "single-id Moved")
+
+/* ---- coalesced Moved iterates event.ids (Buf sink, no viewer) ---- */
+var gCo = Scene()
+var idCo1 = gCo.display(tri(), [0, 0, 0])
+var idCo2 = gCo.display(tri(), [1, 0, 0])
+var bufCo = Buf()
+var serCo = SceneSerializer(gCo, bufCo)
+serCo.serialize()
+var vCo = XView()
+vCo.closed = false
+vCo.graphics = gCo
+vCo.serializer = serCo
+vCo.listen(gCo)
+bufCo.lines = []
+gCo.beginBatch()
+gCo.move(idCo1, [0.1, 0, 0])
+gCo.move(idCo2, [1.1, 0, 0])
+gCo.endBatch()
+expect(countPrefix(bufCo.lines, "d ") == 2, "coalesced move poses both ids")
+vCo.ignore(gCo)
+
+/* ---- Scene.morph does not notify ---- */
+var gSilent = Scene()
+var idSilent = gSilent.display(tri(), [0, 0, 0])
+var sink = MorphSink()
+sink.listen(gSilent)
+expect(gSilent.morph(idSilent, tri2()), "Scene.morph succeeds")
+expect(sink.n == 0, "Scene.morph does not notify")
+expect(gSilent.replace(idSilent, tri()), "Scene.replace succeeds")
+expect(sink.n == 1, "Scene.replace notifies")
+
+/* ---- morph rollback when emit cannot be sent ---- */
+var gRoll = Scene()
+var idRoll = gRoll.display(tri(), [0, 0, 0])
+var prevItem = gRoll.findEntry(idRoll).item
+var nextItem = tri2()
+var vRoll = XView()
+vRoll.closed = false
+vRoll.graphics = gRoll
+vRoll.serializer = SceneSerializer(gRoll, vRoll)
+expect(!vRoll.morph(idRoll, nextItem), "morph fails without a socket")
+expect(gRoll.findEntry(idRoll).item == prevItem, "Scene item rolled back")
+expect(gRoll.findEntry(idRoll).item != nextItem, "new item not kept")
+
+/* ---- failed live emit detaches ---- */
+var gFail = Scene()
+var idFail = gFail.display(tri(), [0, 0, 0])
+var vFail = XView()
+vFail.closed = false
+vFail.graphics = gFail
+vFail.serializer = SceneSerializer(gFail, vFail)
+vFail.listen(gFail)
+expect(gFail.listeners.contains(vFail), "listening before failed emit")
+gFail.move(idFail, [1, 0, 0])
+expect(vFail.closed, "failed emit shuts down")
+expect(isnil(vFail.graphics), "graphics cleared")
+expect(isnil(vFail.serializer), "serializer cleared")
+expect(!gFail.listeners.contains(vFail), "detached after failed emit")
+
+fn contains(s, needle) {
+  if (isnil(s)) return false
+  var n = needle.count(), m = s.count()
+  if (n > m) return false
+  for (i in 0..(m-n)) {
+    if (s.substring(i, i+n) == needle) return true
+  }
+  return false
+}
+
+/* ---- timeout waiting for ok detaches ---- */
+var vT = XView(connecttimeout=80, pollms=40)
+vT.closed = false
+vT._bind()
+vT.poller = ZMQPoller(vT.sock)
+expect(!vT._waitOk(), "timeout waiting for ok")
+expect(vT.closed, "timeout shuts down")
+expect(isnil(vT.sock), "sock nil after timeout")
+expect(isnil(vT.graphics), "graphics nil after timeout")
+
+/* ---- parse error shuts down ---- */
+var vErr = XView()
+expect(!vErr.open("S 1 3\nzzz\n"), "parse error fails open")
+expect(!isnil(vErr.lastErr), "lastErr is set")
+expect(contains(vErr.lastErr, "line"), "reports line")
+expect(contains(vErr.lastErr, "char"), "reports char")
+expect(vErr.closed, "parse error shuts down")
+expect(isnil(vErr.sock), "sock nil after parse error")
+
+/* ---- live: close detaches; reopen; Scene A -> B; Scene -> Graphics ---- */
+print "opening XView life..."
+var gA = Scene()
+gA.title = "life-A"
+var idA = gA.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var v = XView(gA)
+expect(!v.closed, "opened A")
+expect(gA.listeners.contains(v), "listening to A")
+
+var gB = Scene()
+gB.title = "life-B"
+var idB = gB.display(Sphere([0, 0, 0], 1, color=Blue), [0.4, 0, 0], scale=0.3)
+expect(v.update(gB), "switch to B")
+System.sleep(0.15)
+v.poll(timeoutms=0)
+expect(!v.closed, "open after switch to B")
+expect(!gA.listeners.contains(v), "detached A")
+expect(gB.listeners.contains(v), "listening to B")
+
+var gStat = Graphics()
+gStat.title = "life-G"
+gStat.display(PointCloud([[0, 0, 0]], color=Green))
+expect(v.update(gStat), "switch to Graphics")
+System.sleep(0.15)
+v.poll(timeoutms=0)
+expect(!v.closed, "open after Graphics")
+expect(!gB.listeners.contains(v), "detached B")
+expect(!gStat.respondsto("subscribe"), "Graphics is not a Broadcaster")
+
+var gD = Scene()
+gD.title = "life-G2S"
+var idD = gD.display(tri(), [0, 0, 0], scale=0.8)
+expect(v.update(gD), "Graphics -> Scene")
+System.sleep(0.15)
+v.poll(timeoutms=0)
+expect(!v.closed, "open after Graphics -> Scene")
+expect(gD.listeners.contains(v), "listening after Graphics -> Scene")
+
+v.close()
+expect(v.closed, "closed")
+expect(isnil(v.graphics), "graphics nil after close")
+expect(isnil(v.sock), "sock nil after close")
+expect(!gD.listeners.contains(v), "detached D after close")
+
+var gC = Scene()
+gC.title = "life-reopen"
+var idC = gC.display(tri(), [0, 0, 0], scale=0.8)
+expect(v.open(gC), "reopen on Scene")
+expect(!v.closed, "reopened")
+expect(gC.listeners.contains(v), "listening after reopen")
+gC.move(idC, [0.1, 0, 0])
+System.sleep(0.1)
+v.poll(timeoutms=0)
+expect(!v.closed, "pose after reopen")
+
+v.close()
+expect(!gC.listeners.contains(v), "detached after close")
+
+/* ---- viewer-initiated close (Q / window.closed) ---- */
+var gQ = Scene()
+gQ.title = "life-Q"
+gQ.display(tri(), [0, 0, 0])
+var vQ = XView(gQ)
+expect(gQ.listeners.contains(vQ), "listening before viewer close")
+vQ._send("Q")
+var waitedQ = 0
+while (!vQ.closed && waitedQ < 5000) {
+  vQ.poll(timeoutms=50)
+  waitedQ += 50
+}
+expect(vQ.closed, "window.closed shuts down")
+expect(!gQ.listeners.contains(vQ), "detached after viewer close")
+expect(isnil(vQ.graphics), "graphics nil after viewer close")
+expect(isnil(vQ.sock), "sock nil after viewer close")
+print "ok"

@@ -212,4 +212,284 @@ expect(countPrefix(bufS.lines, "o ") == nO, "caches cleared; unit geometry re-em
 expect(serS.objects.contains(sid), "objects rebuilt")
 expect(serS.objects[sid] != oldSid, "viewer ids are not reused across reset")
 
+bufS.lines = []
+gS.move(sid, [0.2, 0, 0])
+expect(serS.pose(sid), "pose after reset")
+poseOnly(bufS.lines, sid)
+
+expect(!serS.pose(999), "missing pose id fails")
+expect(!serS.recolor(999), "missing recolor id fails")
+expect(!serS.replace(999), "missing replace id fails")
+
+fn triMesh() {
+  return TriangleComplex(
+    Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+/* ---- define: primitives, caches, Text, degenerate ---- */
+var gDef = Scene()
+var idTC = gDef.display(triMesh(), [0, 0, 0])
+var idPC = gDef.display(PointCloud([[0, 0, 0], [1, 0, 0]], color=Red))
+var idLS = gDef.display(LineSet([[0, 0, 0], [1, 0, 0]]))
+var idSpA = gDef.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var idSpB = gDef.display(Sphere([0, 0, 0], 1, color=Blue), [1, 0, 0], scale=0.3)
+var idCyA = gDef.display(Cylinder([0, 0, 0], [0, 0, 1], n=6, color=Red))
+var idCyB = gDef.display(Cylinder([1, 0, 0], [1, 0, 1], n=6, color=Green))
+var idArA = gDef.display(Arrow([0, 1, 0], [0, 2, 0], aspectratio=0.2, n=6, color=Red))
+var idArB = gDef.display(Arrow([1, 1, 0], [1, 2, 0], aspectratio=0.2, n=6, color=Blue))
+var idArC = gDef.display(Arrow([2, 1, 0], [2, 2, 0], aspectratio=0.35, n=6, color=Yellow))
+var idTx = gDef.display(Text("Hi", [0, 0, 0], color=White))
+var idPoly = gDef.display(Polygon([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], color=Green))
+var idDegC = gDef.display(Cylinder([0, 0, 0], [0, 0, 0], n=6))
+var idDegA = gDef.display(Arrow([1, 1, 1], [1, 1, 1], n=6))
+var bufD = Buf()
+var serD = SceneSerializer(gDef, bufD)
+serD.serialize()
+
+expect(serD.objects.contains(idTC), "TC mapped")
+expect(serD.objects.contains(idPC), "PointCloud mapped")
+expect(serD.objects.contains(idLS), "LineSet mapped")
+expect(serD.objects.contains(idSpA) && serD.objects.contains(idSpB), "spheres mapped")
+expect(serD.objects[idSpA] == serD.objects[idSpB], "spheres share o")
+expect(serD.objects.contains(idCyA) && serD.objects[idCyA] == serD.objects[idCyB],
+       "cylinders share o")
+expect(serD.objects[idArA] == serD.objects[idArB], "same-ar arrows share o")
+expect(serD.objects[idArC] != serD.objects[idArA], "different-ar arrow is a new o")
+expect(!serD.objects.contains(idTx), "Text is not mapped")
+expect(serD.objects.contains(idPoly), "Polygon bake is mapped")
+expect(!serD.objects.contains(idDegC), "degenerate cylinder is not mapped")
+expect(!serD.objects.contains(idDegA), "degenerate arrow is not mapped")
+expect(countPrefix(bufD.lines, "T ") == 1, "text draw emitted")
+expect(countPrefix(bufD.lines, "p") >= 1, "point cloud emitted")
+
+/* ---- generic pose: TC, PointCloud, LineSet, Cylinder, Arrow ---- */
+fn checkPose(scene, serializer, gid, doMove, msg) {
+  var vid0 = serializer.objects[gid]
+  serializer.out.lines = []
+  doMove()
+  expect(serializer.pose(gid), msg)
+  expect(serializer.objects[gid] == vid0, "${msg} keeps viewer object")
+  poseOnly(serializer.out.lines, gid)
+}
+
+var gPose = Scene()
+var pTC = gPose.display(triMesh(), [0, 0, 0], scale=1)
+var pPC = gPose.display(PointCloud([[0, 0, 0]], color=Red), [0, 0, 0])
+var pLS = gPose.display(LineSet([[0, 0, 0], [1, 0, 0]]), [0, 0, 0])
+var pCy = gPose.display(Cylinder([0, 0, 0], [0, 0, 1], n=6, color=Red), [0, 0, 0])
+var pAr = gPose.display(Arrow([0, 0, 0], [0, 1, 0], n=6, color=Blue), [0, 0, 0])
+var bufPose = Buf()
+var serPose = SceneSerializer(gPose, bufPose)
+serPose.serialize()
+
+checkPose(gPose, serPose, pTC, fn () gPose.move(pTC, [1, 0, 0]), "TC translation")
+checkPose(gPose, serPose, pTC, fn () gPose.move(pTC, rotate=[0.4, 0, 1, 0]), "TC rotation")
+checkPose(gPose, serPose, pTC, fn () gPose.move(pTC, scale=1.5), "TC scalar scale")
+checkPose(gPose, serPose, pTC, fn () gPose.move(pTC, scale=[2, 1, 0.5]), "TC vector scale")
+expect(!isnil(firstPrefix(bufPose.lines, "s ")), "vector scale emits s sx sy sz")
+checkPose(gPose, serPose, pPC, fn () gPose.move(pPC, [0.5, 0, 0]), "PointCloud pose")
+checkPose(gPose, serPose, pLS, fn () gPose.move(pLS, [0, 0.5, 0]), "LineSet pose")
+checkPose(gPose, serPose, pCy, fn () gPose.move(pCy, scale=2), "Cylinder scale is pose-only")
+checkPose(gPose, serPose, pAr, fn () gPose.move(pAr, [0.2, 0, 0]), "Arrow pose")
+
+/* ---- recolor: effective color cases ---- */
+var tbl = ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
+var tcTbl = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  tbl,
+  Matrix([[1], [1], [1]])
+)
+
+var gCol = Scene()
+var colIntr = gCol.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var colOver = gCol.display(Sphere([0, 0, 0], 1, color=Red), [1, 0, 0], scale=0.3, color=Green)
+var colTbl = gCol.display(tcTbl, [0, 0, 0])
+var colTblO = gCol.display(tcTbl, [1, 0, 0], color=Blue)
+var colTxt = gCol.display(Text("Hi", [0, 0, 0], color=White))
+var bufCol = Buf()
+var serCol = SceneSerializer(gCol, bufCol)
+serCol.serialize()
+
+bufCol.lines = []
+expect(serCol.recolor(colIntr), "recolor intrinsic Coloring")
+expect(!isnil(firstPrefix(bufCol.lines, "C ")), "Coloring recolor emits C id")
+expect(lastDraw(bufCol.lines) == "d ${colIntr}", "Coloring recolor restamps draw")
+
+bufCol.lines = []
+gCol.recolor(colOver, Yellow)
+expect(serCol.recolor(colOver), "recolor entry override")
+expect(!isnil(firstPrefix(bufCol.lines, "C ")), "override recolor emits C id")
+
+fn anyExact(lines, want) {
+  for (line in lines) if (line == want) return true
+  return false
+}
+
+bufCol.lines = []
+expect(serCol.recolor(colTbl), "recolor ColorTable, no override")
+expect(anyExact(bufCol.lines, "C"), "ColorTable without override emits bare C")
+expect(lastDraw(bufCol.lines) == "d ${colTbl}", "ColorTable recolor restamps draw")
+
+bufCol.lines = []
+expect(serCol.recolor(colTblO), "recolor ColorTable with override")
+expect(!isnil(firstPrefix(bufCol.lines, "C ")), "ColorTable override emits C id")
+
+bufCol.lines = []
+gCol.recolor(colTblO, nil)
+expect(isnil(gCol.findEntry(colTblO).color), "override cleared")
+expect(serCol.recolor(colTblO), "restore ColorTable")
+expect(anyExact(bufCol.lines, "C"), "restored ColorTable emits bare C")
+
+bufCol.lines = []
+gCol.recolor(colTxt, Red)
+expect(serCol.recolor(colTxt), "Text recolor")
+expect(!isnil(firstPrefix(bufCol.lines, "C ")), "Text recolor emits C")
+expect(lastDraw(bufCol.lines) == "d ${colTxt}", "Text recolor uses d id")
+expect(countPrefix(bufCol.lines, "T ") == 0, "Text recolor does not redefine T")
+
+/* ---- remove: shared cache and Text ---- */
+var gRm = Scene()
+var rmA = gRm.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var rmB = gRm.display(Sphere([0, 0, 0], 1, color=Blue), [1, 0, 0], scale=0.3)
+var rmT = gRm.display(Text("Bye", [0, 0, 0], color=White))
+var bufRm = Buf()
+var serRm = SceneSerializer(gRm, bufRm)
+serRm.serialize()
+var shared = serRm.objects[rmA]
+expect(serRm.objects[rmB] == shared, "shared before remove")
+
+bufRm.lines = []
+gRm.remove(rmA)
+expect(serRm.remove(rmA), "remove shared sphere")
+expect(bufRm.lines[0] == "X D ${rmA}", "shared remove is X D")
+expect(countPrefix(bufRm.lines, "X O") == 0, "no object reclamation")
+expect(serRm.objects.contains(rmB) && serRm.objects[rmB] == shared, "sibling mapping kept")
+
+bufRm.lines = []
+gRm.remove(rmT)
+expect(serRm.remove(rmT), "remove Text")
+expect(bufRm.lines[0] == "X D ${rmT}", "Text remove is X D")
+expect(!serRm.objects.contains(rmT), "Text still not in objects")
+
+/* ---- replace across representation kinds ---- */
+var gX = Scene()
+var x1 = gX.display(triMesh(), [0, 0, 0])
+var x2 = gX.display(Sphere([0, 0, 0], 1, color=Red), [1, 0, 0], scale=0.3)
+var x3 = gX.display(Text("Hi", [0, 0, 0], color=White), [2, 0, 0])
+var x4 = gX.display(Cylinder([0, 0, 0], [0, 1, 0], n=6, color=Red), [3, 0, 0])
+var x5 = gX.display(PointCloud([[0, 0, 0]], color=Green), [4, 0, 0])
+var bufX = Buf()
+var serX = SceneSerializer(gX, bufX)
+serX.serialize()
+
+bufX.lines = []
+gX.replace(x1, Sphere([0, 0, 0], 1, color=Blue))
+expect(serX.replace(x1), "TC -> Sphere")
+expect(serX.objects.contains(x1), "TC -> Sphere remaps")
+expect(countPrefix(bufX.lines, "X D") == 1, "TC -> Sphere removes")
+
+bufX.lines = []
+gX.replace(x2, Text("Z", [0, 0, 0], color=White))
+expect(serX.replace(x2), "Sphere -> Text")
+expect(!serX.objects.contains(x2), "Sphere -> Text leaves the object map")
+expect(countPrefix(bufX.lines, "T ") == 1, "Sphere -> Text defines T")
+
+bufX.lines = []
+gX.replace(x3, triMesh())
+expect(serX.replace(x3), "Text -> TC")
+expect(serX.objects.contains(x3), "Text -> TC enters the object map")
+expect(countPrefix(bufX.lines, "o ") == 1, "Text -> TC defines geometry")
+
+bufX.lines = []
+gX.replace(x4, Arrow([0, 0, 0], [0, 1, 0], n=6, color=Blue))
+expect(serX.replace(x4), "Cylinder -> Arrow")
+expect(serX.objects.contains(x4), "Cylinder -> Arrow remaps")
+
+bufX.lines = []
+gX.replace(x5, Text("P", [0, 0, 0], color=White))
+expect(serX.replace(x5), "PointCloud -> Text")
+expect(!serX.objects.contains(x5), "PointCloud -> Text leaves the object map")
+
+/* ---- lights ---- */
+fn hasL(lines) {
+  for (line in lines) {
+    if (line.count() >= 2 && line[0] == "L" && line[1] == " ") return true
+  }
+  return false
+}
+
+var gL = Scene()
+gL.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var bufL = Buf()
+var serL = SceneSerializer(gL, bufL)
+serL.serialize()
+expect(!hasL(bufL.lines), "Neutral serialize omits L")
+
+bufL.lines = []
+serL.lights()
+expect(bufL.lines.count() == 0, "Neutral lights() is silent")
+bufL.lines = []
+serL.lights(reset=true)
+expect(bufL.lines[0] == "L \"neutral\"", "Neutral lights(reset=true) emits L")
+
+gL.setLights("threepoint")
+bufL.lines = []
+serL.lights(reset=true)
+expect(bufL.lines[0] == "L \"threepoint\"", "threepoint reset")
+
+gL.setLights("off")
+bufL.lines = []
+serL.lights(reset=true)
+expect(bufL.lines[0] == "L \"off\"", "off reset")
+
+gL.setLights([Light([-2.5, 0.4, 0.2], color=White, intensity=1)])
+bufL.lines = []
+serL.lights(reset=true)
+expect(countPrefix(bufL.lines, "L 1") == 1, "custom emits L 1")
+
+gL.resetLights()
+bufL.lines = []
+serL.lights(reset=true)
+expect(bufL.lines[0] == "L \"neutral\"", "custom -> Neutral reset")
+
+/* ---- flat: nil is not false ---- */
+fn hasExact(lines, want) {
+  for (line in lines) if (line == want) return true
+  return false
+}
+
+var gFlat = Scene()
+var pcNil = gFlat.display(PointCloud([[0, 0, 0]], color=Red))
+var pcTrue = gFlat.display(PointCloud([[1, 0, 0]], color=Red), flat=true)
+var pcFalse = gFlat.display(PointCloud([[2, 0, 0]], color=Red), flat=false)
+var tcNil = gFlat.display(triMesh())
+var tcTrue = gFlat.display(triMesh(), flat=true)
+var tcFalse = gFlat.display(triMesh(), flat=false)
+expect(isnil(gFlat.findEntry(pcNil).flat), "PointCloud omitted flat is nil")
+expect(gFlat.findEntry(pcTrue).flat == true, "PointCloud flat=true")
+expect(gFlat.findEntry(pcFalse).flat == false, "PointCloud flat=false")
+expect(isnil(gFlat.findEntry(tcNil).flat), "TC omitted flat is nil")
+
+var bufF = Buf()
+var serF = SceneSerializer(gFlat, bufF)
+serF.serialize()
+expect(hasExact(bufF.lines, "M flat"), "nil/true PointCloud or TC true emit M flat")
+
+bufF.lines = []
+gFlat.replace(pcNil, PointCloud([[0, 0, 0]], color=Blue))
+serF.replace(pcNil)
+expect(hasExact(bufF.lines, "M flat"), "replace keeps renderer-default unlit PointCloud")
+
+bufF.lines = []
+gFlat.replace(pcFalse, PointCloud([[2, 0, 0]], color=Green))
+var eFalse = gFlat.findEntry(pcFalse)
+eFalse.flat = false
+serF.replace(pcFalse)
+expect(!hasExact(bufF.lines, "M flat"), "flat=false PointCloud is shaded, not M flat")
+
 print "ok"
