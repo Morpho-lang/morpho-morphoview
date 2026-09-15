@@ -4,7 +4,6 @@
 //   cd test && morpho6 testgraphicsmove.morpho
 
 import graphics
-import xshow
 import broadcast
 import color
 
@@ -128,37 +127,12 @@ expect(capBatch.events.count() == 2, "batch flushes Defined then Moved")
 expect(capBatch.events[0] == GraphicsEventDefined, "Defined first")
 expect(capBatch.events[1] == GraphicsEventMoved, "Moved after Defined")
 
-/* ---- Show slots for TriangleComplex ---- */
-var g6 = Scene()
-var id6 = g6.display(tc, [1, 0, 0], scale=2)
-class Buf {
-  init() { self.lines = [] }
-  write(line) { self.lines.append(line) }
-}
-var buf = Buf()
-var show = Show()
-show.write(g6, buf)
-expect(show.slots[id6].objectid == 1, "slot records viewer id")
-expect(show.slots.contains(id6), "TC is mapped")
-
-var buf2 = Buf()
-show.emitPoseDraws(g6, buf2)
-expect(buf2.lines.count() > 0, "emitPoseDraws emits")
-var hasT = false
-for (line in buf2.lines) {
-  if (line.count() >= 2 && line[0] == "t") hasT = true
-}
-expect(hasT, "pose redraw includes translation")
-
-/* ---- event.ids + pose (selective, no D) ---- */
+/* ---- event.ids ---- */
 var g7 = Scene()
 var id7a = g7.display(tc, [0, 0, 0], scale=1)
 var id7b = g7.display(tc, [1, 0, 0], scale=1)
 var cap7 = Capture()
 cap7.listen(g7)
-var show7 = Show()
-var buf7 = Buf()
-show7.write(g7, buf7)
 g7.beginBatch()
 g7.move(id7a, [2, 0, 0])
 g7.move(id7b, [3, 0, 0], scale=2)
@@ -166,22 +140,6 @@ g7.endBatch()
 expect(cap7.events.count() == 1 && cap7.events[0] == GraphicsEventMoved, "one coalesced Moved")
 expect(!isnil(cap7.movedIds) && cap7.movedIds.count() == 2, "event.ids has both movers")
 expect(cap7.movedIds[0] == id7a && cap7.movedIds[1] == id7b, "event.ids first-seen order")
-
-var bufPose = Buf()
-expect(show7.pose(g7, id7a, bufPose), "pose a")
-expect(show7.pose(g7, id7b, bufPose), "pose b")
-var hasD = false
-var hasClear = false
-for (line in bufPose.lines) {
-  if (line.count() >= 1 && line[0] == "D") hasClear = true
-  if (line.count() >= 2 && line[0] == "d") hasD = true
-}
-expect(hasD && !hasClear, "selective pose emits d without D")
-
-// Unmapped id: no emit (View must not D+redraw — would blank the window).
-var bufMiss = Buf()
-expect(!show7.pose(g7, 999, bufMiss), "unmapped pose fails")
-expect(bufMiss.lines.count() == 0, "unmapped pose emits nothing")
 
 /* ---- two listeners see the same full id list ---- */
 var gMulti = Scene()
@@ -216,19 +174,6 @@ g8.endBatch()
 expect(cap8.events.count() == 1 && cap8.events[0] == GraphicsEventRecolored, "one coalesced Recolored")
 expect(!isnil(cap8.recolorIds) && cap8.recolorIds.count() == 1, "recolor event.ids")
 expect(cap8.recolorIds[0] == id8, "recolor id on event")
-
-var show8 = Show()
-var buf8 = Buf()
-show8.write(g8, buf8)
-var bufRecolor = Buf()
-expect(show8.recolor(g8, id8, bufRecolor), "recolor")
-var hasC = false
-var hasPoseD = false
-for (line in bufRecolor.lines) {
-  if (line.count() >= 1 && line[0] == "C") hasC = true
-  if (line == "d ${id8}") hasPoseD = true
-}
-expect(hasC && hasPoseD, "recolor emits C and d <id>")
 
 /* ---- remove / replace (Phase 5d) ---- */
 var g9 = Scene()
@@ -274,61 +219,5 @@ expect(gMorph.findEntry(idM).item == tcMorph, "morph sets item")
 expect(capMorph.events.count() == 1, "morph does not notify")
 expect(!gMorph.morph(999, tcMorph), "morph missing id fails")
 expect(!gMorph.morph(idM, 1), "morph bad item fails")
-
-var show9 = Show()
-var buf9 = Buf()
-show9.write(g9, buf9)
-expect(show9.slots.contains(id9b), "remaining mapped")
-var bufRm = Buf()
-expect(show9.remove(id9b, bufRm), "remove")
-var hasXD = false
-var hasXO = false
-for (line in bufRm.lines) {
-  if (line == "X D ${id9b}") hasXD = true
-  if (line.count() >= 3 && line[0] == "X" && line[2] == "O") hasXO = true
-}
-expect(hasXD && hasXO, "remove emits X D and X O for last user")
-expect(!show9.slots.contains(id9b), "map cleared after remove emit")
-
-var show10 = Show()
-var buf10w = Buf()
-show10.write(g10, buf10w)
-expect(show10.slots.contains(id10), "mapped before replace emit")
-var bufRep = Buf()
-expect(show10.replace(g10, id10, bufRep), "replace")
-var hasXD = false
-var hasDefine = false
-for (line in bufRep.lines) {
-  if (line == "X D ${id10}") hasXD = true
-  if (line.count() >= 1 && line[0] == "o") hasDefine = true
-}
-expect(hasXD && hasDefine, "replace drops slot then redefines")
-expect(show10.slots.contains(id10), "replace remaps entry")
-
-/* ---- shared Sphere remove: X D only while other users remain ---- */
-var g11 = Scene()
-var sUnit = Sphere([0, 0, 0], 1, color=Red)
-var id11a = g11.display(sUnit, [0, 0, 0], scale=0.4)
-var id11b = g11.display(sUnit, [1, 0, 0], scale=0.4)
-var show11 = Show()
-var buf11 = Buf()
-show11.write(g11, buf11)
-expect(show11.slots[id11a].objectid == show11.slots[id11b].objectid, "spheres share viewer o")
-var sharedVid = show11.slots[id11a].objectid
-var bufRmA = Buf()
-show11.remove(id11a, bufRmA)
-var hasXOa = false
-for (line in bufRmA.lines) {
-  if (line == "X O ${sharedVid}") hasXOa = true
-}
-expect(!hasXOa, "shared sphere remove skips X O while sibling remains")
-expect(show11.slots.contains(id11b), "sibling still mapped")
-var bufRmB = Buf()
-show11.remove(id11b, bufRmB)
-var hasXOb = false
-for (line in bufRmB.lines) {
-  if (line == "X O ${sharedVid}") hasXOb = true
-}
-expect(hasXOb, "last shared sphere user emits X O")
 
 print "ok"

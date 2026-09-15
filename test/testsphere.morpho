@@ -1,16 +1,10 @@
-// Sphere tessellation: primitive converts at a requested level; Show picks the level.
+// Sphere tessellation: primitive converts at a requested level.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testsphere.morpho
 
 import graphics
-import xshow
 import color
-
-class Buf {
-  init() { self.lines = [] }
-  write(line) { self.lines.append(line) }
-}
 
 fn expect(cond, msg) {
   if (!cond) {
@@ -20,17 +14,6 @@ fn expect(cond, msg) {
 }
 
 fn nv(tri) { return tri.position.dimensions()[1] }
-
-fn cacheKeys(show) {
-  var keys = []
-  for (k in show.meshCache) keys.append(k)
-  return keys
-}
-
-fn hasKey(keys, want) {
-  for (k in keys) if (k == want) return true
-  return false
-}
 
 /* ---- Direct conversion: default level=3, independent of radius ---- */
 var def = Sphere([0, 0, 0], 2).toTriangleComplex()
@@ -55,51 +38,5 @@ expect(abs(pole[0]) < 1e-9 && abs(pole[1]) < 1e-9 && abs(abs(pole[2]) - 1) < 1e-
 var scaled = Sphere([1, 0, 0], 2).toTriangleComplex(level=0)
 var p0 = scaled.position.column(0)
 expect(abs(p0[0] - 1) < 1e-9 && abs(abs(p0[2]) - 2) < 1e-9, "authored mesh uses center and r")
-
-/* ---- Show: level from item.r × entry.scale ---- */
-// r_eff ≤ 0.1 → 0; (0.1, 0.2] → 1; (0.2, 0.4] → 2; > 0.4 → 3
-var gBoth = Graphics()
-gBoth.display(Sphere([0, 0, 0], 0.05, color=Red))
-gBoth.display(Sphere([0, 0, 0], 0.05, color=Blue), [1, 0, 0], scale=20)
-var showBoth = Show()
-showBoth.write(gBoth, Buf())
-var kb = cacheKeys(showBoth)
-expect(hasKey(kb, "sphere:0"), "r=0.05 scale=1 → level 0")
-expect(hasKey(kb, "sphere:3"), "r=0.05 scale=20 → level 3")
-
-var gR = Graphics()
-gR.display(Sphere([0, 0, 0], 8, color=Red), [0, 0, 0], scale=0.01)
-var showR = Show()
-showR.write(gR, Buf())
-expect(hasKey(cacheKeys(showR), "sphere:0"), "r=8 scale=0.01 → level 0")
-
-/* ---- Nonuniform scale uses max |component| ---- */
-var gNU = Graphics()
-gNU.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=[0.05, 0.05, 10])
-gNU.display(Sphere([0, 0, 0], 1, color=Blue), [2, 0, 0], scale=[0.05, 0.05, 0.05])
-var showNU = Show()
-showNU.write(gNU, Buf())
-var knu = cacheKeys(showNU)
-expect(hasKey(knu, "sphere:3"), "nonuniform max |scale| 10 → level 3")
-expect(hasKey(knu, "sphere:0"), "uniform 0.05 → level 0")
-
-/* ---- Cache keys follow the selected level, not raw radius ---- */
-var gSame = Graphics()
-gSame.display(Sphere([0, 0, 0], 0.5, color=Red))
-gSame.display(Sphere([0, 0, 0], 1, color=Blue), [2, 0, 0])
-var showSame = Show()
-var sameBuf = Buf()
-showSame.write(gSame, sameBuf)
-var ks = cacheKeys(showSame)
-expect(hasKey(ks, "sphere:3") && ks.count() == 1, "0.5 and 1.0 share level 3")
-expect(showSame.slots[1].objectid == showSame.slots[2].objectid, "same key → one o")
-
-var gCross = Graphics()
-gCross.display(Sphere([0, 0, 0], 0.05, color=Red))
-gCross.display(Sphere([0, 0, 0], 0.3, color=Blue))
-var showCross = Show()
-showCross.write(gCross, Buf())
-var kc = cacheKeys(showCross)
-expect(hasKey(kc, "sphere:0") && hasKey(kc, "sphere:2"), "crossing a threshold changes the key")
 
 print "ok"

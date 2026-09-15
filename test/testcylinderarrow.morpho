@@ -1,30 +1,10 @@
-// Cylinder/Arrow: authored storage, shared unit mesh cache, move/remove/recolor.
+// Cylinder/Arrow: authored storage and replace keeps entry pose.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testcylinderarrow.morpho
 
 import graphics
-import xshow
 import color
-
-class Buf {
-  init() { self.lines = [] }
-  write(line) { self.lines.append(line) }
-}
-
-fn countPrefix(lines, prefix) {
-  var n = 0
-  for (line in lines) {
-    if (line.count() >= prefix.count()) {
-      var ok = true
-      for (i in 0...prefix.count()) {
-        if (line[i] != prefix[i]) { ok = false; break }
-      }
-      if (ok) n += 1
-    }
-  }
-  return n
-}
 
 fn expect(cond, msg) {
   if (!cond) {
@@ -39,10 +19,6 @@ var zcid = gz.display(Cylinder([0, 0, 0], [0, 0, 0], n=6))
 var zaid = gz.display(Arrow([1, 1, 1], [1, 1, 1], n=6))
 expect(!isnil(zcid) && !isnil(zaid), "degenerate still allocated ids")
 expect(gz.findEntry(zcid).item.start[0] == 0, "stores authored zero cylinder")
-var zbuf = Buf()
-Show().write(gz, zbuf)
-expect(countPrefix(zbuf.lines, "o ") == 0, "degenerate emits no object")
-expect(countPrefix(zbuf.lines, "d ") == 0, "degenerate emits no draw")
 
 /* ---- authored start/end stored; identity entry ---- */
 var g = Graphics()
@@ -60,53 +36,6 @@ expect(ce.position[0] == 0 && ce.position[1] == 0 && ce.position[2] == 0,
 var ae = g.findEntry(aid)
 expect(ae.item.end[0] == 1, "arrow stores authored end")
 expect(isnil(ae.rotate), "no pose args → nil rotate")
-
-/* ---- Show: many cylinders share one o; arrows share per (n,ar) ---- */
-var gs = Graphics()
-for (i in 0...5) {
-  gs.display(Cylinder([Float(i), 0, 0], [Float(i), 0, 1], aspectratio=0.1+0.02*Float(i), n=6,
-                      color=Red))
-}
-gs.display(Arrow([0, 1, 0], [0, 2, 0], aspectratio=0.2, n=6, color=Green))
-gs.display(Arrow([1, 1, 0], [1, 2, 0], aspectratio=0.2, n=6, color=Blue))
-gs.display(Arrow([2, 1, 0], [2, 2, 0], aspectratio=0.35, n=6, color=Yellow)) // different ar
-
-var buf = Buf()
-var show = Show()
-show.write(gs, buf)
-expect(countPrefix(buf.lines, "o ") == 3, "1 cylinder o + 2 arrow o (two aspectratios)")
-expect(countPrefix(buf.lines, "d ") == 8, "eight draw slots")
-expect(countPrefix(buf.lines, "m ") >= 8, "primitive-local m for each shaft")
-
-/* ---- Scene move / recolor / remove (serialize path) ---- */
-var sc = Scene()
-var id1 = sc.display(Cylinder([0, 0, 0], [0, 1, 0], aspectratio=0.15, n=6, color=Red))
-var id2 = sc.display(Cylinder([1, 0, 0], [1, 1, 0], aspectratio=0.15, n=6, color=Blue))
-var id3 = sc.display(Arrow([0, 0, 0], [0, 0, 1], aspectratio=0.2, n=6, color=Green))
-
-var show2 = Show()
-var openBuf = Buf()
-show2.write(sc, openBuf)
-expect(show2.slots[id1].objectid == show2.slots[id2].objectid, "scene cylinders share o")
-
-expect(sc.move(id1, [0.5, 0, 0], scale=[0.1, 0.1, 1.5]), "move cylinder")
-var poseBuf = Buf()
-expect(show2.pose(sc, id1, poseBuf), "pose emit")
-expect(countPrefix(poseBuf.lines, "v ") == 0, "pose has no vertices")
-expect(countPrefix(poseBuf.lines, "f ") == 0, "pose has no facets")
-expect(poseBuf.lines[poseBuf.lines.count()-1] == "d ${id1}", "pose ends with d id")
-
-expect(sc.recolor(id3, Yellow), "recolor arrow")
-var colBuf = Buf()
-expect(show2.recolor(sc, id3, colBuf), "recolor emit")
-expect(countPrefix(colBuf.lines, "d ${id3}") == 1, "recolor redraws slot")
-
-expect(sc.remove(id2), "remove one shared cylinder")
-var remBuf = Buf()
-show2.remove(id2, remBuf)
-expect(countPrefix(remBuf.lines, "X D ${id2}") == 1, "X D for removed")
-expect(countPrefix(remBuf.lines, "X O ") == 0, "shared o retained")
-expect(show2.slots.contains(id1), "sibling cylinder still mapped")
 
 /* ---- replace Sphere keeps entry pose; stores authored item ---- */
 var gsph = Scene()

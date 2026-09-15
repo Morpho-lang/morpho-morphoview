@@ -1,9 +1,9 @@
-// Graphics entries: ids, pose recording, add remap, Show still works.
+// Graphics entries: ids, pose recording, add remap.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testgraphicsentries.morpho
 
-import morphoview
+import graphicsserializer
 import graphics
 import color
 import broadcast
@@ -85,7 +85,7 @@ var tid = gc.display(tc, flat=true)
 expect(gc.findEntry(tid).flat == true, "flat= on mesh display")
 expect(isnil(gc.findEntry(tid).color), "omitted color= leaves nil")
 
-/* ---- PointCloud / LineSet: omitted flat= is nil; Show treats them unlit ---- */
+/* ---- PointCloud / LineSet: omitted flat= is nil; serializer treats them unlit ---- */
 var gflat = Graphics()
 var pcid = gflat.display(PointCloud(Matrix([[0], [0], [0]])))
 var lsid = gflat.display(LineSet(Matrix([[0, 1], [0, 0], [0, 0]])))
@@ -98,8 +98,8 @@ expect(gflat.findEntry(lsid2).flat == false, "LineSet flat=false override")
 var sphflat = gflat.display(Sphere([0, 0, 0], 1))
 expect(isnil(gflat.findEntry(sphflat).flat), "Sphere omitted flat=")
 var fbuf = Buf()
-Show().write(gflat, fbuf)
-expect(countPrefix(fbuf.lines, "M flat") >= 2, "Show unlit default for PointCloud/LineSet")
+GraphicsSerializer(gflat, fbuf).serialize()
+expect(countPrefix(fbuf.lines, "M flat") >= 2, "unlit default for PointCloud/LineSet")
 
 /* ---- add remaps right-hand ids ---- */
 var a = Graphics()
@@ -138,21 +138,21 @@ expect(union.light.clss() == Lighting && union.light.lights.count() == 1,
 union.light.addLight(Light([4, 5, 6]))
 expect(lit.light.lights.count() == 1, "source Lighting is not shared")
 
-/* ---- Show still works from entries ---- */
+/* ---- serializer still works from entries ---- */
 var buf = Buf()
-Show().write(gs, buf)
-expect(countPrefix(buf.lines, "o ") == 1, "Show emits sphere object")
-expect(countPrefix(buf.lines, "d ") == 1, "Show emits sphere draw")
+GraphicsSerializer(gs, buf).serialize()
+expect(countPrefix(buf.lines, "o ") == 1, "emits sphere object")
+expect(countPrefix(buf.lines, "d ") == 1, "emits sphere draw")
 
 var buf2 = Buf()
-Show().write(g, buf2)
-expect(countPrefix(buf2.lines, "o ") == 2, "Show emits two point clouds")
-expect(countPrefix(buf2.lines, "d ") == 2, "Show draws two point clouds")
+GraphicsSerializer(g, buf2).serialize()
+expect(countPrefix(buf2.lines, "o ") == 2, "emits two point clouds")
+expect(countPrefix(buf2.lines, "d ") == 2, "draws two point clouds")
 
 /* ---- replace / U S preamble still works ---- */
 var buf3 = Buf()
 gs.title = "replace-title"
-Show().write(gs, buf3, replace=true)
+GraphicsSerializer(gs, buf3).serialize(replace=true)
 expect(buf3.lines.count() > 0 && buf3.lines[0].count() >= 3 && buf3.lines[0][0] == "U",
        "replace path starts with U")
 expect(countPrefix(buf3.lines, "W \"replace-title\"") == 1,

@@ -3,7 +3,7 @@
 //
 //   cd test && morpho6 testxcolor.morpho
 
-import morphoview
+import graphicsserializer
 import graphics
 import color
 import constants
@@ -253,7 +253,7 @@ var tblFade = withLegacyTransp(rgbTab, 0.5, nil)
 expect(tblFade.clss() == ColorTable && tblFade.channels() == 4, "legacy filter keeps ColorTable")
 expect(approx(tblFade.alpha(0), 0.5, 1e-9), "legacy filter multiplies table alpha")
 
-/* ---- Show MD: Color vs Coloring ---- */
+/* ---- serializer: Color vs Coloring ---- */
 var pos = Matrix([[0, 1, 0.5], [0, 0, 0.8], [0, 0, 0]])
 var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
 var conn = Matrix([[1], [1], [1]])
@@ -261,24 +261,24 @@ var conn = Matrix([[1], [1], [1]])
 var g1 = Graphics()
 g1.display(TriangleComplex(pos, nrm, Color(1, 0, 0, 0.4), conn))
 var buf1 = Buf()
-Show().write(g1, buf1)
+GraphicsSerializer(g1, buf1).serialize()
 var foundA = false
 for (line in buf1.lines) {
   var parts = line.split(" ")
   if (parts.count() == 6 && parts[0] == "c" && parts[5] == "0.4") foundA = true
 }
-expect(foundA, "Show Color.a via MD")
+expect(foundA, "Color.a via MD")
 
 var g2 = Graphics()
 g2.display(TriangleComplex(pos, nrm, ViridisMap(), conn))
 var buf2 = Buf()
-Show().write(g2, buf2)
-expect(buf2.lines.count() > 0, "Show Coloring map as color")
+GraphicsSerializer(g2, buf2).serialize()
+expect(buf2.lines.count() > 0, "Coloring map as color")
 
 var g3 = Graphics()
 g3.display(TriangleComplex(pos, nrm, ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1], [0.4, 0.5, 0.6]])), conn))
 var buf3 = Buf()
-Show().write(g3, buf3)
+GraphicsSerializer(g3, buf3).serialize()
 var sawXnca = false
 var sawXn = false
 var sawAlpha = false
@@ -291,7 +291,7 @@ for (line in buf3.lines) {
   }
 }
 expect(sawXnca && !sawXn, "ColorTable RGBA → xnca")
-expect(sawAlpha, "Show emits per-vertex alpha")
+expect(sawAlpha, "emits per-vertex alpha")
 
 var badLen = false
 try {
@@ -322,7 +322,7 @@ expect(badRecolor, "recolor rejects ColorTable")
 var gOpaque = Graphics()
 gOpaque.display(TriangleComplex(pos, nrm, ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 1]])), conn))
 var bufOpaque = Buf()
-Show().write(gOpaque, bufOpaque)
+GraphicsSerializer(gOpaque, bufOpaque).serialize()
 var sawOpaqueXnca = false
 for (line in bufOpaque.lines) {
   if (line == "v \"xnca\"") sawOpaqueXnca = true
@@ -332,7 +332,7 @@ expect(sawOpaqueXnca, "4-channel ColorTable is xnca even if a=1")
 var gEsc = Graphics(title="say \"hi\"")
 gEsc.display(Text("a\\b\"c", [0, 0, 0], color=White))
 var bufEsc = Buf()
-Show().write(gEsc, bufEsc)
+GraphicsSerializer(gEsc, bufEsc).serialize()
 var sawTitle = false
 var sawText = false
 for (line in bufEsc.lines) {
@@ -342,7 +342,7 @@ for (line in bufEsc.lines) {
     if (parts.count() >= 4 && parts[0] == "T" && parts[3] == "\"a\\\\b\\\"c\"") sawText = true
   }
 }
-expect(sawTitle, "Show escapes quotes in window title")
-expect(sawText, "Show escapes quotes/backslashes in Text")
+expect(sawTitle, "escapes quotes in window title")
+expect(sawText, "escapes quotes/backslashes in Text")
 
 print "ok"

@@ -1,30 +1,10 @@
-// Text draw-slots: model posn on the item, Show emit, move/remove/recolor.
+// Text: authored posn, replace keeps SRT, dirn/vertical.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testtextslot.morpho
 
 import graphics
-import xshow
 import color
-
-class Buf {
-  init() { self.lines = [] }
-  write(line) { self.lines.append(line) }
-}
-
-fn countPrefix(lines, prefix) {
-  var n = 0
-  for (line in lines) {
-    if (line.count() >= prefix.count()) {
-      var ok = true
-      for (i in 0...prefix.count()) {
-        if (line[i] != prefix[i]) { ok = false; break }
-      }
-      if (ok) n += 1
-    }
-  }
-  return n
-}
 
 fn expect(cond, msg) {
   if (!cond) {
@@ -50,45 +30,6 @@ expect(te.item.vertical[0] == 0 && te.item.vertical[1] == 0 && te.item.vertical[
 var tid2 = g.display(Text("bye", [0, 0, 0], color=Blue), [0.5, 0, 0], scale=2)
 expect(tid2 == 2, "posed id")
 expect(g.findEntry(tid2).scale == 2, "explicit scale on entry")
-
-/* ---- Show: T <entryId> <fontId> "…" + maps ---- */
-var buf = Buf()
-var show = Show()
-show.write(g, buf)
-expect(countPrefix(buf.lines, "T ") == 2, "two text slots")
-expect(countPrefix(buf.lines, "T 1 ") == 1, "draw-slot id 1")
-expect(countPrefix(buf.lines, "T 2 ") == 1, "draw-slot id 2")
-expect(show.slots[1].text && show.slots[2].text, "text slots mapped")
-expect(show.slots.contains(1) && show.slots.contains(2), "slots mapped")
-
-/* ---- Scene move / recolor / remove ---- */
-var sc = Scene()
-var id1 = sc.display(Text("a", [0, 0, 0], color=Red))
-var id2 = sc.display(Text("b", [1, 0, 0], color=Blue))
-
-var show2 = Show()
-var openBuf = Buf()
-show2.write(sc, openBuf)
-expect(show2.slots[id1].text, "scene text mapped")
-
-expect(sc.move(id1, [0.5, 0.25, 0]), "move text")
-var poseBuf = Buf()
-expect(show2.pose(sc, id1, poseBuf), "pose emit")
-expect(countPrefix(poseBuf.lines, "T ") == 0, "pose has no T redefine")
-expect(poseBuf.lines[poseBuf.lines.count()-1] == "d ${id1}", "pose ends with d id")
-
-expect(sc.recolor(id2, Yellow), "recolor text")
-var colBuf = Buf()
-expect(show2.recolor(sc, id2, colBuf), "recolor emit")
-expect(countPrefix(colBuf.lines, "d ${id2}") == 1, "recolor redraws slot")
-
-expect(sc.remove(id2), "remove text")
-var remBuf = Buf()
-show2.remove(id2, remBuf)
-expect(countPrefix(remBuf.lines, "X D ${id2}") == 1, "X D for removed")
-expect(countPrefix(remBuf.lines, "X O ") == 0, "no X O for text")
-expect(show2.slots.contains(id1), "sibling text still mapped")
-expect(!show2.slots.contains(id2), "removed from slots")
 
 /* ---- replace content keeps SRT ---- */
 var sc2 = Scene()
