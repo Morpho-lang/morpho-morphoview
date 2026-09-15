@@ -1,9 +1,9 @@
-// xpovray: write() SDL for GraphicsEntry. No povray binary required.
+// povray: write() SDL for GraphicsEntry. No povray binary required.
 // Expect: prints "ok" then exits.
 //
 //   cd test && morpho6 testxpovray.morpho
 
-import xpovray
+import povray
 import graphics
 import color
 
@@ -29,8 +29,16 @@ fn scene(g, camera=nil, transparent=false) {
   return File(path).readall()
 }
 
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn joined(lines) { return String.join(lines, "\n") }
+
 /* ---- import / public veneer ---- */
 expect(POVRaytracer(Graphics()).clss() == POVRaytracer, "POVRaytracer")
+expect(POVSerializer(Graphics(), Buf()).clss() == POVSerializer, "POVSerializer")
 
 /* ---- Camera keyword + positional ---- */
 var g0 = Graphics()
@@ -222,5 +230,54 @@ try {
   "GfxLightName" : badPov = true
 }
 expect(badPov, "unknown light name throws in POV")
+
+/* ---- POVSerializer + Buf; sibling _define; unknown is a no-op ---- */
+var gSer = Graphics()
+gSer.display(Sphere([0, 0, 0], 0.5, color=Red))
+gSer.display(Cylinder([0, 0, 0], [0, 0, 1], color=Blue))
+var buf = Buf()
+POVSerializer(gSer, buf).serialize()
+var serSdl = joined(buf.lines)
+expect(contains(serSdl, "sphere { <0, 0, 0>, 0.5"), "serializer Buf sphere")
+expect(contains(serSdl, "cylinder { <0, 0, 0>, <0, 0, 1>, 0.1"), "serializer Buf cylinder")
+expect(!contains(serSdl, "mesh2"), "serializer Sphere stays native")
+
+var gUnk = Graphics()
+gUnk.display(LegacyPrim())
+var bufUnk = Buf()
+POVSerializer(gUnk, bufUnk).serialize()
+expect(contains(joined(bufUnk.lines), "camera {"), "unknown primitive still writes preamble")
+expect(!contains(joined(bufUnk.lines), "sphere"), "unknown primitive emits no geometry")
+
+/* ---- radii pass through POVSerializer constructor ---- */
+var gRad = Graphics()
+gRad.display(PointCloud([[0, 0, 0]]))
+gRad.display(LineSet([[0, 0, 0], [1, 0, 0]]))
+var povRad = POVRaytracer(gRad)
+povRad.pointradius = 0.05
+povRad.lineradius = 0.03
+var sRad = File(povRad.write("/tmp/testxpovray.pov")).readall()
+expect(contains(sRad, "sphere { <0, 0, 0>, 0.05"), "custom pointradius")
+expect(contains(sRad, "cylinder { <0, 0, 0>, <1, 0, 0>, 0.03"), "custom lineradius")
+
+/* ---- explicit unresolved font is passed through, not replaced by cyrvetic ---- */
+var gFont = Graphics()
+gFont.display(Text("hi", [0, 0, 0], font="nonesuch-font-for-xpovray", color=White))
+var sFont = scene(gFont)
+expect(contains(sFont, "nonesuch-font-for-xpovray"), "unresolved explicit font pass-through")
+expect(!contains(sFont, "cyrvetic.ttf"), "explicit miss is not cyrvetic")
+
+/* ---- PointCloud / LineSet ColorTable ---- */
+var pcCols = Matrix([[1, 0], [0, 1], [0, 0]])
+var gPc = Graphics()
+gPc.display(PointCloud([[0, 0, 0], [1, 0, 0]], color=pcCols))
+var sPc = scene(gPc)
+expect(contains(sPc, "pigment { rgb <1, 0, 0> }"), "PointCloud ColorTable first vertex")
+expect(contains(sPc, "pigment { rgb <0, 1, 0> }"), "PointCloud ColorTable second vertex")
+
+var gLs = Graphics()
+gLs.display(LineSet([[0, 0, 0], [1, 0, 0]], color=pcCols))
+var sLs = scene(gLs)
+expect(contains(sLs, "pigment { rgb <1, 0, 0> }"), "LineSet ColorTable first vertex")
 
 print "ok"

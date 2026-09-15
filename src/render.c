@@ -279,7 +279,7 @@ static void render_normalmatrix(mat4x4 m, mat3x3 out) {
     out[6]=inv[2]; out[7]=inv[6]; out[8]=inv[10];
 }
 
-/** Neutral / ThreePoint view-space dirs: keep in sync with `_povNamedRig` in xpovray.morpho. */
+/** Neutral / ThreePoint view-space dirs: keep in sync with `_namedRig` in povray.morpho. */
 static const float render_neutral_dir[3][3] = {
     { 1.5f, -0.5f, 1.5f },
     { 1.5f,  1.5f, 1.5f },

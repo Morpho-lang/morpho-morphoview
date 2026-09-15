@@ -139,6 +139,6 @@ Graphical elements for `display` (from `graphics`):
 
 All of these are `GraphicsPrimitive`s sharing `color`, `filter`, and `transmit`.
 
-`transmit` / `filter` map to viewer alpha (`alpha = 1 − clamp(transmit + filter, 0, 1)`). True POVRay filter-vs-transmit pigment behavior remains POVRay-only.
+`transmit` / `filter` map to alpha (`alpha = 1 − clamp(transmit + filter, 0, 1)`). MorphoView sends uniform alpha as draw-slot `C`; `povray` writes POV `rgbt` with transmit `1 − a`.
 
 Every `Color` has an alpha channel (`Color(r,g,b)` sets `a=1`; use `Color(r,g,b,a)` for translucency). Uniform alpha is sent as draw-slot `C`; a `ColorTable` with a fourth row is sent as per-vertex `a` (`xnca` / `xca`).

@@ -6,7 +6,7 @@
 import graphics
 import color
 import graphicsserializer
-import xpovray
+import povray
 
 class Buf {
   init() { self.lines = [] }
