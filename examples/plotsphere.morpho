@@ -1,8 +1,8 @@
-// xplot: ImplicitMesh sphere, grades 0+1+2 with one color.
+// ImplicitMesh sphere, grades 0+1+2, one color.
 // Lower grades are auto-Darken'd so points/edges stay visible on faces.
-// style="shaded" turns on Phong + smooth normals (off by default).
+// style="shaded" turns on Phong and smooth normals (off by default).
 //
-//   morpho6 examples/xplotsphere.morpho
+//   morpho6 examples/plotsphere.morpho
 //
 // Close the viewer window to exit.
 
@@ -18,7 +18,7 @@ m.addgrade(1)
 var p = Plot(m, grade=[0, 1, 2],
              color=Color(0.7, 0.7, 0.7),
              style="shaded",
-             title="xplotsphere (Darken lower grades)",
+             title="Plot sphere",
              background=Color(0.08, 0.09, 0.11))
 
 var v = View(p, connecttimeout=20000)

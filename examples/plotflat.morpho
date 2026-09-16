@@ -1,32 +1,31 @@
-// xplot: flat mesh in the xy-plane through the origin + interesting field.
-// Exercises the planar-normal path (constant +z) with interpolate coloring.
+// Flat mesh in the xy-plane through the origin, with a signed field.
+// Exercises the planar-normal path (constant +z) and a diverging colormap.
 //
-//   morpho6 examples/xplotflat.morpho
+//   morpho6 examples/plotflat.morpho
 //
 // Close the viewer window to exit.
-// Requires: morphoview on PATH, morpho-zeromq, display.
 
 import morphoview
 import meshtools
 import plot
 import color
 
-// Axis-aligned rectangle in z=0, centered on the origin.
 var m = AreaMesh(fn (u, v) [u, v, 0],
                  -1.5..1.5:0.05, -1.5..1.5:0.05)
 
-// Soft-envelope quadrupole (signed → diverging map); no atan2 needed.
+/** Soft-envelope quadrupole (signed → diverging map). */
 fn quadrupole(x, y, z) {
   var r2 = x*x + y*y
   return exp(-0.55*r2)*(x*x - y*y)*cos(5*sqrt(r2))
 }
+
 var f = Field(m, quadrupole)
 
 var p = Plot(f, style="interpolate",
              colormap=BlueWhiteRedMap,
              center=0,
              axes=true, scalebar=true,
-             title="xplotflat (xy through origin)",
+             title="Plot flat",
              background=Color(0.08, 0.09, 0.11))
 
 var v = View(p, connecttimeout=20000)

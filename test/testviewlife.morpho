@@ -2,7 +2,7 @@
 // model switch, close/reopen. Live parts need morphoview + display.
 // Expect: prints "ok" then exits.
 //
-//   cd test && morpho6 testxviewlife.morpho
+//   cd test && morpho6 testviewlife.morpho
 
 import graphicsserializer
 import morphoview

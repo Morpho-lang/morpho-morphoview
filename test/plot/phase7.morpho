@@ -1,4 +1,4 @@
-// xplot Phase 7: Plot a Functional integrand Field with no copy.
+// plot Phase 7: Plot a Functional integrand Field with no copy.
 // MeanCurvatureSq is a vertex Field → interpolate. Area is CG0 (grade 2) →
 // default style colors faces; interpolate throws PltFldInt.
 // Expect: prints "ok" then exits.

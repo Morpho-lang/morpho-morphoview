@@ -1,7 +1,7 @@
 // color: Coloring hierarchy, HSV, Blend/add/scale, ColorMap.color(x).
 // Expect: prints "ok" then exits.
 //
-//   cd test && morpho6 testxcolor.morpho
+//   cd test && morpho6 testcolor.morpho
 
 import graphicsserializer
 import graphics

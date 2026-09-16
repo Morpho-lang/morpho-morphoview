@@ -1,4 +1,4 @@
-// xplot Phase 1b: Coloring MD, flat faces, field grade=.
+// plot Phase 1b: Coloring MD, flat faces, field grade=.
 // Expect: prints "ok" then exits.
 //
 //   morpho6 test/plot/phase1b.morpho

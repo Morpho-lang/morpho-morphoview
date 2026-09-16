@@ -1,11 +1,10 @@
-// xplotripple — traveling-wave membrane.
+// Traveling-wave membrane.
 // Mutate the mesh, rebuild the Field snapshot, then Plot.refresh().
 // View only observes the resulting Scene.morph.
 //
-//   morpho6 examples/xplotripple.morpho
+//   morpho6 examples/plotripple.morpho
 //
 // Close the viewer window to exit.
-// Requires: morphoview on PATH, morpho-zeromq, display.
 
 import morphoview
 import meshtools
@@ -17,7 +16,7 @@ var maps = [ViridisMap(), MagmaMap(), PlasmaMap(), InfernoMap(), BlueWhiteRedMap
 var mapNames = ["Viridis", "Magma", "Plasma", "Inferno", "BlueWhiteRed"]
 var mapIdx = 0
 
-/** Radial packet + interfering sheet. */
+/** Radial packet plus an interfering sheet. */
 fn wave(x, y, t) {
   var r = sqrt(x*x + y*y)
   var packet = 0.55*exp(-0.35*r*r)*sin(6.5*r - 5*t)
@@ -25,7 +24,7 @@ fn wave(x, y, t) {
   return packet + sheet
 }
 
-fn applyWave(mesh, t) {
+fn applyWave(mesh, t) { // Set vertex z from the wave at time t
   var vert = mesh.vertexmatrix().clone()
   var nv = vert.dimensions()[1]
   for (i in 0...nv) {
@@ -34,7 +33,7 @@ fn applyWave(mesh, t) {
   mesh.setvertexmatrix(vert)
 }
 
-fn heightField(mesh) {
+fn heightField(mesh) { // Field of vertex z (sampled once at construction)
   return Field(mesh, fn (x, y, z) z)
 }
 
@@ -44,7 +43,7 @@ applyWave(mesh, 0)
 var p = Plot(heightField(mesh), style="interpolate", colormap=maps[0],
              cmin=-0.7, cmax=0.7,
              axes=true,
-             title="xplotripple (Viridis)",
+             title="Plot ripple (Viridis)",
              background=Color(0.08, 0.09, 0.11))
 
 var v = View(p, connecttimeout=20000)
@@ -62,7 +61,7 @@ while (!v.closed) {
     mapIdx = mod(mapIdx + 1, maps.count())
     p.colormap = maps[mapIdx]
     p.center = (mapIdx == 4) ? 0 : nil
-    p.title = "xplotripple (${mapNames[mapIdx]})"
+    p.title = "Plot ripple (${mapNames[mapIdx]})"
   }
 
   if (!p.refresh()) break

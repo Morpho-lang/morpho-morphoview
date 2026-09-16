@@ -1,4 +1,4 @@
-// Flying text yardstick — Text draw-slots with live move / recolor (Phase 5f).
+// Flying text — Text draw-slots with live move / recolor.
 // Unicode, emoji (🦋), and math symbols — define once, animate with Scene.move.
 //
 //   morpho6 examples/flyingtext.morpho

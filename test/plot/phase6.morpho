@@ -1,4 +1,4 @@
-// xplot Phase 6: Plot + Graphics (qtensor-style overlay).
+// plot Phase 6: Plot + Graphics (qtensor-style overlay).
 // Expect: prints "ok" then exits.
 //
 //   morpho6 test/plot/phase6.morpho

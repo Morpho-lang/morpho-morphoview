@@ -1,9 +1,8 @@
-// xplot Phase 3 yardstick: domain frame axes + optional scalebar.
+// Field plot with domain-frame axes and a colormap scalebar.
 //
-//   morpho6 examples/xplotframe.morpho
+//   morpho6 examples/plotaxes.morpho
 //
 // Close the viewer window to exit.
-// Requires: morphoview on PATH, morpho-zeromq, display.
 
 import morphoview
 import meshtools
@@ -16,7 +15,7 @@ var f = Field(m, fn (x, y, z) x)
 
 var p = Plot(f, style="interpolate", colormap=ViridisMap(),
              axes=true, scalebar=true,
-             title="xplotframe (axes + scalebar)",
+             title="Plot axes",
              background=Color(0.08, 0.09, 0.11))
 
 var v = View(p, connecttimeout=20000)

@@ -2,7 +2,7 @@
 // Expect: a morphoview window, then "ok".
 // Requires: morphoview on PATH, morpho-zeromq, display.
 //
-//   cd test && morpho6 testxview.morpho
+//   cd test && morpho6 testviewscene.morpho
 
 import graphicsserializer
 import morphoview

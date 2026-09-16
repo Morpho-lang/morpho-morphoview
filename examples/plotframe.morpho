@@ -146,10 +146,6 @@ g.display(wireBox(lo, hi, Color(0.55, 0.55, 0.6)))
 g = g + frameLabels(lo, hi)
 g.display(heightCloud(400, lo, hi))
 
-var v = View()
-if (!v.open(g)) {
-  print "open failed"
-} else {
-  v.wait()
-  v.close()
-}
+var v = View(g)
+v.wait()
+if (!v.closed) v.close()

@@ -1,4 +1,4 @@
-// xplot Phase 3: bounds, axes chrome, ScaleBar / scalebar=true.
+// plot Phase 3: bounds, axes chrome, ScaleBar / scalebar=true.
 // Expect: prints "ok" then exits.
 //
 //   morpho6 test/plot/phase3.morpho

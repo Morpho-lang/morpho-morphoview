@@ -1,4 +1,4 @@
-// xplot Phase 4: linear normalize + center= (no GUI required).
+// plot Phase 4: linear normalize + center= (no GUI required).
 // Expect: prints "ok" then exits.
 //
 //   morpho6 test/plot/phase4.morpho

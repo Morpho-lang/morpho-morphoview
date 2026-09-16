@@ -1,4 +1,4 @@
-// xplot Phase 1: Plot is Scene + veneers (no GUI required).
+// plot Phase 1: Plot is Scene + veneers (no GUI required).
 // Expect: prints "ok" then exits.
 //
 //   morpho6 test/plot/phase1.morpho
