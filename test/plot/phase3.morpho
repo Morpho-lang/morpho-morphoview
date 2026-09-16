@@ -26,13 +26,13 @@ expect(p3.bounds.count() == 3, "3D bounds length matches vertex dim")
 
 /* ---- axes=true records chrome under entries["axes"] ---- */
 var pAx = Plot(m3, color=Green, axes=true)
-expect(pAx.entries.contains("axes"), "axes entries present")
-expect(pAx.entries["axes"].count() > 1, "wire + labels/ticks")
+expect(pAx._entries.contains("axes"), "axes entries present")
+expect(pAx._entries["axes"].count() > 1, "wire + labels/ticks")
 
 var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
 var pFlat = Plot(am, color=Red, axes=true)
 expect(pFlat.bounds.count() == 3, "AreaMesh vertex dim is 3 even if planar")
-expect(pFlat.entries.contains("axes"), "planar 3D still gets axes")
+expect(pFlat._entries.contains("axes"), "planar 3D still gets axes")
 
 /* ---- shared nice ticks (public ScaleBar.ticks) ---- */
 var ticks = ScaleBar().ticks(-1.2, 3.4, 5)
@@ -44,16 +44,16 @@ expect(!isnil(sb), "ScaleBar constructs")
 
 var f = Field(am, fn (x, y, z) x)
 var pf = Plot(f, style="interpolate", axes=true, scalebar=true)
-expect(pf.entries.contains("scalebar"), "scalebar=true draws bar")
-expect(pf.entries.contains("axes"), "field plot can have both axes and scalebar")
+expect(pf._entries.contains("scalebar"), "scalebar=true draws bar")
+expect(pf._entries.contains("axes"), "field plot can have both axes and scalebar")
 
 /* ---- explicit ScaleBar instance ---- */
 var sb2 = ScaleBar(length=0.4, posn=[1.3, 0.5, 0])
 var pf2 = Plot(f, style="interpolate", scalebar=sb2)
-expect(pf2.entries.contains("scalebar"), "explicit scalebar still recorded")
+expect(pf2._entries.contains("scalebar"), "explicit scalebar still recorded")
 
 /* ---- mesh + scalebar=true is a no-op (no field range) ---- */
 var pMeshBar = Plot(am, color=Red, scalebar=true)
-expect(!pMeshBar.entries.contains("scalebar"), "scalebar=true ignored without field colormap")
+expect(!pMeshBar._entries.contains("scalebar"), "scalebar=true ignored without field colormap")
 
 print "ok"

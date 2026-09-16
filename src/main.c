@@ -12,6 +12,7 @@
 #include "display.h"
 #include "text.h"
 #include "listener.h"
+#include "mvversion.h"
 
 /** Next argv token or embedded -xVALUE; advances *i when consuming argv[++]. */
 static const char *main_optarg(const char *option, unsigned int *i, int argc, const char *argv[]) {
@@ -21,6 +22,15 @@ static const char *main_optarg(const char *option, unsigned int *i, int argc, co
 }
 
 int main(int argc, const char * argv[]) {
+    for (unsigned int i=1; i<(unsigned int)argc; i++) {
+        const char *option = argv[i];
+        if (option && (strcmp(option, "-v")==0 || strcmp(option, "--version")==0)) {
+            printf("morphoview %s protocol %d\n",
+                   MORPHOVIEW_VERSIONSTRING, MORPHOVIEW_PROTOCOL);
+            return 0;
+        }
+    }
+
     morpho_initialize();
     command_initialize();
     listener_initialize();

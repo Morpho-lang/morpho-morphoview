@@ -1,0 +1,20 @@
+// MorphoViewFinder.version() reads morphoview -v via subprocess.
+// Expect: prints "ok" then exits.
+//
+//   morpho6 test/testfinderversion.morpho
+
+import morphoview
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+var v = MorphoViewFinder().version()
+expect(!isnil(v), "version() is nil (rebuild morphoview?)")
+expect(v["version"] == "0.7.0", "version string")
+expect(v["protocol"] == 2, "protocol")
+
+print "ok"

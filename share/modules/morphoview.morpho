@@ -31,6 +31,8 @@ var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command)
 class MorphoViewFinder {
   init() {
     self.cached = nil
+    self.ver = nil
+    self.verQueried = false
     self.exe = System.platform()=="windows" ? "morphoview.exe" : "morphoview"
   }
 
@@ -45,6 +47,31 @@ class MorphoViewFinder {
 
     self.cached = hit
     return hit
+  }
+
+  version() { // Extract version string from morphoview -v
+    if (self.verQueried) return self.ver
+    self.verQueried = true
+    var bin = self.find()
+    var r = System.subprocess("\"${bin}\" -v")
+    if (r["exitstatus"]!=0) return nil
+    self.ver = self._parseVersion(r["stdout"].split("\n")[0])
+    return self.ver
+  }
+
+  _parseVersion(line) { // morphoview X.Y.Z protocol N
+    if (isnil(line) || line.count()==0) return nil
+    var toks = []
+    for (p in line.split(" ")) {
+      if (p.count()>0) toks.append(p)
+    }
+    if (toks.count() < 4) return nil
+    if (toks[0] != "morphoview") return nil
+    var ver = toks[1]
+    if (ver.count()==0) return nil
+    if (toks[2] != "protocol") return nil
+    var proto = Int(Float(toks[3]))
+    return { "version": ver, "protocol": proto }
   }
 
   _haveExe(bindir) { // Does bindir contain the morphoview executable?

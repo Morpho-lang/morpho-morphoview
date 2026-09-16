@@ -103,8 +103,8 @@ expect(tubeOpen.normals.column(tnv-1).inner(Matrix([0, 0, 1])) > 0.9, "open tube
 /* ---- Plot faces: duplicated-vertex winding matches oriented normals ---- */
 var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:1, 0..1:1)
 var pFaces = Plot(am, color=Red)
-expect(pFaces.entries.contains("faces"), "AreaMesh draws faces")
-var tcPlot = pFaces.findEntry(pFaces.entries["faces"][0]).item
+expect(pFaces._entries.contains("faces"), "AreaMesh draws faces")
+var tcPlot = pFaces.findEntry(pFaces._entries["faces"][0]).item
 var nfp = tcPlot.connectivity.dimensions()[1]
 var nflip = 0
 for (i in 0...nfp) {

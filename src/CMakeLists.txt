@@ -7,5 +7,5 @@ target_sources(morphoview
         render.c    render.h
         scene.c     scene.h 
         text.c      text.h
-        main.c    
+        main.c      mvversion.h
 )

@@ -50,10 +50,10 @@ expect(approx(_fieldSampleNorm(5, 0, 1, scale=false), 5), "scale=false raw")
 var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
 var fConst = Field(am, fn (x, y, z) 7)
 var pConst = Plot(fConst, style="interpolate")
-expect(pConst.entries.contains("faces"), "uniform field plots")
+expect(pConst._entries.contains("faces"), "uniform field plots")
 expect(approx(pConst.cmin, 7) && approx(pConst.cmax, 7), "uniform range")
 
-var face = pConst.findEntry(pConst.entries["faces"][0]).item
+var face = pConst.findEntry(pConst._entries["faces"][0]).item
 var rgb0 = face.color.rgb(0)
 var rgb1 = face.color.rgb(1)
 expect(approx(rgb0[0], rgb1[0]) && approx(rgb0[1], rgb1[1]) && approx(rgb0[2], rgb1[2]),
@@ -66,10 +66,10 @@ expect(approxEps(rgb0[0], mid[0], 1e-6) && approxEps(rgb0[1], mid[1], 1e-6) && a
 
 /* ---- RGBA through Plot: uniform Coloring stays Color; interpolate bakes ColorTable ---- */
 var pA = Plot(am, color=Color(1, 0, 0, 0.5))
-var faceA = pA.findEntry(pA.entries["faces"][0]).item
+var faceA = pA.findEntry(pA._entries["faces"][0]).item
 expect(faceA.color.clss() == Color, "uniform Color.a stays Color")
 expect(approx(faceA.color.a, 0.5), "face alpha kept")
-expect(pA.findEntry(pA.entries["faces"][0]).flat == true, "uniform faces stay flat")
+expect(pA.findEntry(pA._entries["faces"][0]).flat == true, "uniform faces stay flat")
 
 var bufA = Buf()
 Show().write(pA, bufA)
@@ -86,16 +86,16 @@ expect(sawXnA && !sawXncA, "uniform translucent mesh uses xn not xnc")
 expect(sawAlphaA, "uniform Color.a reaches viewer C")
 
 var pTup = Plot(am, color=(1, 0, 0, 0.5))
-expect(pTup.findEntry(pTup.entries["faces"][0]).item.color.clss() == Color, "RGBA tuple stays Color")
-expect(approx(pTup.findEntry(pTup.entries["faces"][0]).item.color.a, 0.5), "RGBA tuple is shared")
+expect(pTup.findEntry(pTup._entries["faces"][0]).item.color.clss() == Color, "RGBA tuple stays Color")
+expect(approx(pTup.findEntry(pTup._entries["faces"][0]).item.color.a, 0.5), "RGBA tuple is shared")
 var pList = Plot(am, color=[1, 0, 0, 0.5])
-expect(approx(pList.findEntry(pList.entries["faces"][0]).item.color.a, 0.5), "RGBA list is shared")
+expect(approx(pList.findEntry(pList._entries["faces"][0]).item.color.a, 0.5), "RGBA list is shared")
 
 var pMap = Plot(fConst, style="interpolate", colormap=ViridisMap().opacity(0.5))
-var faceM = pMap.findEntry(pMap.entries["faces"][0]).item
+var faceM = pMap.findEntry(pMap._entries["faces"][0]).item
 expect(faceM.color.clss() == ColorTable && faceM.color.channels() == 4, "map opacity → ColorTable RGBA")
 expect(approx(faceM.color.alpha(0), 0.5), "colormap opacity kept")
-expect(pMap.findEntry(pMap.entries["faces"][0]).flat == false, "interpolated faces not flat")
+expect(pMap.findEntry(pMap._entries["faces"][0]).flat == false, "interpolated faces not flat")
 var bufMap = Buf()
 Show().write(pMap, bufMap)
 var sawXncaMap = false

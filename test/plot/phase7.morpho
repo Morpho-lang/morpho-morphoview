@@ -28,7 +28,7 @@ fn threwPltFldInt(blk) {
 fn approx(a, b) { return abs(a - b) < 1e-12 }
 
 fn faceEntry(plot) {
-  return plot.findEntry(plot.entries["faces"][0])
+  return plot.findEntry(plot._entries["faces"][0])
 }
 
 /* ---- closed surface: implicit ellipsoid (in-tree plotfield twin) ---- */
@@ -43,8 +43,8 @@ expect(msq.count() == mesh.count(0), "vertex integrand count matches verts")
 
 var pMsq = Plot(msq, style="interpolate", scalebar=true)
 expect(pMsq.source == msq, "Plot holds the integrand Field (no copy)")
-expect(pMsq.entries.contains("faces"), "interpolate curvature → faces")
-expect(pMsq.entries.contains("scalebar"), "scalebar=true")
+expect(pMsq._entries.contains("faces"), "interpolate curvature → faces")
+expect(pMsq._entries.contains("scalebar"), "scalebar=true")
 expect(!isnil(pMsq.cmin) && !isnil(pMsq.cmax), "field range from integrand")
 expect(faceEntry(pMsq).flat == false, "interpolated faces are lit")
 
@@ -52,7 +52,7 @@ var pVeneer = plotfield(msq, style="interpolate", scalebar=true)
 expect(pVeneer.source == msq, "plotfield veneer holds the same Field")
 expect(pVeneer.displaylist.count() == pMsq.displaylist.count(),
        "plotfield matches Plot displaylist count")
-expect(pVeneer.entries.contains("faces") && pVeneer.entries.contains("scalebar"),
+expect(pVeneer._entries.contains("faces") && pVeneer._entries.contains("scalebar"),
        "plotfield interpolate has faces+scalebar")
 expect(approx(pVeneer.cmin, pMsq.cmin) && approx(pVeneer.cmax, pMsq.cmax),
        "plotfield range matches Plot")
@@ -66,13 +66,13 @@ expect(area.count() == mesh.count(2), "Area integrand count matches faces")
 
 var pArea = Plot(area)
 expect(pArea.source == area, "Plot holds the Area integrand")
-expect(pArea.entries.contains("faces"), "default style colors faces")
-expect(!pArea.entries.contains("points"), "CG0 Area is not a vertex Field")
+expect(pArea._entries.contains("faces"), "default style colors faces")
+expect(!pArea._entries.contains("points"), "CG0 Area is not a vertex Field")
 expect(faceEntry(pArea).flat == true, "per-face CG0 colors stay flat")
 expect(faceEntry(pArea).item.color.clss() == ColorTable, "per-face ColorTable")
 
 var pAreaVeneer = plotfield(area)
-expect(pAreaVeneer.entries.contains("faces"), "plotfield(Area) default colors faces")
+expect(pAreaVeneer._entries.contains("faces"), "plotfield(Area) default colors faces")
 expect(faceEntry(pAreaVeneer).flat == true, "plotfield CG0 faces stay flat")
 
 expect(threwPltFldInt(fn () Plot(area, style="interpolate")),
@@ -87,7 +87,7 @@ var s = Selection(mesh, fn (q) q > 1.5*mean, en)
 expect(s.count(0) == 0, "Field Selection is on the integrand grade, not vertices")
 if (s.count(2) > 0) {
   var pThr = Plot(en, selection=s)
-  expect(pThr.entries.contains("faces"), "Plot(en, selection=s) has faces")
+  expect(pThr._entries.contains("faces"), "Plot(en, selection=s) has faces")
 }
 
 print "ok"

@@ -46,4 +46,4 @@ Online help: `help morphoview` (package file in `share/help/`).
 
 Viewer command language (ASCII / C API / ZMQ): [`docs/commandapi.md`](docs/commandapi.md). Backlog: [`TODO.md`](TODO.md).
 
-Viewer CLI: `-b <endpoint>` binds a ZMQ PAIR socket; `-c <endpoint>` connects (used by `View`). `-t` unlinks a temp draw file on exit (used by `Show`).
+Viewer CLI: `-v` / `--version` prints `morphoview X.Y.Z protocol N`. `-b <endpoint>` binds a ZMQ PAIR socket; `-c <endpoint>` connects (used by `View`). `-t` unlinks a temp draw file on exit (used by `Show`).

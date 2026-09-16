@@ -17,7 +17,7 @@ fn expect(cond, msg) {
 var m = LineMesh(fn (t) [cos(t), sin(t), 0], 0...2*Pi:Pi/6, closed=true)
 var p = Plot(m, color=Red)
 expect(p.displaylist.count() == 1, "expected one LineSet")
-expect(p.entries.contains("lines"), "missing lines entries")
+expect(p._entries.contains("lines"), "missing lines entries")
 expect(p.source.count(0) == m.count(0), "source mismatch")
 
 var p2 = plotmesh(m)
@@ -39,10 +39,10 @@ expect(psT.displaylist.count() >= 1, "plotselection transmit keeps selection col
 
 var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
 var pf2 = Plot(am, color=Color(0.2, 0.6, 0.9))
-expect(pf2.entries.contains("faces"), "missing faces entry")
+expect(pf2._entries.contains("faces"), "missing faces entry")
 
 var sb = ScaleBar(length=0.5, posn=[1.2, 0.5, 0])
 var pf3 = Plot(Field(am, fn (x, y, z) x), style="interpolate", scalebar=sb)
-expect(pf3.entries.contains("scalebar"), "scalebar entries missing")
+expect(pf3._entries.contains("scalebar"), "scalebar entries missing")
 
 print "ok"

@@ -20,23 +20,23 @@ fn approx(a, b) { return abs(a - b) < 1e-9 }
 fn approxEps(a, b, eps) { return abs(a - b) < eps }
 
 fn faceRgb0(plot) {
-  var face = plot.findEntry(plot.entries["faces"][0]).item
+  var face = plot.findEntry(plot._entries["faces"][0]).item
   return face.color.rgb(0)
 }
 
 /* ---- axes(false/true) ---- */
 var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
 var pAx = Plot(am, color=Red, axes=true)
-expect(pAx.entries.contains("axes"), "axes present after construct")
+expect(pAx._entries.contains("axes"), "axes present after construct")
 var nBefore = pAx.displaylist.count()
 expect(pAx.axes(false), "axes(false) ok")
-expect(!pAx.entries.contains("axes"), "axes role cleared")
+expect(!pAx._entries.contains("axes"), "axes role cleared")
 expect(pAx.displaylist.count() < nBefore, "axes entries removed from scene")
 expect(pAx.wantAxes == false, "wantAxes false")
 
 expect(pAx.axes(true), "axes(true) ok")
-expect(pAx.entries.contains("axes"), "axes redrawn")
-expect(pAx.entries["axes"].count() > 1, "wire + labels")
+expect(pAx._entries.contains("axes"), "axes redrawn")
+expect(pAx._entries["axes"].count() > 1, "wire + labels")
 expect(pAx.wantAxes, "wantAxes true")
 
 /* ---- field semantic methods store kwargs ---- */
@@ -45,11 +45,11 @@ var p = Plot(f, style="interpolate", colormap=ViridisMap(), scalebar=true,
              cmin=0, cmax=1)
 expect(p.style == "interpolate", "stores style")
 expect(approx(p.cmin, 0) && approx(p.cmax, 1), "stores range")
-expect(p.entries.contains("faces") && p.entries.contains("scalebar"), "faces+scalebar")
+expect(p._entries.contains("faces") && p._entries.contains("scalebar"), "faces+scalebar")
 expect(p.scalebar(false), "scalebar(false) ok")
-expect(!p.entries.contains("scalebar"), "scalebar role cleared")
+expect(!p._entries.contains("scalebar"), "scalebar role cleared")
 expect(p.scalebar(true), "scalebar(true) ok")
-expect(p.entries.contains("scalebar"), "scalebar redrawn")
+expect(p._entries.contains("scalebar"), "scalebar redrawn")
 
 var rgbViridis0 = Matrix(ViridisMap().rgb(0))
 var rgb0 = faceRgb0(p)
@@ -58,11 +58,11 @@ expect(approxEps(rgb0[0], rgbViridis0[0], 1e-5) &&
        approxEps(rgb0[2], rgbViridis0[2], 1e-5), "initial colormap at low end")
 
 /* ---- colormap(...) rebuilds geometry colors ---- */
-var nFaces = p.entries["faces"].count()
+var nFaces = p._entries["faces"].count()
 expect(p.colormap(MagmaMap()), "colormap swap")
-expect(p.entries.contains("faces"), "faces after colormap")
-expect(p.entries["faces"].count() == nFaces, "same face entry count")
-expect(p.entries.contains("scalebar"), "scalebar rebuilt")
+expect(p._entries.contains("faces"), "faces after colormap")
+expect(p._entries["faces"].count() == nFaces, "same face entry count")
+expect(p._entries.contains("scalebar"), "scalebar rebuilt")
 
 var rgbMagma0 = Matrix(MagmaMap().rgb(0))
 rgb0 = faceRgb0(p)
@@ -145,36 +145,45 @@ expect(capBar.nRemoved == 1, "scalebar one coalesced Removed")
 /* ---- fast morph path keeps face id and rebuilds scalebar ---- */
 var pFast = Plot(f, style="interpolate", colormap=ViridisMap(), scalebar=true,
                  cmin=0, cmax=1)
-var faceId = pFast.entries["faces"][0]
-var bar0 = pFast.entries["scalebar"][0]
-var nBar = pFast.entries["scalebar"].count()
+var faceId = pFast._entries["faces"][0]
+var bar0 = pFast._entries["scalebar"][0]
+var nBar = pFast._entries["scalebar"].count()
 var capFast = PlotCap()
 capFast.listen(pFast)
 expect(pFast.refresh(), "headless refresh")
-expect(pFast.entries["faces"][0] == faceId, "fast path morphs same face id")
-expect(pFast.entries.contains("scalebar"), "scalebar present after fast refresh")
-expect(pFast.entries["scalebar"].count() == nBar, "scalebar entry count")
-expect(pFast.entries["scalebar"][0] != bar0, "scalebar rebuilt with new ids")
+expect(pFast._entries["faces"][0] == faceId, "fast path morphs same face id")
+expect(pFast._entries.contains("scalebar"), "scalebar present after fast refresh")
+expect(pFast._entries["scalebar"].count() == nBar, "scalebar entry count")
+expect(pFast._entries["scalebar"][0] != bar0, "scalebar rebuilt with new ids")
 expect(capFast.nMorphed == 1, "refresh morphs faces")
 expect(capFast.nRemoved >= 1 && capFast.nDefined >= 1, "scalebar remove+define")
 
-/* ---- axes survive refresh when bounds change (fixed domain frame) ---- */
+fn axesWireZHi(plot) {
+  var pos = plot.findEntry(plot._entries["axes"][0]).item.position
+  var n = pos.dimensions()[1]
+  return bounds(pos[2, 0...n])[1]
+}
+
+/* ---- deforming Field rebuilds axes to match new bounds ---- */
 var amB = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
 var pBounds = Plot(Field(amB, fn (x, y, z) z), style="interpolate", axes=true)
-expect(pBounds.entries.contains("axes"), "axes at construct")
-var axesId0 = pBounds.entries["axes"][0]
-var nAxes = pBounds.entries["axes"].count()
+expect(pBounds._entries.contains("axes"), "axes at construct")
+var axesId0 = pBounds._entries["axes"][0]
+var nAxes = pBounds._entries["axes"].count()
 var zHi0 = pBounds.bounds[2][1]
-var faceZ0 = pBounds.findEntry(pBounds.entries["faces"][0]).item.position[2, 0]
+var wireZ0 = axesWireZHi(pBounds)
+var faceZ0 = pBounds.findEntry(pBounds._entries["faces"][0]).item.position[2, 0]
 var vert = amB.vertexmatrix().clone()
 for (i in 0...vert.dimensions()[1]) vert[2, i] = 3
 amB.setvertexmatrix(vert)
 pBounds.source = Field(amB, fn (x, y, z) z) // Field samples z once
 expect(pBounds.refresh(), "refresh after deform")
 expect(pBounds.bounds[2][1] > zHi0 + 1, "bounds z updated")
-expect(pBounds.findEntry(pBounds.entries["faces"][0]).item.position[2, 0] > faceZ0 + 1,
+expect(pBounds.findEntry(pBounds._entries["faces"][0]).item.position[2, 0] > faceZ0 + 1,
        "refresh morphs face vertices")
-expect(pBounds.entries["axes"][0] == axesId0, "axes ids unchanged")
-expect(pBounds.entries["axes"].count() == nAxes, "axes not rebuilt")
+expect(pBounds._entries.contains("axes"), "axes still present")
+expect(pBounds._entries["axes"].count() == nAxes, "same number of axes entries")
+expect(pBounds._entries["axes"][0] != axesId0, "axes rebuilt")
+expect(axesWireZHi(pBounds) > wireZ0 + 1, "axes frame tracks new extent")
 
 print "ok"

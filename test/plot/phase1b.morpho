@@ -18,24 +18,24 @@ var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
 
 /* ---- Coloring as mesh color (MD path) ---- */
 var pColor = Plot(am, color=Red)
-expect(pColor.entries.contains("faces"), "Coloring color works")
+expect(pColor._entries.contains("faces"), "Coloring color works")
 
 /* ---- discrete face colors → GraphicsEntry.flat ---- */
 var pFlat = Plot(am, color=Color(0.2, 0.6, 0.9))
-expect(pFlat.entries.contains("faces"), "faces entry")
-var faceId = pFlat.entries["faces"][0]
+expect(pFlat._entries.contains("faces"), "faces entry")
+var faceId = pFlat._entries["faces"][0]
 expect(pFlat.findEntry(faceId).flat == true, "discrete faces should be flat")
 
 /* ---- interpolated field → not flat ---- */
 var pSmooth = Plot(Field(am, fn (x, y, z) x), style="interpolate")
-var smoothId = pSmooth.entries["faces"][0]
+var smoothId = pSmooth._entries["faces"][0]
 expect(pSmooth.findEntry(smoothId).flat == false, "interpolated faces should not be flat")
 
 /* ---- curved interpolate → smooth (non-equal) corner normals ---- */
 var curved = AreaMesh(fn (u, v) [u, v, 0.2*sin(2*u)*cos(3*v)],
                       -1..1:0.5, -1..1:0.5)
 var pCurved = Plot(Field(curved, fn (x, y, z) x), style="interpolate")
-var tc = pCurved.findEntry(pCurved.entries["faces"][0]).item
+var tc = pCurved.findEntry(pCurved._entries["faces"][0]).item
 var n0 = tc.normals.column(0)
 var n1 = tc.normals.column(1)
 var n2 = tc.normals.column(2)
@@ -49,16 +49,16 @@ var line = LineMesh(fn (t) [cos(t), sin(t), 0], 0...2*Pi:Pi/6, closed=true)
 var fLine = Field(line, fn (x, y, z) x)
 // Function fields are vertex-valued → grade 0 only
 var pDef = Plot(fLine)
-expect(pDef.entries.contains("points"), "vertex field defaults to points")
-expect(!pDef.entries.contains("lines"), "vertex field has no line data")
+expect(pDef._entries.contains("points"), "vertex field defaults to points")
+expect(!pDef._entries.contains("lines"), "vertex field has no line data")
 var pG0 = Plot(fLine, grade=0)
-expect(pG0.entries.contains("points"), "grade=0 points")
+expect(pG0._entries.contains("points"), "grade=0 points")
 var pG1 = Plot(fLine, grade=1)
 expect(pG1.displaylist.count() == 0, "grade=1 with no edge field data → empty")
 
 var fArea = Field(am, fn (x, y, z) x)
 var pI2 = Plot(fArea, style="interpolate", grade=2)
-expect(pI2.entries.contains("faces"), "interpolate grade=2 → faces")
+expect(pI2._entries.contains("faces"), "interpolate grade=2 → faces")
 var pI0 = Plot(fArea, style="interpolate", grade=0)
 expect(pI0.displaylist.count() == 0, "interpolate grade=0 skips faces")
 
@@ -66,8 +66,8 @@ expect(pI0.displaylist.count() == 0, "interpolate grade=0 skips faces")
 var s = Selection(am)
 s.addgrade(2)
 var pSel = Plot(s)
-if (pSel.entries.contains("faces")) {
-  expect(pSel.findEntry(pSel.entries["faces"][0]).flat == true, "selection faces flat")
+if (pSel._entries.contains("faces")) {
+  expect(pSel.findEntry(pSel._entries["faces"][0]).flat == true, "selection faces flat")
 }
 
 print "ok"

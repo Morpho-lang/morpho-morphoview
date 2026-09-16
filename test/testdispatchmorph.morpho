@@ -90,7 +90,7 @@ checkMorph(ts, idT, "TestScene")
 /* ---- Plot ---- */
 var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
 var p = Plot(Field(am, fn (x, y, z) z), style="interpolate")
-expect(p.entries.contains("faces") && p.entries["faces"].count() == 1, "Plot has faces")
+expect(p._entries.contains("faces") && p._entries["faces"].count() == 1, "Plot has faces")
 var capP = listenBuf(p)
 var vP = capP[0]
 var bufP = capP[1]

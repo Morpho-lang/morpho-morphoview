@@ -1,5 +1,5 @@
 [comment]: # (MorphoView package help)
-[version]: # (0.6)
+[version]: # (0.7)
 
 # MorphoView
 [tagmorphoview]: # (morphoview)
@@ -25,6 +25,8 @@ There are two ways to display graphics. Static `Show` serializes with `GraphicsS
     v.wait()
 
 Requires `morpho-zeromq` package. Low-level viewer ASCII commands are documented in the package `docs/commandapi.md`.
+
+`MorphoViewFinder` locates the `morphoview` binary. `find()` returns its path; `version()` runs `morphoview -v` and returns `{ "version": "0.7.0", "protocol": 2 }`, or `nil` if the binary does not report a version.
 
 [showsubtopics]: # (subtopics)
 

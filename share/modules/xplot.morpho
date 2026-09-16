@@ -44,6 +44,17 @@ fn _boundsLoHi(bnds) { // Lower and upper corners as 3-vectors, plus how many ax
   return (lo, hi, dim)
 }
 
+fn _boundsEqual(a, b) { // Same axis count and lo/hi, within a tight tolerance
+  if (isnil(a) && isnil(b)) return true
+  if (isnil(a) || isnil(b)) return false
+  if (a.count() != b.count()) return false
+  for (i in 0...a.count()) {
+    if (abs(a[i][0] - b[i][0]) > 1e-12) return false
+    if (abs(a[i][1] - b[i][1]) > 1e-12) return false
+  }
+  return true
+}
+
 fn _planarAxis(bb) { // Which axis has zero width, or nil if none
   for (x, i in bb) {
     if (abs(x[1]-x[0])<1e-10) return i
@@ -771,7 +782,7 @@ class Plot is Scene {
   _setup(source, title=nil, background=nil, axes=false, scalebar=false) { // Set up the Plot from the source object
     super.init(title=title, background=background)
     self.source = source
-    self.entries = Dictionary()
+    self._entries = Dictionary()
     self.bounds = nil
     self.wantAxes = axes
     if (isbool(scalebar)) {
@@ -802,16 +813,16 @@ class Plot is Scene {
 
   _recordEntry(role, id) { // Remember this graphics id (points, lines, faces, axes, or scalebar)
     if (isnil(id)) return
-    if (!self.entries.contains(role)) self.entries[role] = []
-    self.entries[role].append(id)
+    if (!self._entries.contains(role)) self._entries[role] = []
+    self._entries[role].append(id)
   }
 
   _clearRole(role) { // Remove every graphics entry stored under this name
-    if (!self.entries.contains(role)) return
+    if (!self._entries.contains(role)) return
     self.beginBatch()
-    for (id in self.entries[role]) self.remove(id)
+    for (id in self._entries[role]) self.remove(id)
     self.endBatch()
-    self.entries.remove(role)
+    self._entries.remove(role)
   }
 
   _drawAxes(nticks=5) { // Draw the bounding-box outline and axis labels
@@ -823,7 +834,7 @@ class Plot is Scene {
   }
 
   _drawScalebar() { // Draw the colormap legend
-    if (self.entries.contains("scalebar")) return
+    if (self._entries.contains("scalebar")) return
     if (isnil(self.colormap) || isnil(self.cmin) || isnil(self.cmax)) return
 
     var bar = self.scaleBar
@@ -858,7 +869,7 @@ class Plot is Scene {
   axes(show) { // Show or hide the bounding-box outline
     if (show) {
       self.wantAxes = true
-      if (!self.entries.contains("axes")) self._drawAxes()
+      if (!self._entries.contains("axes")) self._drawAxes()
     } else {
       self.wantAxes = false
       self._clearRole("axes")
@@ -869,7 +880,7 @@ class Plot is Scene {
   scalebar(Bool show) { // Show or hide the colormap legend
     if (show) {
       self.wantScalebar = true
-      if (!self.entries.contains("scalebar")) self._drawScalebar()
+      if (!self._entries.contains("scalebar")) self._drawScalebar()
     } else {
       self.wantScalebar = false
       self._clearRole("scalebar")
@@ -887,7 +898,9 @@ class Plot is Scene {
   _rebuildField() { // Rebuild the field plot from the current source
     if (!isfield(self.source)) return false
 
-    var hadScalebar = self.entries.contains("scalebar") || self.wantScalebar
+    var hadScalebar = self._entries.contains("scalebar") || self.wantScalebar
+    var hadAxes = self._entries.contains("axes") || self.wantAxes
+    var oldBounds = self.bounds
     var info = _fieldColors(self.source, selection=self.selection, grade=self.grade,
                             colormap=self.colormap, style=self.style, scale=self.scale,
                             cmin=self.cmin, cmax=self.cmax, center=self.center)
@@ -897,8 +910,8 @@ class Plot is Scene {
     self.cmax = bnd[1]
 
     var fast = _styleHas(self.style, "interpolate") &&
-        self.entries.contains("faces") && self.entries["faces"].count() == 1 &&
-        !self.entries.contains("points") && !self.entries.contains("lines")
+        self._entries.contains("faces") && self._entries["faces"].count() == 1 &&
+        !self._entries.contains("points") && !self._entries.contains("lines")
 
     self.beginBatch()
 
@@ -909,7 +922,7 @@ class Plot is Scene {
       var planar = _planarAxis(bb)
       var got = self._facesItem(mesh, sel, col,
                                 vertMat, bb, planar, style=self.style)
-      if (isnil(got) || !self.morph(self.entries["faces"][0], got[0])) {
+      if (isnil(got) || !self.morph(self._entries["faces"][0], got[0])) {
         self.endBatch()
         return false
       }
@@ -919,6 +932,11 @@ class Plot is Scene {
       self._clearRole("faces")
       self._meshInto(mesh, selection=sel, grade=showgrades, color=col,
                      style=self.style)
+    }
+
+    if (hadAxes && !_boundsEqual(oldBounds, self.bounds)) {
+      self._clearRole("axes")
+      self._drawAxes()
     }
 
     if (hadScalebar) {
