@@ -26,7 +26,7 @@ There are two ways to display graphics. Static `Show` serializes with `GraphicsS
 
 Requires `morpho-zeromq` package. Low-level viewer ASCII commands are documented in the package `docs/commandapi.md`.
 
-`MorphoViewFinder` locates the `morphoview` binary. `find()` returns its path; `version()` runs `morphoview -v` and returns `{ "version": "0.7.0", "protocol": 2 }`, or `nil` if the binary does not report a version.
+`MorphoViewFinder` locates the `morphoview` binary. `find()` returns its path; `version()` runs `morphoview -v` and returns `{ "version": "0.7.0", "protocol": 2 }`, or `nil` if the binary does not report a version. `Show` and `View` require a versioned binary (`MvOld` if `-v` is missing).
 
 [showsubtopics]: # (subtopics)
 

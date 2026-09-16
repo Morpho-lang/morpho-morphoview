@@ -16,5 +16,6 @@ var v = MorphoViewFinder().version()
 expect(!isnil(v), "version() is nil (rebuild morphoview?)")
 expect(v["version"] == "0.7.0", "version string")
 expect(v["protocol"] == 2, "protocol")
+expect(!isnil(findMorphoViewBin()), "findMorphoViewBin requires a versioned binary")
 
 print "ok"

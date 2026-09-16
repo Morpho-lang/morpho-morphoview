@@ -21,6 +21,7 @@ import morphoviewclient
 
 // Error messages
 var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command); please upgrade morphopm.")
+var _mvold = Error("MvOld", "morphoview is too old; please rebuild or upgrade morphoview.")
 
 /* ----------------------------------------------------------------
  * MorphoViewFinder
@@ -140,7 +141,11 @@ class MorphoViewFinder {
 
 var _mvfinder = MorphoViewFinder()
 
-fn findMorphoViewBin() { return _mvfinder.find() } // Path to the morphoview executable
+fn findMorphoViewBin() { // Path to the morphoview executable
+  var bin = _mvfinder.find()
+  if (isnil(_mvfinder.version())) _mvold.throw()
+  return bin
+}
 
 /* ----------------------------------------------------------------
  * Show
