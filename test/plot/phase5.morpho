@@ -164,7 +164,7 @@ fn axesWireZHi(plot) {
   return bounds(pos[2, 0...n])[1]
 }
 
-/* ---- deforming Field rebuilds axes to match new bounds ---- */
+/* ---- deforming Field: axes expand with bounds, then hold the envelope ---- */
 var amB = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
 var pBounds = Plot(Field(amB, fn (x, y, z) z), style="interpolate", axes=true)
 expect(pBounds._entries.contains("axes"), "axes at construct")
@@ -185,5 +185,15 @@ expect(pBounds._entries.contains("axes"), "axes still present")
 expect(pBounds._entries["axes"].count() == nAxes, "same number of axes entries")
 expect(pBounds._entries["axes"][0] != axesId0, "axes rebuilt")
 expect(axesWireZHi(pBounds) > wireZ0 + 1, "axes frame tracks new extent")
+
+var axesId1 = pBounds._entries["axes"][0]
+var wireZ1 = axesWireZHi(pBounds)
+for (i in 0...vert.dimensions()[1]) vert[2, i] = 0
+amB.setvertexmatrix(vert)
+pBounds.source = Field(amB, fn (x, y, z) z)
+expect(pBounds.refresh(), "refresh after shrink")
+expect(pBounds.bounds[2][1] < 0.5, "geometry bounds shrink")
+expect(pBounds._entries["axes"][0] == axesId1, "axes keep expanded frame")
+expect(axesWireZHi(pBounds) > wireZ1 - 0.1, "axes do not retract")
 
 print "ok"

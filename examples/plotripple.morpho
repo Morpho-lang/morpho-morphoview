@@ -40,11 +40,15 @@ fn heightField(mesh) { // Field of vertex z (sampled once at construction)
 var mesh = AreaMesh(fn (u, v) [u, v, 0], -1.5..1.5:0.1, -1.5..1.5:0.1)
 applyWave(mesh, 0)
 
+var zHi = 0.8 // packet+sheet; Plot axes expand but do not retract
 var p = Plot(heightField(mesh), style="interpolate", colormap=maps[0],
              cmin=-0.7, cmax=0.7,
              axes=true,
              title="Plot ripple (Viridis)",
              background=Color(0.08, 0.09, 0.11))
+p.axesBounds = [p.bounds[0], p.bounds[1], (-zHi, zHi)]
+p.axes(false) // redraw the frame at the pinned z range
+p.axes(true)
 
 var v = View(p, connecttimeout=20000)
 var t = 0.0
