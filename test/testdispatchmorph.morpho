@@ -6,7 +6,7 @@
 import morphoview
 import graphics
 import meshtools
-import xplot
+import plot
 import color
 
 fn expect(cond, msg) {

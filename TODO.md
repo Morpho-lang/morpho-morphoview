@@ -15,14 +15,15 @@ Do **not** make `update(Graphics)` automatically incremental. Keep `U S` as the 
 
 ## Backlog
 
-### Upstream (package work is done; still to land in morpho)
+### Upstream (morpho)
 
-- [x] Push graphics to morpho (`graphics`); still to land: [`xshow.morpho`](share/modules/xshow.morpho) / [`xfonts.morpho`](share/modules/xfonts.morpho) as `show` / `fonts`
+- [x] Push graphics to morpho (`graphics`)
+- [x] Push fonts to morpho (`fonts`); Show/View stay in this package
 - [x] Push color to morpho (`Color` alpha, `Coloring`, `ColorTable`, ColorMap ≠ Color)
-- [ ] Push [`xplot.morpho`](share/modules/xplot.morpho) to morpho `plot` (dogfood this package first)
-- [X] Keep core `graphics.morpho` free of `meshtools` (UV sphere in graphics; examples like soapbubble may still `import meshtools`)
+- [x] Push xplot to morpho `plot`
+- [x] Keep core `graphics.morpho` free of `meshtools` (UV sphere in graphics; examples like soapbubble may still `import meshtools`)
+- [x] `String.join(list, sep)` — View already joins `cmdLines` in one call
 - [ ] Move `meshtools` (and heavy mesh pipeline) to an extension in morpho
-- [ ] Faster String.join(list, sep) (or List.join) so Show/View stop pairwise-merging and += loops.
 
 ### This package
 
@@ -46,20 +47,14 @@ Returned on the ZMQ PAIR and consumed by `View.poll`:
 ## Done in this package
 
 - [x] Live Graphics/Scene/View through Text draw-slots: stable ids, define vs draw, Broadcaster listeners, selective pose redraw, unit Sphere/Cylinder/Arrow mesh cache, `U O` / `U V` / `X O` / `X D`, materials/lighting/opacity, framing/auto-fit, ZMQ `View` session API, yardsticks (`boing`, `nbody`, `soapbubble`, `vectors`, `flyingtext`)
-- [x] Graphics compactification: `GraphicsEntry.effectiveColor()`, primitive color never nil, uniform color via draw-slot `C`, `_ViewerSlot` serializer bookkeeping, `TriangleComplex.faceIndices`, modules `xfonts` / `xshow` split out of `xgraphics`
+- [x] Graphics compactification: `GraphicsEntry.effectiveColor()`, primitive color never nil, uniform color via draw-slot `C`, `_ViewerSlot` serializer bookkeeping, `TriangleComplex.faceIndices`; fonts/Show split out of graphics
 - [x] Local UV-sphere tessellation (no meshtools in graphics)
 - [x] `color`: `Color(r,g,b)` / `Color(r,g,b,a)`, `Coloring`, `ColorTable` RGB/RGBA, ColorMap ≠ Color, Show via Coloring MD
-- [x] `xplot` Phases 1–5: `Plot is Scene`, bulk primitives, axes/`ScaleBar`/`ScaleBarStrip`, normalize/`center=`, live `axes`/`colormap`/`range`/`center`/`refresh(view)`
+- [x] `plot` (was xplot) Phases 1–5: `Plot is Scene`, bulk primitives, axes/`ScaleBar`/`ScaleBarStrip`, normalize/`center=`, live `axes`/`colormap`/`range`/`center`/`refresh`
 - [x] Per-vertex alpha: format letter `a`; Show emits `xnca`/`xca` for RGBA ColorTables. Uniform `Color.a` still uses `C`. Transparent sort remains object-centroid.
 
-## Compatibility shims — remove after the migration window
+## Compatibility shims
 
-Tagged `// [Compatibility shim]` in source. Delete the whole group in one pass when callers have moved:
+Filter/transmit, plot veneers, POVRaytracer camera fields, `ColorTable.column`, and ScaleBar `getfontsize` / `drawbar` / `drawlabel` now live in morpho (`graphics` / `plot` / `color` / `povray`). Remaining in this package:
 
-- primitive `filter=` / `transmit=` constructor kwargs
-- `_legacyAlpha` / `_legacyOpacity` / `withLegacyTransp` (and xplot veneer transparency paths)
-- `plotmesh` / `plotselection` / `plotfield` legacy transparency
-- `POVRaytracer` mirrored camera fields (`viewpoint`, `viewangle`, …)
-- `ColorTable.column`
-- ScaleBar `getfontsize` / `drawbar` / `drawlabel`
 - PATH fallback in `findMorphoViewBin` (bare `morphoview`)

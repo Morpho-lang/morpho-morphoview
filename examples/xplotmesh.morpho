@@ -10,7 +10,7 @@
 
 import morphoview
 import meshtools
-import xplot
+import plot
 import color
 
 var n = 40

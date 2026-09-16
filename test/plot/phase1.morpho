@@ -4,7 +4,7 @@
 //   morpho6 test/plot/phase1.morpho
 
 import meshtools
-import xplot
+import plot
 import color
 
 fn expect(cond, msg) {

@@ -9,7 +9,7 @@
 
 import morphoview
 import meshtools
-import xplot
+import plot
 import color
 
 var dt = 1/60

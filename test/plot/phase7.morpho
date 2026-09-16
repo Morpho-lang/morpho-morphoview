@@ -6,7 +6,7 @@
 //   morpho6 test/plot/phase7.morpho
 
 import implicitmesh
-import xplot
+import plot
 
 fn expect(cond, msg) {
   if (!cond) {

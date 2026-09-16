@@ -8,7 +8,7 @@
 
 import morphoview
 import meshtools
-import xplot
+import plot
 import color
 
 var m = AreaMesh(fn (u, v) [u, v, 0.15*sin(3*u)*cos(2*v)],
