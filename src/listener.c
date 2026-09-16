@@ -81,13 +81,14 @@ static void reply_clear(void) {
  * ------------------------------------------------------- */
 
 static MorphoThread listener_thread;
-static volatile bool listener_running = false;
-static volatile bool listener_stop_requested = false;
+static bool listener_thread_created = false; /* control thread: join/clear still owed */
+static bool listener_running = false;
+static bool listener_stop_requested = false;
 static char *listener_endpoint = NULL;
 static bool listener_do_bind = false; /* true = bind, false = connect */
 
 bool listener_isactive(void) {
-    return listener_running;
+    return MorphoAtomic_loadbool(&listener_running);
 }
 
 bool listener_reply(const char *msg) {
@@ -114,7 +115,7 @@ static MorphoThreadFnReturnType listener_thread_main(void *arg) {
     zsock_t *sock = zsock_new(ZMQ_PAIR);
     if (!sock) {
         fprintf(stderr, "morphoview: Could not create ZMQ PAIR socket.\n");
-        listener_running = false;
+        MorphoAtomic_storebool(&listener_running, false);
         return (MorphoThreadFnReturnType) NULL;
     }
 
@@ -129,14 +130,14 @@ static MorphoThreadFnReturnType listener_thread_main(void *arg) {
         fprintf(stderr, "morphoview: Could not %s ZMQ endpoint '%s'.\n",
                 listener_do_bind ? "bind" : "connect", listener_endpoint);
         zsock_destroy(&sock);
-        listener_running = false;
+        MorphoAtomic_storebool(&listener_running, false);
         command_wake();
         return (MorphoThreadFnReturnType) NULL;
     }
 
     zsock_set_rcvtimeo(sock, 100); /* ms — allows stop checks + reply processing */
 
-    while (!listener_stop_requested) {
+    while (!MorphoAtomic_loadbool(&listener_stop_requested)) {
         listener_process_replies(sock);
 
         char *msg = zstr_recv(sock);
@@ -160,7 +161,7 @@ static MorphoThreadFnReturnType listener_thread_main(void *arg) {
             varray_charclear(&buf);
             /* View kills the session on err; stop the I/O loop so display_loop can
              * exit without waiting for SIGTERM (GLFW often ignores it). */
-            listener_stop_requested = true;
+            MorphoAtomic_storebool(&listener_stop_requested, true);
             command_wake();
         }
         error_clear(&err);
@@ -169,14 +170,14 @@ static MorphoThreadFnReturnType listener_thread_main(void *arg) {
 
     listener_process_replies(sock);
     zsock_destroy(&sock);
-    listener_running = false;
+    MorphoAtomic_storebool(&listener_running, false);
     command_wake();
     return (MorphoThreadFnReturnType) NULL;
 }
 
 /** Start the I/O thread; do_bind selects bind vs connect. */
 static bool listener_start(const char *endpoint, bool do_bind) {
-    if (listener_running) {
+    if (MorphoAtomic_loadbool(&listener_running) || listener_thread_created) {
         fprintf(stderr, "morphoview: Listener already active.\n");
         return false;
     }
@@ -190,17 +191,18 @@ static bool listener_start(const char *endpoint, bool do_bind) {
     if (!listener_endpoint) return false;
 
     listener_do_bind = do_bind;
-    listener_stop_requested = false;
-    listener_running = true;
+    MorphoAtomic_storebool(&listener_stop_requested, false);
+    MorphoAtomic_storebool(&listener_running, true);
 
     if (!MorphoThread_create(&listener_thread, listener_thread_main, NULL)) {
         fprintf(stderr, "morphoview: Could not start listener thread.\n");
-        listener_running = false;
+        MorphoAtomic_storebool(&listener_running, false);
         MORPHO_FREE(listener_endpoint);
         listener_endpoint = NULL;
         return false;
     }
 
+    listener_thread_created = true;
     return true;
 }
 
@@ -213,22 +215,18 @@ bool listener_connect(const char *endpoint) {
 }
 
 void listener_stop(void) {
-    if (!listener_running && !listener_stop_requested) {
-        reply_clear();
-        if (listener_endpoint) MORPHO_FREE(listener_endpoint);
-        listener_endpoint = NULL;
-        return;
-    }
-
-    listener_stop_requested = true;
-    if (listener_running) {
+    MorphoAtomic_storebool(&listener_stop_requested, true);
+    if (listener_thread_created) {
         MorphoThread_join(listener_thread);
         MorphoThread_clear(listener_thread);
+        listener_thread_created = false;
     }
-    listener_running = false;
+    MorphoAtomic_storebool(&listener_running, false);
     reply_clear();
-    if (listener_endpoint) MORPHO_FREE(listener_endpoint);
-    listener_endpoint = NULL;
+    if (listener_endpoint) {
+        MORPHO_FREE(listener_endpoint);
+        listener_endpoint = NULL;
+    }
 }
 
 void listener_initialize(void) {
