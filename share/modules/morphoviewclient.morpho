@@ -1,12 +1,11 @@
 /* ***************************************************************
  * MorphoViewClient
  * ================
- * Abstract classes to support launching morphoview viewer sessions.
+ * Abstract, transport-neutral classes to support viewer sessions.
  **************************************************************** */
 
 import graphicsserializer
 import broadcast
-import zeromq
 import graphics
 
 // Error messages
@@ -37,48 +36,6 @@ class MorphoViewShow {
 }
 
 /* ----------------------------------------------------------------
- * ZMQPairTransportMixin
- *
- * Generic transport: bind, send, poll, receive, and close.
- * This implementation uses a ZeroMQ PAIR socket.
- * ---------------------------------------------------------------- */
-
-class ZMQPairTransportMixin {
-  _transportInit() { // Empty transport
-    self._zmqSocket = nil
-    self._zmqPoller = nil
-    self._zmqEndpoint = nil
-  }
-
-  _transportBind(address="tcp://127.0.0.1:!") { // Bind a local PAIR socket
-    self._zmqSocket = ZMQPair()
-    self._zmqSocket.bind(address)
-    self._zmqEndpoint = self._zmqSocket.endpoint()
-    self._zmqPoller = ZMQPoller(self._zmqSocket)
-  }
-
-  _transportReady() { return !isnil(self._zmqSocket) } // Is the transport bound?
-
-  _transportEndpoint() { return self._zmqEndpoint } // Connection endpoint
-
-  _transportSend(message) { self._zmqSocket.send(message) } // Send a message
-
-  _transportPoll(timeoutms) { // Wait for a message
-    if (isnil(self._zmqPoller)) return false
-    return self._zmqPoller.wait(timeoutms)
-  }
-
-  _transportReceive() { return self._zmqSocket.receive() } // Receive a message
-
-  _transportClose() { // Unbind and drop the socket
-    if (!isnil(self._zmqSocket)) self._zmqSocket.unbind()
-    self._zmqSocket = nil
-    self._zmqPoller = nil
-    self._zmqEndpoint = nil
-  }
-}
-
-/* ----------------------------------------------------------------
  * MorphoViewView
  *
  * Template for an interactive viewer session.
@@ -92,10 +49,12 @@ class ZMQPairTransportMixin {
  *    v.wait(sessiontimeout=1500)    // wait for the session to close
  *    v.close()                      // close the session
  * 
- * Subclasses must provide _spawn and _kill methods.
+ * Subclasses must provide _spawn and _kill, and a transport mixin
+ * that implements _transportInit / Bind / Ready / Endpoint / Send /
+ * Poll / Receive / Close.
  * ---------------------------------------------------------------- */
 
-class MorphoViewView with Listener, ZMQPairTransportMixin {
+class MorphoViewView with Listener {
   init(connecttimeout=5000, pollms=100) {
     self.connecttimeout = connecttimeout
     self.pollms = pollms
