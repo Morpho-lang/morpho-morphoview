@@ -1,0 +1,105 @@
+// View morph dispatch: Scene, a trivial Scene subclass, and Plot.
+// Headless (Buf sink, no viewer). Expect: prints "ok" then exits.
+//
+//   morpho6 test/testdispatchmorph.morpho
+
+import morphoview
+import graphics
+import meshtools
+import xplot
+import color
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn tri() {
+  return TriangleComplex(
+    Matrix([[-0.5, 0.5, 0], [-0.5, -0.5, 0.5], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Matrix([[1, 1, 1], [0.4, 0.4, 0.4], [0.1, 0.1, 0.1]]),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn triZ(z) {
+  return TriangleComplex(
+    Matrix([[-0.5, 0.5, 0], [-0.5, -0.5, 0.5], [0, 0, z]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Matrix([[1, 1, 1], [0.4, 0.4, 0.4], [0.1, 0.1, 0.1]]),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+class TestScene is Scene { }
+
+fn listenBuf(g) {
+  var buf = Buf()
+  var ser = SceneSerializer(g, buf)
+  ser.serialize()
+  var v = View()
+  v.closed = false
+  v.graphics = g
+  v.serializer = ser
+  v.listen(g)
+  buf.lines = []
+  return (v, buf)
+}
+
+fn checkMorph(g, id, label) {
+  var cap = listenBuf(g)
+  var v = cap[0]
+  var buf = cap[1]
+  expect(g.morph(id, triZ(0.5)), "${label} morph ok")
+  expect(countPrefix(buf.lines, "U V") == 1, "${label} -> View handles Morphed")
+  v.ignore(g)
+}
+
+/* ---- Scene ---- */
+var g = Scene()
+var id = g.display(tri())
+checkMorph(g, id, "Scene")
+
+/* ---- trivial Scene subclass (isolates dispatch from Plot) ---- */
+var ts = TestScene()
+var idT = ts.display(tri())
+checkMorph(ts, idT, "TestScene")
+
+/* ---- Plot ---- */
+var am = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
+var p = Plot(Field(am, fn (x, y, z) z), style="interpolate")
+expect(p.entries.contains("faces") && p.entries["faces"].count() == 1, "Plot has faces")
+var capP = listenBuf(p)
+var vP = capP[0]
+var bufP = capP[1]
+var vert = am.vertexmatrix().clone()
+for (i in 0...vert.dimensions()[1]) vert[2, i] = 1
+am.setvertexmatrix(vert)
+p.source = Field(am, fn (x, y, z) z)
+expect(p.refresh(), "Plot.refresh")
+expect(countPrefix(bufP.lines, "U V") == 1, "Plot -> View handles Morphed")
+vP.ignore(p)
+
+print "ok"

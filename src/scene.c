@@ -454,13 +454,19 @@ bool scene_deletedraw(scene *s, int drawid) {
     return true;
 }
 
-/** Overwrite vertex floats in place; requires same length. */
+/** Overwrite vertex floats. Same length memcpy's in place; otherwise appends. */
 bool scene_replacevertices(scene *s, int id, const float *data, int n) {
     gobject *obj = scene_getgobjectfromid(s, id);
     if (!s || !obj || !data || n <= 0) return false;
-    if (obj->vertexdata.indx == SCENE_EMPTY || obj->vertexdata.length != n)
-        return false;
-    memcpy(&s->data.data[obj->vertexdata.indx], data, sizeof(float) * (size_t) n);
+    if (obj->vertexdata.indx != SCENE_EMPTY && obj->vertexdata.length == n) {
+        memcpy(&s->data.data[obj->vertexdata.indx], data, sizeof(float) * (size_t) n);
+        obj->centroid_valid = false;
+        return true;
+    }
+    int indx = scene_adddata(s, (float *) data, n);
+    if (indx < 0) return false;
+    obj->vertexdata.indx = indx;
+    obj->vertexdata.length = n;
     obj->centroid_valid = false;
     return true;
 }

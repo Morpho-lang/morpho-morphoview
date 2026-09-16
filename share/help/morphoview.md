@@ -50,23 +50,23 @@ Open immediately from a `Graphics` or `Scene`:
 
     var v = View(g)              // throws on failure
     var v = View()
-    v.open(g)                    // or an ASCII command string
+    v.open(g)
+    v.open(commands)             // raw morphoview protocol
 
 View makes use of the `Listener` protocol to track changes in a `Scene`.  
 
 ### Methods
 
-* `open(commands)` / `open(Graphics)` / `open(Scene)` — bind, spawn viewer, send first chunk, wait for `ok`. Parse failures come back as `err` plus a line/char message; `lastErr` holds the reportable string. The `View(g)` constructor throws `VwOpnFl` with that detail.
-* `update(commands)` / `update(Graphics)` / `update(Scene)` — send another chunk (`Graphics` uses full `U S` replace)
-* `morph(id, item)` — update the item in place when the vertex layout matches; otherwise replace
-* `refreshMesh(id)` — redefine viewer geometry from the current model
-* `redraw(commands)` — clear draws (`D`) and re-issue draw ASCII (tests / escape hatch)
+* `open(Graphics)` / `open(Scene)` — bind, spawn viewer, serialize the model, wait for `ok`. Parse failures come back as `err` plus a line/char message; `lastErr` holds the reportable string. The `View(g)` constructor throws `VwOpnFl` with that detail.
+* `open(String commands)` — same session setup, but send raw morphoview protocol (see `docs/commandapi.md`)
+* `update(Graphics)` / `update(Scene)` — replace the displayed model (`Graphics` uses full `U S` replace)
+* `update(String commands)` — send a raw protocol chunk to an open viewer
 * `write(line)` — File-compatible sink for `Show.write`
 * `poll(timeoutms=0)` — one reply, or `nil` on timeout
 * `wait(sessiontimeout=0)` — spin until the window closes (0 = forever)
 * `close()` — send `Q`, wait for `window.closed`; idempotent
 
-Occasional full refresh uses `update(Graphics)`. Efficient animation uses a `Scene` and `g.move` after `View(g)`.
+Occasional full refresh uses `update(Graphics)`. Efficient animation uses a `Scene` and `scene.move` / `scene.morph` after `View(scene)`.
 
 ## Graphics
 [tagGraphics]: # (Graphics)
@@ -117,7 +117,7 @@ A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (
 * `recolor(id, color)` — set presentation color; `recolor(id, nil)` clears the override
 * `remove(id)` — remove the entry
 * `replace(id, item)` — swap the item; entry pose/color/flat are kept
-* `morph(id, item)` — same-length mesh swap; `View.morph` uses `U V` when the vertex layout matches
+* `morph(id, item)` — same-length mesh swap; a listening `View` uses `U V` when the vertex layout matches
 * `setLights(...)` / `addLight(...)` / `resetLights()` — replace the whole lighting, append a world-space `Light` (or position/`color=`/`intensity=`), or restore Neutral; live `View` sends `L`
 * `beginBatch()` / `endBatch()` — coalesce Moved/Recolored/Lights notifies (via Broadcaster)
 

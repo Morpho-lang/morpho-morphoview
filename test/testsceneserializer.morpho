@@ -811,20 +811,4 @@ expect(!serIns.caches.contains(SphereSerializerMixin), "inspect did not create a
 expect(!serIns.caches.contains(CylinderSerializerMixin), "inspect did not create cylinder cache")
 expect(!serIns.caches.contains(ArrowSerializerMixin), "inspect did not create arrow cache")
 
-/* ---- refreshMesh is full replace, never U V ---- */
-var gRf = Scene()
-var rfId = gRf.display(xnMesh())
-var bufRf = Buf()
-var vRf = View()
-vRf.closed = false
-vRf.graphics = gRf
-var serRf = SceneSerializer(gRf, bufRf)
-serRf.serialize()
-vRf.serializer = serRf
-bufRf.lines = []
-expect(!vRf.refreshMesh(rfId), "refreshMesh send fails without a socket")
-expect(countPrefix(bufRf.lines, "U V") == 0, "refreshMesh does not emit U V")
-expect(countPrefix(bufRf.lines, "X D") == 1, "refreshMesh removes the draw")
-expect(countPrefix(bufRf.lines, "o ") == 1, "refreshMesh redefines")
-
 print "ok"

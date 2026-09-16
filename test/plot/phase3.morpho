@@ -14,7 +14,7 @@ fn expect(cond, msg) {
   }
 }
 
-/* ---- scientific bounds from mesh dimensionality ---- */
+/* ---- vertex bounds follow mesh dimension ---- */
 var m2 = LineMesh(fn (t) [cos(t), sin(t)], 0...2*Pi:Pi/6, closed=true)
 var p2 = Plot(m2, color=Red)
 expect(!isnil(p2.bounds), "2D mesh stores bounds")

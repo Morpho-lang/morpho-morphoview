@@ -84,11 +84,10 @@ class ZMQPairTransportMixin {
  * Template for an interactive viewer session.
  *
  *    var v = View(scene)            // Open and connect
- *    v.open(commands)               // Open with commands
+ *    v.open(commands)               // raw morphoview protocol
  *    scene.move(id, ...)            // move item id
  *    scene.recolor(id, ...)         // recolor item id
- *    v.morph(id, item)              // update item id in place
- *    v.refreshMesh(id)              // redefine from the model
+ *    scene.morph(id, item)          // morph item id
  *    v.poll(timeoutms=0)            // poll for messages
  *    v.wait(sessiontimeout=1500)    // wait for the session to close
  *    v.close()                      // close the session
@@ -107,6 +106,14 @@ class MorphoViewView with Listener, ZMQPairTransportMixin {
     self.cmdLines = []
     self.graphics = nil
     self.serializer = nil
+  }
+
+  init(Scene g, connecttimeout=5000, pollms=100) { // Open a scene and listen
+    self.init(connecttimeout=connecttimeout, pollms=pollms)
+    if (!self.open(g)) {
+      if (!isnil(self.lastErr)) _vwopnfl.throw(self.lastErr)
+      else _vwopnfl.throw()
+    }
   }
 
   init(Graphics g, connecttimeout=5000, pollms=100) { // Open a graphic in morphoview
@@ -140,7 +147,7 @@ class MorphoViewView with Listener, ZMQPairTransportMixin {
     return self._waitOk()
   }
 
-  open(String commands) { // Open a morphoview session
+  open(String commands) { // Open a session with raw morphoview protocol
     if (self._transportReady()) {
       _vwalrdy.warning()
       return false
@@ -160,7 +167,7 @@ class MorphoViewView with Listener, ZMQPairTransportMixin {
     return ok
   }
 
-  update(String commands) { // Send commands to an open viewer
+  update(String commands) { // Send raw morphoview protocol to an open viewer
     if (self.closed) return false
     return self._sendWait(commands)
   }
@@ -199,61 +206,76 @@ class MorphoViewView with Listener, ZMQPairTransportMixin {
   _detach(Graphics g) { }
   _detach(Scene g) { self.ignore(g) } // Stop listening to this Scene
 
-  redraw(commands) { // Force a redraw
-    if (self.closed) return false
-    var body = commands
-    if (isnil(body)) body = ""
-    if (body.count() == 0 || body[0] != "D") body = "D\n${body}"
-    return self._sendWait(body)
-  }
-
   _live() { // Is the viewer still connected?
     self._process()
     return !self.closed && !isnil(self.serializer)
   }
 
-  _ids(ev) { // Ids from this event
-    if (isnil(ev.ids) || ev.ids.count() == 0) return [ev.id]
-    return ev.ids
+  receive(sender, ev) { // Sender untyped: Plot and other Scene subclasses must match
+    if (!self._live()) return
+    self._receive(ev)
   }
 
-  receive(Graphics g, GraphicsEventDefined ev) {
-    if (!self._live()) return
-    var entry = g.findEntry(ev.id)
-    if (isnil(entry)) return
-    self._tryEmit("defined id ${ev.id}", fn () { self.serializer.define(entry) })
+  _receive(GraphicsEventDefined ev) {
+    var g = self.graphics
+    self._tryEmit("defined", fn () {
+      for (id in ev.ids) {
+        var entry = g.findEntry(id)
+        if (isnil(entry)) continue
+        self.serializer.define(entry)
+      }
+    })
   }
 
-  receive(Graphics g, GraphicsEventMoved ev) {
-    if (!self._live()) return
+  _receive(GraphicsEventMoved ev) {
     self._tryEmit("moved", fn () {
-      for (id in self._ids(ev)) self.serializer.pose(id)
+      for (id in ev.ids) self.serializer.pose(id)
     })
   }
 
-  receive(Graphics g, GraphicsEventRecolored ev) {
-    if (!self._live()) return
+  _receive(GraphicsEventRecolored ev) {
     self._tryEmit("recolored", fn () {
-      for (id in self._ids(ev)) self.serializer.recolor(id)
+      for (id in ev.ids) self.serializer.recolor(id)
     })
   }
 
-  receive(Graphics g, GraphicsEventLights ev) {
-    if (!self._live()) return
+  _receive(GraphicsEventLights ev) {
     self._tryEmit("lights", fn () { self.serializer.lights(reset=true) })
   }
 
-  receive(Graphics g, GraphicsEventRemoved ev) {
-    if (!self._live()) return
-    self._tryEmit("removed id ${ev.id}", fn () { self.serializer.remove(ev.id) })
-  }
-
-  receive(Graphics g, GraphicsEventReplaced ev) {
-    if (!self._live()) return
-    self._tryEmit("replaced id ${ev.id}", fn () {
-      if (!self.serializer.replace(ev.id)) return
+  _receive(GraphicsEventRemoved ev) {
+    self._tryEmit("removed", fn () {
+      for (id in ev.ids) self.serializer.remove(id)
     })
   }
+
+  _receive(GraphicsEventReplaced ev) {
+    var g = self.graphics
+    var ser = self.serializer
+    self._tryEmit("replaced", fn () {
+      for (id in ev.ids) {
+        if (isnil(g.findEntry(id))) continue
+        ser.replace(id)
+      }
+    })
+  }
+
+  _receive(GraphicsEventMorphed ev) {
+    var g = self.graphics
+    var ser = self.serializer
+    self._tryEmit("morphed", fn () {
+      for (id in ev.ids) {
+        if (isnil(g.findEntry(id))) continue
+        var newItem = ev.newItems[id]
+        if (ser.canUpdateVertices(id, ev.oldItems[id], newItem)) {
+          if (ser.updateVertices(id, newItem)) continue
+        }
+        ser.replace(id)
+      }
+    })
+  }
+
+  _receive(ev) { }
 
   _tryEmit(label, emit) { // Emit commands, shutting down on failure
     self.cmdLines = []
@@ -265,54 +287,6 @@ class MorphoViewView with Listener, ZMQPairTransportMixin {
         self._shutdown()
       }
     }
-  }
-
-  _emitAndWait(emit) { // Emit commands and wait for ok
-    self.cmdLines = []
-    emit()
-    if (self.cmdLines.count() == 0) return false
-    return self._sendWait(self._takeCommands())
-  }
-
-  morph(graphicsId, item) { // Update an item, replacing it if the layout changed
-    if (self.closed || isnil(self.graphics) || isnil(self.serializer)) return false
-
-    var g = self.graphics
-    var ser = self.serializer
-    if (!g.respondsto("morph")) return false
-
-    var entry = g.findEntry(graphicsId)
-    if (isnil(entry)) return false
-
-    var prev = entry.item
-    var sameLayout = ser.canUpdateVertices(graphicsId, prev, item)
-    if (!g.morph(graphicsId, item)) return false
-
-    var ok
-    if (sameLayout) {
-      ok = self._emitAndWait(fn () {
-        if (!ser.updateVertices(graphicsId, item)) return
-      })
-    } else {
-      ok = self._emitAndWait(fn () {
-        if (!ser.replace(graphicsId)) return
-      })
-    }
-
-    if (!ok) {
-      g.morph(graphicsId, prev)
-      return false
-    }
-    return true
-  }
-
-  refreshMesh(graphicsId) { // Redefine geometry from the current model
-    if (self.closed || isnil(self.serializer) || isnil(self.graphics)) return false
-    if (isnil(self.graphics.findEntry(graphicsId))) return false
-
-    return self._emitAndWait(fn () {
-      if (!self.serializer.replace(graphicsId)) return
-    })
   }
 
   poll(timeoutms=nil) { // Wait for a viewer message

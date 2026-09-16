@@ -185,7 +185,7 @@ gobject *scene_addobject(scene *s, int id);
 bool scene_clearobject(scene *s, int id);
 bool scene_deleteobject(scene *s, int id);
 bool scene_deletedraw(scene *s, int drawid);
-bool scene_replacevertices(scene *s, int id, const float *data, int n);
+bool scene_replacevertices(scene *s, int id, const float *data, int n); /* same length in-place; else append */
 int scene_adddata(scene *s, float *data, int count);
 int scene_addindex(scene *s, int *data, int count);
 /** Take ownership of *datap; nulls *datap. */

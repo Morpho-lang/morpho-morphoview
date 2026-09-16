@@ -1,4 +1,4 @@
-// View lifecycle: detach on shutdown, fail-closed emit, morph rollback,
+// View lifecycle: detach on shutdown, fail-closed emit,
 // model switch, close/reopen. Live parts need morphoview + display.
 // Expect: prints "ok" then exits.
 //
@@ -17,9 +17,10 @@ class Buf {
 
 class MorphSink with Listener {
   init() { self.n = 0 }
-  receive(g, GraphicsEventReplaced ev) { self.n += 1 }
-  receive(g, GraphicsEventDefined ev) { self.n += 1 }
-  receive(g, GraphicsEventMoved ev) { self.n += 1 }
+  receive(Scene scene, GraphicsEventReplaced ev) { self.n += 1 }
+  receive(Scene scene, GraphicsEventDefined ev) { self.n += 1 }
+  receive(Scene scene, GraphicsEventMoved ev) { self.n += 1 }
+  receive(Scene scene, GraphicsEventMorphed ev) { self.n += 1 }
 }
 
 fn countPrefix(lines, prefix) {
@@ -61,14 +62,18 @@ fn tri2() {
   )
 }
 
-/* ---- _ids coalesces Moved/Recolored ---- */
-var vIds = View()
-var evM = GraphicsEventMoved(3)
-evM.ids = [3, 7]
-var ids = vIds._ids(evM)
-expect(ids.count() == 2 && ids[0] == 3 && ids[1] == 7, "coalesced event.ids")
-var ev1 = GraphicsEventMoved(5)
-expect(vIds._ids(ev1).count() == 1 && vIds._ids(ev1)[0] == 5, "single-id Moved")
+fn listenBuf(g) {
+  var buf = Buf()
+  var ser = SceneSerializer(g, buf)
+  ser.serialize()
+  var v = View()
+  v.closed = false
+  v.graphics = g
+  v.serializer = ser
+  v.listen(g)
+  buf.lines = []
+  return (v, buf, ser)
+}
 
 /* ---- coalesced Moved iterates event.ids (Buf sink, no viewer) ---- */
 var gCo = Scene()
@@ -90,30 +95,139 @@ gCo.endBatch()
 expect(countPrefix(bufCo.lines, "d ") == 2, "coalesced move poses both ids")
 vCo.ignore(gCo)
 
-/* ---- Scene.morph does not notify ---- */
+/* ---- receive(Morphed) emits U V from old→new (Buf sink, no viewer) ---- */
+var gMorphBuf = Scene()
+var idMorphBuf = gMorphBuf.display(tri(), [0, 0, 0])
+var bufMorph = Buf()
+var serMorph = SceneSerializer(gMorphBuf, bufMorph)
+serMorph.serialize()
+var vMorphBuf = View()
+vMorphBuf.closed = false
+vMorphBuf.graphics = gMorphBuf
+vMorphBuf.serializer = serMorph
+vMorphBuf.listen(gMorphBuf)
+bufMorph.lines = []
+var nextMorph = tri2()
+expect(serMorph.canUpdateVertices(idMorphBuf, gMorphBuf.findEntry(idMorphBuf).item, nextMorph),
+       "same-layout U V")
+gMorphBuf.morph(idMorphBuf, nextMorph)
+expect(countPrefix(bufMorph.lines, "U V") == 1, "Morphed listener emits U V")
+vMorphBuf.ignore(gMorphBuf)
+
+/* ---- batched morph of two ids emits both ---- */
+var gAB = Scene()
+var idA = gAB.display(tri(), [0, 0, 0])
+var idB = gAB.display(tri(), [1, 0, 0])
+var ab = listenBuf(gAB)
+var vAB = ab[0]
+var bufAB = ab[1]
+gAB.beginBatch()
+gAB.morph(idA, tri2())
+gAB.morph(idB, tri2())
+gAB.endBatch()
+expect(countPrefix(bufAB.lines, "U V") == 2, "batched morph updates both ids")
+expect(countPrefix(bufAB.lines, "X D") == 0, "same-layout morphs do not replace")
+vAB.ignore(gAB)
+
+/* ---- morph A, morph B, remove A: skip A, still update B ---- */
+var gSkip = Scene()
+var idSkipA = gSkip.display(tri(), [0, 0, 0])
+var idSkipB = gSkip.display(tri(), [1, 0, 0])
+var skip = listenBuf(gSkip)
+var vSkip = skip[0]
+var bufSkip = skip[1]
+gSkip.beginBatch()
+gSkip.morph(idSkipA, tri2())
+gSkip.morph(idSkipB, tri2())
+gSkip.remove(idSkipA)
+gSkip.endBatch()
+expect(isnil(gSkip.findEntry(idSkipA)), "A removed from Scene")
+expect(!isnil(gSkip.findEntry(idSkipB)), "B remains")
+expect(countPrefix(bufSkip.lines, "U V") == 1, "B still receives U V")
+expect(countPrefix(bufSkip.lines, "X D ${idSkipA}") == 1, "A is removed")
+vSkip.ignore(gSkip)
+
+/* ---- inapplicable U V falls back to replace; later id still morphs ---- */
+var gFb = Scene()
+var idFbA = gFb.display(tri(), [0, 0, 0])
+var idFbB = gFb.display(tri(), [1, 0, 0])
+var fb = listenBuf(gFb)
+var vFb = fb[0]
+var bufFb = fb[1]
+var serFb = fb[2]
+var sph = Sphere([0, 0, 0], 1, color=Red)
+expect(!serFb.canUpdateVertices(idFbA, gFb.findEntry(idFbA).item, sph),
+       "TC -> Sphere cannot U V")
+gFb.beginBatch()
+gFb.morph(idFbA, sph)
+gFb.morph(idFbB, tri2())
+gFb.endBatch()
+expect(countPrefix(bufFb.lines, "X D ${idFbA}") == 1, "A falls back to replace")
+expect(countPrefix(bufFb.lines, "U V") == 1, "B still receives U V")
+vFb.ignore(gFb)
+
+/* ---- batched replace of two ids ---- */
+var gRepAB = Scene()
+var idRepA = gRepAB.display(tri(), [0, 0, 0])
+var idRepB = gRepAB.display(tri(), [1, 0, 0])
+var repAB = listenBuf(gRepAB)
+var vRepAB = repAB[0]
+var bufRepAB = repAB[1]
+var serRepAB = repAB[2]
+gRepAB.beginBatch()
+gRepAB.replace(idRepA, tri2())
+gRepAB.replace(idRepB, tri2())
+gRepAB.endBatch()
+expect(countPrefix(bufRepAB.lines, "X D ${idRepA}") == 1, "A replaced")
+expect(countPrefix(bufRepAB.lines, "X D ${idRepB}") == 1, "B replaced")
+expect(serRepAB.objects.contains(idRepA) && serRepAB.objects.contains(idRepB),
+       "both ids still mapped")
+vRepAB.ignore(gRepAB)
+
+/* ---- replace A, replace B, remove A: skip A, still replace B ---- */
+var gRepSkip = Scene()
+var idRSA = gRepSkip.display(tri(), [0, 0, 0])
+var idRSB = gRepSkip.display(tri(), [1, 0, 0])
+var repSkip = listenBuf(gRepSkip)
+var vRepSkip = repSkip[0]
+var bufRepSkip = repSkip[1]
+var serRepSkip = repSkip[2]
+var itemRSB = tri2()
+gRepSkip.beginBatch()
+gRepSkip.replace(idRSA, tri2())
+gRepSkip.replace(idRSB, itemRSB)
+gRepSkip.remove(idRSA)
+gRepSkip.endBatch()
+expect(isnil(gRepSkip.findEntry(idRSA)), "A removed from Scene")
+expect(gRepSkip.findEntry(idRSB).item == itemRSB, "B has final item")
+expect(countPrefix(bufRepSkip.lines, "X D ${idRSA}") == 1, "A removed once")
+expect(countPrefix(bufRepSkip.lines, "X D ${idRSB}") == 1, "B replaced")
+expect(!serRepSkip.objects.contains(idRSA), "A not in serializer")
+expect(serRepSkip.objects.contains(idRSB), "B remains in serializer")
+vRepSkip.ignore(gRepSkip)
+
+/* ---- Scene.morph notifies Morphed ---- */
 var gSilent = Scene()
 var idSilent = gSilent.display(tri(), [0, 0, 0])
 var sink = MorphSink()
 sink.listen(gSilent)
 expect(gSilent.morph(idSilent, tri2()), "Scene.morph succeeds")
-expect(sink.n == 0, "Scene.morph does not notify")
+expect(sink.n == 1, "Scene.morph notifies Morphed")
 expect(gSilent.replace(idSilent, tri()), "Scene.replace succeeds")
-expect(sink.n == 1, "Scene.replace notifies")
+expect(sink.n == 2, "Scene.replace notifies")
 
-/* ---- morph rollback when emit cannot be sent ---- */
+/* ---- Scene.morph; no model rollback if a listener is attached ---- */
 var gRoll = Scene()
 var idRoll = gRoll.display(tri(), [0, 0, 0])
-var prevItem = gRoll.findEntry(idRoll).item
 var nextItem = tri2()
 var vRoll = View()
 vRoll.closed = false
 vRoll.graphics = gRoll
 vRoll.serializer = SceneSerializer(gRoll, vRoll)
-expect(!vRoll.morph(idRoll, nextItem), "morph fails without a socket")
-expect(gRoll.findEntry(idRoll).item == prevItem, "Scene item rolled back")
-expect(gRoll.findEntry(idRoll).item != nextItem, "new item not kept")
+expect(gRoll.morph(idRoll, nextItem), "Scene.morph updates the Scene")
+expect(gRoll.findEntry(idRoll).item == nextItem, "Scene keeps the new item")
 
-/* ---- same-layout U V rollback ---- */
+/* ---- same-layout morph still updates the Scene without a socket ---- */
 var gUV = Scene()
 var idUV = gUV.display(tri(), [0, 0, 0])
 var prevUV = gUV.findEntry(idUV).item
@@ -126,10 +240,10 @@ serUV.serialize()
 vUV.cmdLines = []
 vUV.serializer = serUV
 expect(serUV.canUpdateVertices(idUV, prevUV, nextUV), "mapped same-layout is U V")
-expect(!vUV.morph(idUV, nextUV), "U V morph fails without a socket")
-expect(gUV.findEntry(idUV).item == prevUV, "U V failure rolls Scene item back")
+expect(gUV.morph(idUV, nextUV), "Scene.morph succeeds")
+expect(gUV.findEntry(idUV).item == nextUV, "U V path keeps the new item")
 
-/* ---- layout-changing morph rollback (replace path) ---- */
+/* ---- layout-changing morph still updates the Scene without a socket ---- */
 var gRepFail = Scene()
 var idRepFail = gRepFail.display(tri(), [0, 0, 0])
 var prevRep = gRepFail.findEntry(idRepFail).item
@@ -143,8 +257,8 @@ vRepFail.cmdLines = []
 vRepFail.serializer = serRepFail
 expect(!serRepFail.canUpdateVertices(idRepFail, prevRep, nextRep),
        "TC -> Sphere is replace")
-expect(!vRepFail.morph(idRepFail, nextRep), "replace morph fails without a socket")
-expect(gRepFail.findEntry(idRepFail).item == prevRep, "replace failure rolls Scene item back")
+expect(gRepFail.morph(idRepFail, nextRep), "Scene.morph succeeds")
+expect(gRepFail.findEntry(idRepFail).item == nextRep, "replace path keeps the new item")
 
 /* ---- failed live emit detaches ---- */
 var gFail = Scene()

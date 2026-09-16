@@ -10,6 +10,7 @@
 #include "render.h"
 #include "command.h"
 #include "listener.h"
+#include "platform.h"
 
 /* -------------------------------------------------------
  * Global variables
@@ -380,7 +381,9 @@ void display_loop(void) {
     bool had_displays = (opendisplays != NULL);
 
     while (opendisplays != NULL || listener_isactive()) {
-        glfwWaitEvents();
+        /* Poll, never block: Cocoa can drop glfwPostEmptyEvent from the ZMQ
+         * thread, so WaitEvents leaves U V queued and the first frame stuck. */
+        glfwPollEvents();
         command_process();
 
         if (opendisplays != NULL) had_displays = true;
@@ -400,6 +403,12 @@ void display_loop(void) {
                 
                 glfwSwapBuffers(d->window);
             }
+        }
+
+        if (listener_isactive()) {
+            platform_sleep(16);
+        } else if (opendisplays != NULL) {
+            glfwWaitEvents();
         }
 
         /* After the last window closes, notify Morpho and stop the listener. */

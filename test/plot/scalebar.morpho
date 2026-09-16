@@ -5,7 +5,7 @@
 
 import xplot
 import color
-import xshow
+import morphoview
 import povray
 
 class Buf {
@@ -73,7 +73,7 @@ fn orthonormal(sb) {
          approx(sb.perp.inner(sb.tickdirn), 0)
 }
 
-/* ---- no meshtools: this file imports only xplot/color/xshow/povray ---- */
+/* ---- no meshtools: this file imports only xplot/color/morphoview/povray ---- */
 var ticks = ScaleBar().ticks(-1.2, 3.4, 5)
 expect(ticks.count() <= 5, "nice ticks respect nmax")
 expect(ScaleBar().ticks(3, 3, 5).count() == 1, "uniform field one tick")

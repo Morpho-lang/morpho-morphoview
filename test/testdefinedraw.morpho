@@ -1,4 +1,4 @@
-// Smoke: define once, D+redraw, pose-only `d`, draw-slots, then Phase 5d
+// Smoke: define once, D via update, pose-only `d`, draw-slots, then Phase 5d
 // object/draw update-delete ops.
 // Expect: prints "ok" then exits.
 // Requires: morphoview on PATH, morpho-zeromq, display.
@@ -33,7 +33,7 @@ if (!v.open(once)) {
   System.exit()
 }
 
-if (!v.redraw(redraw)) {
+if (!v.update(redraw)) {
   print "redraw failed"
   v.close()
   System.exit()

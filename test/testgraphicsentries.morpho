@@ -185,7 +185,7 @@ expect(sidx[0] == ridx[0] && sidx[1] == ridx[1] && sidx[2] == ridx[2], "sparse f
 /* ---- Scene.setLights / addLight / resetLights notify ---- */
 class LightSink with Listener {
   init() { self.n = 0 }
-  receive(g, GraphicsEventLights ev) { self.n += 1 }
+  receive(Scene scene, GraphicsEventLights ev) { self.n += 1 }
 }
 var sc = Scene()
 var sink = LightSink()

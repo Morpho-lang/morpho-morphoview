@@ -109,7 +109,7 @@ System.sleep(0.15)
 v.poll(timeoutms=0)
 expect(!v.closed, "live lighting including Neutral reset")
 
-expect(v.morph(idTri, tri()), "View.morph redefine")
+expect(g.morph(idTri, tri()), "Scene.morph redefine")
 System.sleep(0.15)
 v.poll(timeoutms=0)
 expect(!v.closed, "open after morph")

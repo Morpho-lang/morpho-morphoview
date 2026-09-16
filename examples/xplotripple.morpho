@@ -1,5 +1,6 @@
-// xplotripple — traveling-wave membrane with live View.morph via Plot.refresh(view).
-// Shape + colors update each frame; colormap cycles occasionally.
+// xplotripple — traveling-wave membrane.
+// Mutate the mesh, rebuild the Field snapshot, then Plot.refresh().
+// View only observes the resulting Scene.morph.
 //
 //   morpho6 examples/xplotripple.morpho
 //
@@ -11,7 +12,7 @@ import meshtools
 import xplot
 import color
 
-var dt = 1/30
+var dt = 1/60
 var maps = [ViridisMap(), MagmaMap(), PlasmaMap(), InfernoMap(), BlueWhiteRedMap]
 var mapNames = ["Viridis", "Magma", "Plasma", "Inferno", "BlueWhiteRed"]
 var mapIdx = 0
@@ -55,9 +56,8 @@ while (!v.closed) {
   frame += 1
 
   applyWave(mesh, t)
-  p.source = heightField(mesh)
+  p.source = heightField(mesh) // Field samples z once; rebuild from the current mesh
 
-  // Phase 5: cycle colormap / center on the Plot, then morph through the View.
   if (mod(frame, 90) == 0) {
     mapIdx = mod(mapIdx + 1, maps.count())
     p.colormap = maps[mapIdx]
@@ -65,7 +65,7 @@ while (!v.closed) {
     p.title = "xplotripple (${mapNames[mapIdx]})"
   }
 
-  if (!p.refresh(v)) break
+  if (!p.refresh()) break
 
   v.poll(timeoutms=0)
   System.sleep(dt)

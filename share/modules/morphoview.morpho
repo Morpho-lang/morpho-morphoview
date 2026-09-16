@@ -8,11 +8,10 @@
  * Example usage:
  *    Show(g)                        // temp file + morphoview -t
  *    var v = View(scene)            // open + listen
- *    v.open(commands)               // or ASCII chunk
+ *    v.open(commands)               // raw morphoview protocol
  *    scene.move(id, ...)            // pose
  *    scene.recolor(id, ...)         // recolor
- *    v.morph(id, item)              // update in place, or replace
- *    v.refreshMesh(id)              // redefine from the model
+ *    scene.morph(id, item)          // morph item id
  *    v.poll(timeoutms=0)
  *    v.wait(sessiontimeout=1500)
  *    v.close()
@@ -24,45 +23,97 @@ import morphoviewclient
 var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command); please upgrade morphopm.")
 
 /* ----------------------------------------------------------------
- * findMorphoViewBin 
+ * MorphoViewFinder
  *
- * Find the morphoview executable.
+ * Locate the morphoview executable.
  * ---------------------------------------------------------------- */
 
-var _mvbin = nil
+class MorphoViewFinder {
+  init() {
+    self.cached = nil
+    self.exe = System.platform()=="windows" ? "morphoview.exe" : "morphoview"
+  }
 
-fn findMorphoViewBin() { // Path to the morphoview executable
-  if (!isnil(_mvbin)) return _mvbin
+  find() { // Path to the morphoview executable
+    if (!isnil(self.cached)) return self.cached
 
-  var exe = (System.platform()=="windows" ? "morphoview.exe" : "morphoview")
-  var roots = []
-  var haspm = System.subprocess(System.platform()=="windows" ? "where morphopm" : "command -v morphopm")
+    var hit = self._findLocal()
+    if (isnil(hit)) hit = self._findPackages()
+    if (isnil(hit)) hit = self._findMorphoPM()
+    if (isnil(hit)) hit = self._findPath()
+    if (isnil(hit)) hit = self.exe
 
-  if (haspm["exitstatus"]==0) {
+    self.cached = hit
+    return hit
+  }
+
+  _haveExe(bindir) { // Does bindir contain the morphoview executable?
+    return Folder.isFolder(bindir) &&
+           Folder.contents(bindir).contains(self.exe)
+  }
+
+  _fromRoot(root) { // root/bin/morphoview, or nil
+    if (isnil(root) || root.count()==0) return nil
+    var bindir = Folder.normalizePath("${root}/bin")
+    if (!self._haveExe(bindir)) return nil
+    return Folder.normalizePath("${bindir}/${self.exe}")
+  }
+
+  _isPackageRoot(dir) { // Checkout / package with share/modules/morphoview.morpho
+    var mods = Folder.normalizePath("${dir}/share/modules")
+    return Folder.isFolder(mods) &&
+           Folder.contents(mods).contains("morphoview.morpho")
+  }
+
+  _findLocal() { // CWD and parents: a local checkout beats /usr/local and morphopm
+    var dir = System.workingfolder()
+    for (i in 1..8) {
+      if (self._isPackageRoot(dir)) {
+        var hit = self._fromRoot(dir)
+        if (!isnil(hit)) return hit
+      }
+      var parts = dir.split("/\\")
+      if (parts.count() < 2) break
+      var parent = String.join(parts[0...parts.count()-1], "/")
+      if (parent.count()==0 || parent == dir) break
+      dir = parent
+    }
+    return nil
+  }
+
+  _findPackages() { // Dev checkouts listed in ~/.morphopackages
+    if (!Folder.contents(System.homefolder()).contains(".morphopackages")) return nil
+    for (p in File(Folder.normalizePath("${System.homefolder()}/.morphopackages")).lines()) {
+      if (!p.split("/\\").contains("morpho-morphoview")) continue
+      var hit = self._fromRoot(p)
+      if (!isnil(hit)) return hit
+    }
+    return nil
+  }
+
+  _findMorphoPM() { // morphopm install (often a system prefix)
+    var cmd = System.platform()=="windows" ? "where morphopm" : "command -v morphopm"
+    if (System.subprocess(cmd)["exitstatus"]!=0) return nil
     var line = System.subprocess("morphopm path morphoview")["stdout"].split("\n")[0]
     var parts = line.split("'")
     var code = (parts.count()>1) ? parts[1] : ""
     if (code == "ErrMorphoPMUnrcgnzd") _mvpmold.throw()
-    if (line.count()>0 && Folder.isFolder(line)) roots.append(line)
+    return self._fromRoot(line)
   }
 
-  if (roots.count()==0 && Folder.contents(System.homefolder()).contains(".morphopackages")) {
-    for (p in File(Folder.normalizePath("${System.homefolder()}/.morphopackages")).lines()) {
-      if (p.split("/\\").contains("morpho-morphoview")) roots.append(p)
-    }
+  _findPath() { // PATH, resolved to an absolute path if possible
+    var cmd = System.platform()=="windows" ? "where ${self.exe}" : "command -v ${self.exe}"
+    var which = System.subprocess(cmd)
+    if (which["exitstatus"]!=0) return nil
+    var resolved = which["stdout"].split("\n")[0]
+    if (resolved.count()==0) return nil
+    return resolved
   }
-
-  for (root in roots) {
-    var bindir = Folder.normalizePath("${root}/bin")
-    if (root.count()>0 && Folder.isFolder(bindir) && Folder.contents(bindir).contains(exe)) {
-      _mvbin = Folder.normalizePath("${bindir}/${exe}")
-      return _mvbin
-    }
-  }
-
-  _mvbin = "morphoview"
-  return _mvbin
 }
+
+var _mvfinder = MorphoViewFinder()
+
+fn findMorphoViewBin() { return _mvfinder.find() } // Path to the morphoview executable
 
 /* ----------------------------------------------------------------
  * Show
@@ -112,7 +163,8 @@ class View is MorphoViewView {
     if (System.platform()=="windows") {
       system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-c', '${ep}'\"")
     } else {
-      system("\"${bin}\" -c \"${ep}\" > /dev/null 2>&1 &")
+      /* Keep stderr: apply errors (U V length, missing object) used to vanish. */
+      system("\"${bin}\" -c \"${ep}\" >/dev/null &")
     }
   }
 

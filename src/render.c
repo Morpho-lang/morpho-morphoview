@@ -442,6 +442,10 @@ bool render_init(renderer *r) {
 
 /** Free uploaded geometry/fonts; leave shader programs intact for reuse. */
 void render_reset(renderer *r) {
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+
     for (unsigned int i=0; i<r->glbuffers.count; i++) {
         renderglbuffers *b=&r->glbuffers.data[i];
 

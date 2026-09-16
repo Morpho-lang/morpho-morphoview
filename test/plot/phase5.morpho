@@ -6,6 +6,8 @@
 import meshtools
 import xplot
 import color
+import graphics
+import broadcast
 
 fn expect(cond, msg) {
   if (!cond) {
@@ -93,5 +95,86 @@ var pMesh = Plot(am, color=Blue)
 expect(!pMesh.colormap(ViridisMap()), "colormap rejected on mesh")
 expect(!pMesh.range(0, 1), "range rejected on mesh")
 expect(!pMesh.center(0), "center rejected on mesh")
+
+/* ---- live axes/scalebar generate Scene events ---- */
+class PlotCap with Listener {
+  init() {
+    self.definedIds = nil
+    self.removedIds = nil
+    self.morphed = nil
+    self.nDefined = 0
+    self.nRemoved = 0
+    self.nMorphed = 0
+  }
+  receive(Scene scene, GraphicsEventDefined ev) {
+    self.nDefined += 1
+    self.definedIds = ev.ids
+  }
+  receive(Scene scene, GraphicsEventRemoved ev) {
+    self.nRemoved += 1
+    self.removedIds = ev.ids
+  }
+  receive(Scene scene, GraphicsEventMorphed ev) {
+    self.nMorphed += 1
+    self.morphed = ev
+  }
+}
+
+var pLive = Plot(am, color=Red)
+var capLive = PlotCap()
+capLive.listen(pLive)
+expect(pLive.axes(true), "axes(true) live")
+expect(capLive.nDefined == 1, "axes one coalesced Defined")
+expect(!isnil(capLive.definedIds) && capLive.definedIds.count() > 1,
+       "axes Defined includes ticks/labels")
+expect(pLive.axes(false), "axes(false) live")
+expect(capLive.nRemoved == 1, "axes one coalesced Removed")
+expect(!isnil(capLive.removedIds) && capLive.removedIds.count() > 1,
+       "axes Removed includes ticks/labels")
+
+var pBar = Plot(f, style="interpolate", colormap=ViridisMap(), cmin=0, cmax=1)
+var capBar = PlotCap()
+capBar.listen(pBar)
+expect(pBar.scalebar(true), "scalebar(true) live")
+expect(capBar.nDefined == 1, "scalebar one coalesced Defined")
+expect(!isnil(capBar.definedIds) && capBar.definedIds.count() >= 1,
+       "scalebar Defined has ids")
+expect(pBar.scalebar(false), "scalebar(false) live")
+expect(capBar.nRemoved == 1, "scalebar one coalesced Removed")
+
+/* ---- fast morph path keeps face id and rebuilds scalebar ---- */
+var pFast = Plot(f, style="interpolate", colormap=ViridisMap(), scalebar=true,
+                 cmin=0, cmax=1)
+var faceId = pFast.entries["faces"][0]
+var bar0 = pFast.entries["scalebar"][0]
+var nBar = pFast.entries["scalebar"].count()
+var capFast = PlotCap()
+capFast.listen(pFast)
+expect(pFast.refresh(), "headless refresh")
+expect(pFast.entries["faces"][0] == faceId, "fast path morphs same face id")
+expect(pFast.entries.contains("scalebar"), "scalebar present after fast refresh")
+expect(pFast.entries["scalebar"].count() == nBar, "scalebar entry count")
+expect(pFast.entries["scalebar"][0] != bar0, "scalebar rebuilt with new ids")
+expect(capFast.nMorphed == 1, "refresh morphs faces")
+expect(capFast.nRemoved >= 1 && capFast.nDefined >= 1, "scalebar remove+define")
+
+/* ---- axes survive refresh when bounds change (fixed domain frame) ---- */
+var amB = AreaMesh(fn (u, v) [u, v, 0], 0..1:0.5, 0..1:0.5)
+var pBounds = Plot(Field(amB, fn (x, y, z) z), style="interpolate", axes=true)
+expect(pBounds.entries.contains("axes"), "axes at construct")
+var axesId0 = pBounds.entries["axes"][0]
+var nAxes = pBounds.entries["axes"].count()
+var zHi0 = pBounds.bounds[2][1]
+var faceZ0 = pBounds.findEntry(pBounds.entries["faces"][0]).item.position[2, 0]
+var vert = amB.vertexmatrix().clone()
+for (i in 0...vert.dimensions()[1]) vert[2, i] = 3
+amB.setvertexmatrix(vert)
+pBounds.source = Field(amB, fn (x, y, z) z) // Field samples z once
+expect(pBounds.refresh(), "refresh after deform")
+expect(pBounds.bounds[2][1] > zHi0 + 1, "bounds z updated")
+expect(pBounds.findEntry(pBounds.entries["faces"][0]).item.position[2, 0] > faceZ0 + 1,
+       "refresh morphs face vertices")
+expect(pBounds.entries["axes"][0] == axesId0, "axes ids unchanged")
+expect(pBounds.entries["axes"].count() == nAxes, "axes not rebuilt")
 
 print "ok"

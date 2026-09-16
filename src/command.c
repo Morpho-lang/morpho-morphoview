@@ -198,11 +198,10 @@ bool command_enqueue(mv_command *cmd) {
         return varray_mv_commandptradd(command_parse_staging, &cmd, 1);
     }
     MorphoMutex_lock(&command_queue_mutex);
-    bool wasempty = (command_queue.count == 0);
     bool ok = varray_mv_commandptradd(&command_queue, &cmd, 1);
     MorphoMutex_unlock(&command_queue_mutex);
     if (!ok) return false;
-    if (wasempty) command_wake();
+    command_wake();
     return true;
 }
 
@@ -213,14 +212,13 @@ static bool command_commit_staging(varray_mv_commandptr *staging) {
         return true;
     }
     MorphoMutex_lock(&command_queue_mutex);
-    bool wasempty = (command_queue.count == 0);
     bool ok = varray_mv_commandptradd(&command_queue, staging->data,
                                      (int) staging->count);
     if (ok) staging->count = 0; /* ownership moved; do not free cmds */
     MorphoMutex_unlock(&command_queue_mutex);
     if (!ok) return false;
     varray_mv_commandptrclear(staging);
-    if (wasempty) command_wake();
+    command_wake();
     return true;
 }
 
@@ -329,8 +327,11 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             if (!obj) {
                 return command_apply_error("No object with id '%i'.", c->id);
             }
+            int have = obj->vertexdata.length;
             if (!scene_replacevertices(ctx->scene, c->id, c->data, c->length)) {
-                return command_apply_error("U V length mismatch for object '%i'.", c->id);
+                return command_apply_error(
+                    "U V length mismatch for object '%i' (have %d, got %d).",
+                    c->id, have, c->length);
             }
             if (c->format) {
                 if (obj->vertexdata.format) free(obj->vertexdata.format);
@@ -338,14 +339,11 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 c->format = NULL;
                 obj->centroid_valid = false;
             }
-            /* Prefer in-place GL upload; fall back to full prepare if unprepared. */
-            bool uploaded = false;
+            command_touchscene(ctx);
             if (ctx->display && ctx->display->window) {
                 glfwMakeContextCurrent(ctx->display->window);
-                uploaded = render_updateobjectvertices(&ctx->display->render,
-                                                       ctx->scene, c->id);
+                render_updateobjectvertices(&ctx->display->render, ctx->scene, c->id);
             }
-            if (!uploaded) command_touchscene(ctx);
             return true;
         }
 
