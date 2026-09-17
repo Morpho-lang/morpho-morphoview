@@ -68,12 +68,7 @@ void command_applyctx_init(command_applyctx *ctx) {
     command_reset_colorstamp(ctx);
 }
 
-/** Resolve `C` for this `d` / `T`, then consume it.
- *  Show emits `C` immediately before each draw; `d` without a preceding `C`
- *  preserves the slot. If the stamp were left active, a later pose-only `d` in
- *  the same process() batch (View `ok` is parse-ack; moves can queue before
- *  apply) would inherit a leftover CLEAR from a vertex-color mesh and wipe a
- *  uniform translucent `xn` color — the boing shadow going white. */
+/** Resolve `C` for this `d` / `T`, then consume it. */
 static void command_draw_colorstamp(command_applyctx *ctx, bool *stamp_color, int *colorid) {
     if (ctx->colorstamp==COLORSTAMP_SET) {
         *stamp_color=true;
@@ -88,7 +83,7 @@ static void command_draw_colorstamp(command_applyctx *ctx, bool *stamp_color, in
     command_reset_colorstamp(ctx);
 }
 
-/** Sticky apply context across command_process batches (follow-up chunks may omit `S`). */
+/** Apply context kept across command batches. */
 static command_applyctx g_applyctx;
 static bool g_applyctx_ready=false;
 
@@ -105,7 +100,7 @@ static void command_sticky_applyctx_reset(void) {
     g_applyctx_ready=false;
 }
 
-/** Clear sticky apply context if it still points at @p s (e.g. Escape teardown). */
+/** Drop apply context if it refers to this scene. */
 void command_invalidate_scene(scene *s) {
     if (!g_applyctx_ready || !s) return;
     if (g_applyctx.scene == s) command_sticky_applyctx_reset();
@@ -164,7 +159,7 @@ void command_free(mv_command *cmd) {
 static varray_mv_commandptr command_queue;
 static MorphoMutex command_queue_mutex;
 
-/** Staging destination while parsing one chunk (failed parse cannot wipe the live queue). */
+/** Commands parsed from the current chunk. */
 static varray_mv_commandptr *command_parse_staging = NULL;
 
 void command_queue_init(void) {
@@ -228,7 +223,7 @@ static bool command_commit_staging(varray_mv_commandptr *staging) {
 
 static char command_apply_msg[256];
 
-/** Record an apply failure on stderr (CLI). Live sessions already sent `ok` after parse. */
+/** Report an apply failure. */
 static bool command_apply_error(const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
@@ -249,12 +244,12 @@ static bool command_needobject(command_applyctx *ctx) {
     return command_apply_error("%s", COMMAND_NOOBJECT_MSG);
 }
 
-/** Scene content / bounds changed — needs GL upload or camera fit. */
+/** Mark the current scene as changed. */
 static void command_touchscene(command_applyctx *ctx) {
     if (ctx->scene) scene_markchanged(ctx->scene);
 }
 
-/** Apply one IR command to the sticky scene/display context. */
+/** Apply one IR command. */
 bool command_apply(mv_command *cmd, command_applyctx *ctx) {
     switch (cmd->type) {
         case MVCMD_SCENE_CREATE: {
@@ -407,7 +402,6 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             return true;
 
         case MVCMD_CLEAR_DISPLAY: {
-            /* Apply-time scene only — parse must not require has_scene (ok-before-apply). */
             if (!command_needscene(ctx)) return false;
             scene_cleardisplaylist(ctx->scene);
             scene_markchanged(ctx->scene);
@@ -472,7 +466,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 if (ctx->cobject->vertexdata.format)
                     free(ctx->cobject->vertexdata.format);
                 ctx->cobject->vertexdata.format=c->format;
-                c->format=NULL; /* transferred */
+                c->format=NULL;
                 ctx->cobject->centroid_valid=false;
             }
 
@@ -507,7 +501,8 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 el.length=c->length;
             }
 
-            scene_addelement(ctx->cobject, &el);
+            if (scene_addelement(ctx->cobject, &el) < 0)
+                return command_apply_error("Could not store element data.");
             command_touchscene(ctx);
             return true;
         }
@@ -521,7 +516,8 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
                 int nfloats = c->length*ncomp;
                 int indx=scene_adddata_take(ctx->scene, &c->rgb, nfloats);
                 if (indx<0) return command_apply_error("Could not store color data.");
-                scene_addcolor(ctx->scene, c->id, c->length, ncomp, indx);
+                if (scene_addcolor(ctx->scene, c->id, c->length, ncomp, indx)<0)
+                    return command_apply_error("Could not store color data.");
             }
             command_touchscene(ctx);
             return true;
@@ -548,7 +544,9 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             if (!command_needscene(ctx)) return false;
             float coeffs[4] = { c->ka, c->kd, c->ks, c->shininess };
             int matindx=scene_adddata(ctx->scene, coeffs, 4);
-            scene_adddraw(ctx->scene, SHADE, c->mode, matindx);
+            if (matindx<0) return command_apply_error("Could not store material.");
+            if (!scene_adddraw(ctx->scene, SHADE, c->mode, matindx))
+                return command_apply_error("Could not store material.");
             command_touchscene(ctx);
             return true;
         }
@@ -580,9 +578,10 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
                 bool had_matrix = (drw->matindx != SCENE_EMPTY);
                 int old_color = drw->colorid;
-                scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
-                                       c->has_matrix ? c->matrix : NULL,
-                                       stamp_color, stamp);
+                if (!scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
+                                            c->has_matrix ? c->matrix : NULL,
+                                            stamp_color, stamp))
+                    return command_apply_error("Could not update draw '%i'.", c->drawid);
 
                 /* Color is baked into the renderlist at prepare time. */
                 if (stamp_color && stamp != old_color)
@@ -594,9 +593,10 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
 
                 if (need_prepare) command_touchscene(ctx);
             } else {
-                scene_addobjectdraw(ctx->scene, c->drawid, objectid,
-                                    c->has_matrix ? c->matrix : NULL,
-                                    stamp_color ? stamp : SCENE_EMPTY);
+                if (!scene_addobjectdraw(ctx->scene, c->drawid, objectid,
+                                         c->has_matrix ? c->matrix : NULL,
+                                         stamp_color ? stamp : SCENE_EMPTY))
+                    return command_apply_error("Could not create draw '%i'.", c->drawid);
                 command_touchscene(ctx);
             }
             return true;
@@ -626,37 +626,44 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
             if (c->drawid != SCENE_EMPTY) {
                 gdraw *drw = scene_finddrawbydrawid(ctx->scene, c->drawid);
                 if (drw && drw->type == TEXT) {
-                    /* In-place content + pose/color update for an existing slot. */
                     gtext *txt = &ctx->scene->textlist.data[drw->id];
-                    free(txt->text);
+                    textfont *font = scene_getfontfromid(ctx->scene, c->fontid);
+                    if (!text_prepare(font, c->string))
+                        return command_apply_error("Could not prepare text.");
+                    char *old = txt->text;
                     txt->text = c->string;
                     c->string = NULL;
                     txt->fontid = c->fontid;
-                    text_prepare(scene_getfontfromid(ctx->scene, c->fontid),
-                                 txt->text);
-                    scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
-                                           matrix, stamp_color, stamp);
+                    free(old);
+                    if (!scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
+                                                matrix, stamp_color, stamp))
+                        return command_apply_error("Could not update text.");
                     command_touchscene(ctx);
                     return true;
                 }
 
                 int tid = scene_addtext(ctx->scene, c->fontid, c->string);
-                c->string = NULL; /* transferred to scene */
-                scene_addtextdraw(ctx->scene, c->drawid, tid, matrix,
-                                  stamp_color ? stamp : SCENE_EMPTY);
+                if (tid < 0) return command_apply_error("Could not add text.");
+                c->string = NULL;
+                if (!scene_addtextdraw(ctx->scene, c->drawid, tid, matrix,
+                                       stamp_color ? stamp : SCENE_EMPTY))
+                    return command_apply_error("Could not add text.");
                 command_touchscene(ctx);
                 return true;
             }
 
             /* Legacy: append TEXT draw with no draw-slot id; stamp active `C`. */
             int tid = scene_addtext(ctx->scene, c->fontid, c->string);
-            c->string = NULL; /* transferred to scene */
+            if (tid < 0) return command_apply_error("Could not add text.");
+            c->string = NULL;
 
             int matindx = SCENE_EMPTY;
             if (c->has_matrix) {
                 matindx = scene_adddata(ctx->scene, c->matrix, 16);
+                if (matindx<0) return command_apply_error("Could not add text.");
             }
-            scene_adddraw(ctx->scene, TEXT, tid, matindx);
+            if (!scene_adddraw(ctx->scene, TEXT, tid, matindx))
+                return command_apply_error("Could not add text.");
             if (stamp_color && ctx->scene->displaylist.count > 0) {
                 gdraw *last = &ctx->scene->displaylist.data[
                     ctx->scene->displaylist.count - 1];
@@ -674,7 +681,7 @@ bool command_apply(mv_command *cmd, command_applyctx *ctx) {
     return command_apply_error("Unrecognized command.");
 }
 
-/** Apply queued commands on the GLFW thread.
+/** Apply queued commands.
  * @returns number applied before an error, or the full batch count */
 int command_process(void) {
     command_applyctx *ctx = command_sticky_applyctx();
@@ -919,6 +926,25 @@ bool command_parsefloat(parser *p, float *out) {
     return true;
 }
 
+/** Copy a quoted-token body, turning \\ and \" into \ and ". */
+static bool command_unescapestring(const char *src, int n, char **out) {
+    if (!out) return false;
+    if (n < 0) n = 0;
+    if (n > 0 && !src) return false;
+
+    char *str = malloc((size_t) n + 1);
+    if (!str) return false;
+
+    int j = 0;
+    for (int i = 0; i < n; i++) {
+        if (src[i]=='\\' && i+1<n) i++;
+        str[j++]=src[i];
+    }
+    str[j]='\0';
+    *out = str;
+    return true;
+}
+
 bool command_parsestring(parser *p, char **out) {
     if (!parse_checktokenadvance(p, MVTOKEN_STRING)) {
         parse_error(p, false, COMMAND_EXPECTSTRING);
@@ -928,15 +954,10 @@ bool command_parsestring(parser *p, char **out) {
     int length = (int) p->previous.length - 2;
     if (length < 0) length = 0;
 
-    char *str = malloc(sizeof(char)*(length+1));
-    if (!str) {
+    if (!command_unescapestring(p->previous.start+1, length, out)) {
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
         return false;
     }
-
-    strncpy(str, p->previous.start+1, length);
-    str[length]='\0';
-    *out = str;
     return true;
 }
 
@@ -1193,7 +1214,7 @@ bool command_parsedraw(parser *p, void *out) {
     return command_enqueue_owned(p, &cmd->cmd);
 }
 
-/** `D` — clear displaylist only (no parse-time has_scene; sticky apply supplies scene). */
+/** Clear the displaylist. */
 bool command_parsecleardisplay(parser *p, void *out) {
     (void) p;
     (void) out;
@@ -1212,7 +1233,6 @@ bool command_parseobject(parser *p, void *out) {
 
     PARSE_CHECK(command_parseinteger(p, &id));
 
-    /* Apply-time scene only — live Defined has no S in-chunk (ok-before-apply). */
     mv_cmd_object *cmd = command_new(MVCMD_OBJECT, sizeof(mv_cmd_object));
     if (!cmd) {
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
@@ -1227,7 +1247,6 @@ bool command_parsevertices(parser *p, void *out) {
     command_parsectx *ctx = (command_parsectx *) out;
     char *format=NULL;
 
-    /* In-chunk `o` / `U O` / `X O`; sticky scene at apply (no parse-time has_scene). */
     if (!ctx->has_object) {
         parse_error(p, true, COMMAND_NOOBJECT);
         return false;
@@ -1426,7 +1445,6 @@ bool command_parseupdate(parser *p, void *out) {
             return false;
         }
         cmd->id=id;
-        /* Sticky scene at apply; allow following v/f in this chunk. */
         ctx->has_scene=true;
         ctx->has_object=true;
         return command_enqueue_owned(p, &cmd->cmd);
@@ -1503,7 +1521,6 @@ bool command_parsedelete(parser *p, void *out) {
             return false;
         }
         cmd->id=id;
-        /* Sticky scene at apply; allow following o/v/f in this chunk (replace path). */
         ctx->has_scene=true;
         return command_enqueue_owned(p, &cmd->cmd);
     }
@@ -1643,7 +1660,6 @@ bool command_parselight(parser *p, void *out) {
         return false;
     }
 
-    /* Sticky scene at apply; follow-up L batches have no S in-chunk. */
     (void) ctx;
 
     mv_cmd_light *cmd = command_new(MVCMD_LIGHT, sizeof(mv_cmd_light));
@@ -1667,7 +1683,6 @@ bool command_parsebackground(parser *p, void *out) {
         PARSE_CHECK(command_parsefloat(p, &rgb[i]));
     }
 
-    /* Sticky scene at apply; follow-up G batches have no S in-chunk. */
     mv_cmd_background *cmd = command_new(MVCMD_BACKGROUND, sizeof(mv_cmd_background));
     if (!cmd) {
         parse_error(p, true, ERROR_ALLOCATIONFAILED);
@@ -1854,7 +1869,7 @@ void command_formaterror(const error *err, varray_char *out) {
     varray_charwrite(out, '\0');
 }
 
-/** Parse ASCII into the shared queue (does not apply).
+/** Parse ASCII into the command queue.
  * @param[in] in - command text
  * @param[out] err - filled on failure; not printed
  * @returns true on success; failed chunks discard only their own IR */
@@ -1902,7 +1917,6 @@ bool command_parse(char *in, error *err) {
     }
 
     if (!command_commit_staging(&staging)) {
-        /* Ownership transferred only on success; on failure free what we hold. */
         command_free_list(&staging);
         morpho_writeerrorwithid(err, ERROR_ALLOCATIONFAILED, NULL,
                                 ERROR_POSNUNIDENTIFIABLE, ERROR_POSNUNIDENTIFIABLE);

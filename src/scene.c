@@ -367,6 +367,7 @@ gobject *scene_getgobjectfromid(scene *s, int id);
 
 /** Adds an object to a scene, or returns the existing object with this id. */
 gobject *scene_addobject(scene *s, int id) {
+    if (!s) return NULL;
     gobject *existing = scene_getgobjectfromid(s, id);
     if (existing) return existing;
 
@@ -379,7 +380,7 @@ gobject *scene_addobject(scene *s, int id) {
     obj.centroid[0]=obj.centroid[1]=obj.centroid[2]=0.0f;
     obj.centroid_valid=false;
 
-    varray_gobjectadd(&s->objectlist, &obj, 1);
+    if (!varray_gobjectadd(&s->objectlist, &obj, 1)) return NULL;
     return &s->objectlist.data[s->objectlist.count-1];
 }
 
@@ -454,34 +455,30 @@ bool scene_deletedraw(scene *s, int drawid) {
     return true;
 }
 
-/** Overwrite vertex floats. Same length memcpy's in place; otherwise appends. */
+/** Replace vertex floats in place. Length must match the existing object. */
 bool scene_replacevertices(scene *s, int id, const float *data, int n) {
     gobject *obj = scene_getgobjectfromid(s, id);
     if (!s || !obj || !data || n <= 0) return false;
-    if (obj->vertexdata.indx != SCENE_EMPTY && obj->vertexdata.length == n) {
-        memcpy(&s->data.data[obj->vertexdata.indx], data, sizeof(float) * (size_t) n);
-        obj->centroid_valid = false;
-        return true;
-    }
-    int indx = scene_adddata(s, (float *) data, n);
-    if (indx < 0) return false;
-    obj->vertexdata.indx = indx;
-    obj->vertexdata.length = n;
+    if (obj->vertexdata.indx == SCENE_EMPTY || obj->vertexdata.length != n)
+        return false;
+    memcpy(&s->data.data[obj->vertexdata.indx], data, sizeof(float) * (size_t) n);
     obj->centroid_valid = false;
     return true;
 }
 
-/** Add vertex data to a scene; returns the starting index of the data */
+/** Add vertex data to a scene; returns the starting index, or -1. */
 int scene_adddata(scene *s, float *data, int count) {
-    int ret = s->data.count;
-    varray_floatadd(&s->data, data, count);
+    if (!s) return -1;
+    int ret = (int) s->data.count;
+    if (!varray_floatadd(&s->data, data, count)) return -1;
     return ret;
 }
 
-/** Add index data to a scene; returns the starting index of the data  */
+/** Add index data to a scene; returns the starting index, or -1. */
 int scene_addindex(scene *s, int *data, int count) {
-    int ret=s->indx.count;
-    varray_intadd(&s->indx, data, count);
+    if (!s) return -1;
+    int ret = (int) s->indx.count;
+    if (!varray_intadd(&s->indx, data, count)) return -1;
     return ret;
 }
 
@@ -546,33 +543,38 @@ int scene_addindex_take(scene *s, int **datap, int count) {
     return ret;
 }
 
-/** Adds element data to an object */
+/** Add element data to an object; returns the index, or -1. */
 int scene_addelement(gobject *obj, gelement *el) {
-    varray_gelementadd(&obj->elements, el, 1);
-    return obj->elements.count-1;
+    if (!obj || !el) return -1;
+    if (!varray_gelementadd(&obj->elements, el, 1)) return -1;
+    return (int) obj->elements.count-1;
 }
 
-/** Adds a font to a scene
+/** Add a font to a scene.
  @param[in] s - The scene
  @param[in] id - font id
  @param[in] file - font file to open
  @param[in] size - in points
  @param[out] fontindx - index to refer to this */
 bool scene_addfont(scene *s, int id, char *file, float size, int *fontindx) {
+    if (!s || !file) return false;
+
     gfont font;
-    
     font.id=id;
     text_fontinit(&font.font, TEXT_DEFAULTWIDTH);
-    
-    int sizepx = (int) (size / 72.0 * 720.0) /* in pts / points per inch * DPI */;
-    
-    if (text_openfont(file, sizepx, &font.font)) {
-        varray_gfontwrite(&s->fontlist, font);
-        if (fontindx) *fontindx = s->fontlist.count-1;
-        return true;
-    }
 
-    return false;
+    int sizepx = (int) (size / 72.0 * 720.0);
+
+    if (!text_openfont(file, sizepx, &font.font)) {
+        text_fontclear(&font.font);
+        return false;
+    }
+    if (!varray_gfontadd(&s->fontlist, &font, 1)) {
+        text_fontclear(&font.font);
+        return false;
+    }
+    if (fontindx) *fontindx = (int) s->fontlist.count-1;
+    return true;
 }
 
 /** Find the textfont object corresponding to a given fontid */
@@ -583,39 +585,41 @@ textfont *scene_getfontfromid(scene *s, int fontid) {
     return NULL;
 }
 
-/** Adds text to a scene */
+/** Add text to a scene; returns the index, or -1. */
 int scene_addtext(scene *s, int fontid, char *text) {
+    if (!s || !text) return -1;
     textfont *font = scene_getfontfromid(s, fontid);
 
     if (!font) {
         fprintf(stderr, "Font id '%i' not found.\n", fontid);
-        return false;
+        return -1;
     }
-    
-    text_prepare(font, text);
-    
+    if (!text_prepare(font, text)) return -1;
+
     gtext txt;
     txt.fontid=fontid;
     txt.text=text;
-    
-    return varray_gtextwrite(&s->textlist, txt);;
+    if (!varray_gtextadd(&s->textlist, &txt, 1)) return -1;
+    return (int) s->textlist.count-1;
 }
 
-/** Adds a color to a scene */
+/** Add a color to a scene; returns the index, or -1. */
 int scene_addcolor(scene *s, int colorid, int length, int components, int indx) {
+    if (!s) return -1;
     gcolor color = { .colorid = colorid,
                      .length = length,
                      .components = components,
                      .indx = indx
     };
-    
-    return varray_gcolorwrite(&s->colorlist, color);
+    if (!varray_gcoloradd(&s->colorlist, &color, 1)) return -1;
+    return (int) s->colorlist.count-1;
 }
 
-void scene_adddraw(scene *scene, gdrawtype type, int id, int matindx) {
+bool scene_adddraw(scene *s, gdrawtype type, int id, int matindx) {
+    if (!s) return false;
     gdraw d = { .type = type, .id = id, .drawid = SCENE_EMPTY,
                 .colorid = SCENE_EMPTY, .matindx = matindx };
-    varray_gdrawwrite(&scene->displaylist, d);
+    return varray_gdrawadd(&s->displaylist, &d, 1);
 }
 
 /** OBJECT or TEXT draw with drawid, or NULL. */
@@ -652,10 +656,11 @@ gdraw *scene_addobjectdraw(scene *s, int drawid, int objectid,
         float tmp[16];
         memcpy(tmp, matrix, sizeof(tmp));
         matindx = scene_adddata(s, tmp, 16);
+        if (matindx < 0) return NULL;
     }
     gdraw d = { .type = OBJECT, .id = objectid, .drawid = drawid,
                 .colorid = colorid, .matindx = matindx };
-    varray_gdrawwrite(&s->displaylist, d);
+    if (!varray_gdrawadd(&s->displaylist, &d, 1)) return NULL;
     return &s->displaylist.data[s->displaylist.count - 1];
 }
 
@@ -668,10 +673,11 @@ gdraw *scene_addtextdraw(scene *s, int drawid, int textindex,
         float tmp[16];
         memcpy(tmp, matrix, sizeof(tmp));
         matindx = scene_adddata(s, tmp, 16);
+        if (matindx < 0) return NULL;
     }
     gdraw d = { .type = TEXT, .id = textindex, .drawid = drawid,
                 .colorid = colorid, .matindx = matindx };
-    varray_gdrawwrite(&s->displaylist, d);
+    if (!varray_gdrawadd(&s->displaylist, &d, 1)) return NULL;
     return &s->displaylist.data[s->displaylist.count - 1];
 }
 
@@ -688,7 +694,9 @@ bool scene_updateobjectdraw(scene *s, gdraw *drw, bool has_matrix,
         } else {
             float tmp[16];
             memcpy(tmp, matrix, sizeof(tmp));
-            drw->matindx = scene_adddata(s, tmp, 16);
+            int indx = scene_adddata(s, tmp, 16);
+            if (indx < 0) return false;
+            drw->matindx = indx;
         }
     }
     if (stamp_color) drw->colorid = colorid;

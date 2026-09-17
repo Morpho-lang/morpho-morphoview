@@ -81,7 +81,7 @@ static void reply_clear(void) {
  * ------------------------------------------------------- */
 
 static MorphoThread listener_thread;
-static bool listener_thread_created = false; /* control thread: join/clear still owed */
+static bool listener_thread_created = false;
 static bool listener_running = false;
 static bool listener_stop_requested = false;
 static char *listener_endpoint = NULL;
@@ -159,8 +159,6 @@ static MorphoThreadFnReturnType listener_thread_main(void *arg) {
             command_formaterror(&err, &buf);
             zstr_sendf(sock, "%s%s", LISTENER_ERR_PREFIX, buf.data ? buf.data : "");
             varray_charclear(&buf);
-            /* View kills the session on err; stop the I/O loop so display_loop can
-             * exit without waiting for SIGTERM (GLFW often ignores it). */
             MorphoAtomic_storebool(&listener_stop_requested, true);
             command_wake();
         }

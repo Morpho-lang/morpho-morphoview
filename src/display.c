@@ -82,8 +82,9 @@ static void display_errorcallback(int error, const char* description) {
 
 /** Framebuffer resize callback. */
 static void display_framebuffersizecallback(windowref *window, int width, int height) {
+    if (width<=0 || height<=0) return;
     display *d=display_fromwindow(window);
-    
+
     d->aspectRatio=(float) width/(float) height;
     d->width = (float) width;
     glViewport(0, 0, width, height);
@@ -180,6 +181,11 @@ static void display_keycallback(windowref *window, int key, int scancode, int ac
 /** Cursor position callback. */
 static void display_cursorposncallback(windowref *window, double x, double y) {
     display *d=display_fromwindow(window);
+
+    if (d->width<=0.0) {
+        d->ox=x; d->oy=y;
+        return;
+    }
 
     if (d->state==DRAGGING_ROT) {
         d->view_user_modified=true;

@@ -104,9 +104,9 @@ int main(int argc, const char * argv[]) {
 
     listener_finalize();
 
+    scene_finalize();
     text_finalize();
     display_finalize();
-    scene_finalize();
     command_finalize();
     morpho_finalize();
 

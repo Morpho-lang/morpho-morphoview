@@ -204,7 +204,9 @@ void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, f
     mat4x4 pr = { 2.0f/(right-left), 0.0f, 0.0f, 0.0f, // Col major order!
                   0.0f, 2.0f/(top-bottom), 0.0f, 0.0f,
                   0.0f, 0.0f, -2.0f/(far-near), 0.0f,
-                  0.0f, 0.0f, 0.0f, 1.0f };
+                  -(right+left)/(right-left),
+                  -(top+bottom)/(top-bottom),
+                  -(far+near)/(far-near), 1.0f };
     mat4x4 in2;
     if (in==out) mat3d_copy4x4(in, in2); /* Use a copy if in and out are the same matrix */
     

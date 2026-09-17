@@ -21,7 +21,7 @@ producer → command_parse / command_enqueue → queue
 3. **Wake** (`command_wake`) — `glfwPostEmptyEvent()`, so a blocked `glfwWaitEvents` can run.
 4. **Process** (`command_process`) — apply every queued command in order on the **caller** thread, then free them. Returns the number applied. On apply failure, frees the remainder and stops.
 
-`main` processes once after loading a file (bootstrap), starts `-b`/`-c` listening after that parse, then `display_loop` processes again after each `glfwWaitEvents`. With `-b`/`-c`, an I/O thread enqueues via ZMQ while the loop runs. Live parse replies `ok`/`err …` immediately; apply runs later on the GLFW thread.
+`main` processes once after loading a file (bootstrap), starts `-b`/`-c` listening after that parse, then `display_loop` processes again after each `glfwWaitEvents`. With `-b`/`-c`, an I/O thread enqueues via ZMQ while the loop runs. Live parse replies `ok`/`err …` immediately after **parse/enqueue**; apply runs later on the GLFW thread. Apply failures are written to stderr and are not sent as ZMQ `err` (a future protocol revision may add asynchronous apply errors).
 
 **Invariant:** only the main/GLFW thread calls `command_process` and touches GL. The queue is mutex-protected so the I/O thread can `command_enqueue` safely.
 
@@ -46,7 +46,7 @@ Whitespace between tokens is ignored. Prefixes are single letters. Strings use `
 | `o` | `MVCMD_OBJECT` | `<id>` | Current object (requires a scene) |
 | `v` | `MVCMD_VERTICES` | `["format"] <floats…>` | Vertex data for current object |
 | `p` / `l` / `f` | `MVCMD_ELEMENT` | `<indices…>` | Points / lines / facets |
-| `c` | `MVCMD_COLOR` | `<id> <r g b [a]>…` | Color table entry (RGB or RGBA) |
+| `c` | `MVCMD_COLOR` | `<id> <r g b [a]>…` | Color table. Length infers RGB vs RGBA; 12 floats is ambiguous (see below). Show emits one uniform RGB or RGBA |
 | `C` | `MVCMD_SELECT_COLOR` | `<id>` or (none) | Active color stamped onto subsequent `d` / `T`. Bare `C` clears the draw-slot override (restore geometry vertex colors). Parse context only |
 | `M` | `MVCMD_MATERIAL` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Unlit or Phong (default ka=kd=0.5, ks=0) |
 | `d` | `MVCMD_DRAW` | `<drawId>` \| `<drawId> <objectId>` | Draw-slot; matrix from prior transforms; stamps `C`. Existing slot → update in place |
@@ -95,6 +95,7 @@ I = \text{albedo}\,\Bigl(k_a\,\text{ambient}
 - **`M shaded`** (default) — Phong/Lambert; defaults \(k_a=k_d=0.5\), \(k_s=0\). Optional floats override coeffs.
 - **`M flat`** — unlit albedo (diagrams / categorical color).
 - **Uniform color:** `c` / `C` then `v "xn"` (or `v "x"` for points/lines) — `C` sets albedo (and optional alpha) for subsequent draws.
+- **`c` length:** the float count infers one or more RGB triples, or RGBA if the count is 4 or a multiple of 4 that is not a multiple of 3. **12 floats is ambiguous** (4 RGB vs 3 RGBA) and is treated as RGB. Package Show uses `c` for a single uniform color (3 or 4 floats) and embeds per-vertex ColorTable data in vertex records, so this inference is unused on the current serializer path.
 - **Vertex format:** `v` / `U V` take a format string whose letters name fields in order: `x` position (`dim` floats), `n` normal (`dim`), `c` RGB (3), `a` alpha (1). Missing `c`/`n`/`a` use defaults (white, +z, alpha 1). Typical Show layouts: `xn`, `xnc`, `xnca`, `x`, `xc`, `xca`.
 - **Vertex color:** `v "xnc"` / `v "xc"` with a draw-slot in empty color mode — per-vertex RGB is the albedo (opaque unless `a` is also present). `C <id>` on the same draw-slot is a uniform RGB override that hides vertex colors without redefining geometry; vertex `a` is unchanged. Bare `C` then `d` clears that override. `d` without a preceding `C` preserves the current mode. Package `Show` emits `C` or `C <id>` immediately before each `d` so the color mode is self-contained (bare `C` for an intrinsic ColorTable).
 - **Opacity:** `c <id> <r g b a>` — opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off. A format that includes `a` is treated as transparent. Transparent objects sorted **far → near** by object centroid. Closed translucent meshes draw back faces then front. Not triangle-level / OIT — intersecting translucents can still artifact.
@@ -177,9 +178,11 @@ An I/O thread owns the socket. Each received string is an ASCII command chunk (`
 
 | Message | Meaning |
 |---------|---------|
-| `ok` | Chunk parsed and enqueued successfully |
+| `ok` | Chunk parsed and enqueued successfully. Not an apply acknowledgement |
 | `err …` | Parse failed; remainder is a user-reportable string (`Error [id] at line N char M: …`) |
 | `window.closed` | Last display window closed (also after `Q` with no windows) |
+
+Apply-time failures (missing object, `U V` length mismatch, failed font load, …) run later on the GLFW thread and are printed to stderr. They do not become ZMQ `err`.
 
 Command-line file parse (`morphoview file.cmd`) writes that same reportable string to stderr and does not use ZMQ. A live `-b`/`-c` session sends `err …` on the PAIR socket instead of printing.
 

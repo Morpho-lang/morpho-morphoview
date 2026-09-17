@@ -287,6 +287,7 @@ DEFINE_VARRAY(textglyph, textglyph);
 
 /** Initialize a font structure. */
 void text_fontinit(textfont *font, int width) {
+    font->face=NULL;
     text_skylineinit(&font->skyline, width, width*3/4);
     varray_textglyphinit(&font->glyphs);
     font->texturedata=NULL;
@@ -295,11 +296,14 @@ void text_fontinit(textfont *font, int width) {
 
 /** Clear a font structure. */
 void text_fontclear(textfont *font) {
-    FT_Done_Face(font->face);
-    
+    if (font->face) {
+        FT_Done_Face(font->face);
+        font->face=NULL;
+    }
+
     text_skylineclear(&font->skyline);
     varray_textglyphclear(&font->glyphs);
-    
+
     text_cleartexture(font);
 }
 
@@ -309,11 +313,18 @@ void text_fontclear(textfont *font) {
  * @param[out] font - filled font record */
 bool text_openfont(char *file, int size, textfont *font) {
     FT_Error error = FT_New_Face(ftlibrary, file, 0, &font->face);
-    if (error) return false;
-    
+    if (error) {
+        font->face=NULL;
+        return false;
+    }
+
     error = FT_Set_Pixel_Sizes(font->face, 0, size);
-    if (error) return false;
-    
+    if (error) {
+        FT_Done_Face(font->face);
+        font->face=NULL;
+        return false;
+    }
+
     return true;
 }
 

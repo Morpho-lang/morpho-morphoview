@@ -14,9 +14,6 @@
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#define GL_SILENCE_DEPRECATION
-#include <glad/glad.h>
-
 #define TEXT_DEFAULTWIDTH 1280
 #define TEXT_DEFAULTHEIGHT 960
 #define TEXTSKYLINE_EMPTY -1

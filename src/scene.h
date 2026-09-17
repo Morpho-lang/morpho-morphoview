@@ -185,18 +185,18 @@ gobject *scene_addobject(scene *s, int id);
 bool scene_clearobject(scene *s, int id);
 bool scene_deleteobject(scene *s, int id);
 bool scene_deletedraw(scene *s, int drawid);
-bool scene_replacevertices(scene *s, int id, const float *data, int n); /* same length in-place; else append */
-int scene_adddata(scene *s, float *data, int count);
-int scene_addindex(scene *s, int *data, int count);
+bool scene_replacevertices(scene *s, int id, const float *data, int n); /* same-length in-place replace */
+int scene_adddata(scene *s, float *data, int count); /* starting index, or -1 */
+int scene_addindex(scene *s, int *data, int count); /* starting index, or -1 */
 /** Take ownership of *datap; nulls *datap. */
 int scene_adddata_take(scene *s, float **datap, int count);
 int scene_addindex_take(scene *s, int **datap, int count);
-int scene_addelement(gobject *obj, gelement *el);
+int scene_addelement(gobject *obj, gelement *el); /* index, or -1 */
 bool scene_addfont(scene *s, int id, char *file, float size, int *fontindx);
 textfont *scene_getfontfromid(scene *s, int fontid);
-int scene_addtext(scene *s, int fontid, char *text);
-int scene_addcolor(scene *s, int colorid, int length, int components, int indx);
-void scene_adddraw(scene *scene, gdrawtype type, int id, int matindx);
+int scene_addtext(scene *s, int fontid, char *text); /* index, or -1 */
+int scene_addcolor(scene *s, int colorid, int length, int components, int indx); /* index, or -1 */
+bool scene_adddraw(scene *scene, gdrawtype type, int id, int matindx);
 gdraw *scene_finddrawbydrawid(scene *s, int drawid);
 gdraw *scene_findobjectdraw(scene *s, int objectid);
 /** Create an OBJECT draw slot; matrix may be NULL, colorid may be SCENE_EMPTY. */
