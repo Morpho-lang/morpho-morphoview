@@ -10,6 +10,7 @@
 #include "varray.h"
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H

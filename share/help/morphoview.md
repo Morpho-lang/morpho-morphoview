@@ -5,18 +5,20 @@
 [tagmorphoview]: # (morphoview)
 [tagview]: # (View)
 
-The `morphoview` package provides interactive 3D visualization through the external `morphoview` application. Import the package modules:
+The `morphoview` package provides interactive 3D visualization through the external `morphoview` application. Use this package together with `graphics` and `plot` for visualization:
 
+    import graphics
     import morphoview
 
-There are two ways to display graphics. Static `Show` serializes with `GraphicsSerializer` and launches morphoview (`-t`). Live `View` keeps a duplex ZeroMQ session.
+There are two ways to display graphics: 
 
-* **Display only** — build a `Graphics` object and call `Show(g)`. The viewer opens, then exits when you close the window.
-* **Live session** — build a `Scene`, open a `View`, and update with `move` / `recolor` / etc. The viewer stays connected over ZeroMQ.
+The `Show` class provides a static view of a `Graphics` or `Scene`: 
 
     var g = Graphics()
     g.display(Sphere([0,0,0], 1, color=Red))
     Show(g)
+
+The `View` class provides a live, updatable view of a `Scene`: 
 
     var g = Scene()
     var id = g.display(Sphere([0,0,0], 1), [0,0,0], color=Red)
@@ -24,26 +26,20 @@ There are two ways to display graphics. Static `Show` serializes with `GraphicsS
     g.move(id, [0.1, 0, 0])
     v.wait()
 
-Requires `morpho-zeromq` package. Low-level viewer ASCII commands are documented in the package `docs/commandapi.md`.
-
-`MorphoViewFinder` locates the `morphoview` binary. `find()` returns its path; `version()` runs `morphoview -v` and returns `{ "version": "0.7.0", "protocol": 2 }`, or `nil` if the binary does not report a version. `Show` and `View` require a versioned binary (`MvOld` if `-v` is missing).
-
 [showsubtopics]: # (subtopics)
 
 ## Show
 [tagshow]: # (Show)
 
-`Show` launches morphoview with a temporary draw file (`-t`). Use it for one-shot display:
+`Show` launches morphoview with a static view: 
+
+    import graphics, morphoview
 
     var g = Graphics()
     g.display(Sphere([0,0,0], 1, color=Red))
     Show(g)
 
-You can also serialize without launching:
 
-    var show = Show()
-    show.write(g, out)                 // any object with write(line)
-    show.write(g, out, replace=true)   // preamble emits U S instead of S
 
 ## View
 [tagView]: # (View)
