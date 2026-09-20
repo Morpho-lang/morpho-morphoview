@@ -31,7 +31,7 @@ The `View` class provides a live, updatable view of a `Scene`:
 ## Show
 [tagshow]: # (Show)
 
-`Show` launches morphoview with a static view: 
+`Show` launches the morphoview application to show a `Graphics` or `Scene` object: 
 
     import graphics, morphoview
 
@@ -39,104 +39,20 @@ The `View` class provides a live, updatable view of a `Scene`:
     g.display(Sphere([0,0,0], 1, color=Red))
     Show(g)
 
-
+The view is static and cannot be updated; use `View` for interactive display. 
 
 ## View
 [tagView]: # (View)
 
-Open immediately from a `Graphics` or `Scene`:
+`View` launches the morphoview application to show a `Graphics` or `Scene` object: 
 
     var v = View(g)              // throws on failure
     var v = View()
-    v.open(g)
-    v.open(commands)             // raw morphoview protocol
 
-View makes use of the `Listener` protocol to track changes in a `Scene`.  
+The view can be updated:
 
-### Methods
+* a `View` automatically detects changes to the `Scene` and updates the display. 
 
-* `open(Graphics)` / `open(Scene)` — bind, spawn viewer, serialize the model, wait for `ok`. Parse failures come back as `err` plus a line/char message; `lastErr` holds the reportable string. The `View(g)` constructor throws `VwOpnFl` with that detail.
-* `open(String commands)` — same session setup, but send raw morphoview protocol (see `docs/commandapi.md`)
-* `update(Graphics)` / `update(Scene)` — replace the displayed model (`Graphics` uses full `U S` replace)
-* `update(String commands)` — send a raw protocol chunk to an open viewer
-* `write(line)` — File-compatible sink for `Show.write`
-* `poll(timeoutms=0)` — one reply, or `nil` on timeout
-* `wait(sessiontimeout=0)` — spin until the window closes (0 = forever)
-* `close()` — send `Q`, wait for `window.closed`; idempotent
+* you can replace the contents of a `View` using the `update` method.
 
-Occasional full refresh uses `update(Graphics)`. Efficient animation uses a `Scene` and `scene.move` / `scene.morph` after `View(scene)`.
-
-## Graphics
-[tagGraphics]: # (Graphics)
-
-`Graphics` is a static displaylist of id-bearing entries. Create one and add elements with `display`:
-
-    var g = Graphics()
-    var id = g.display(Sphere([0,0,0], 1, color=Red))
-
-`display` returns a stable Graphics-owned id (`Int`). Optional pose:
-
-    g.display(item, position, scale=, rotate=, color=, flat=)
-
-* `position` — list or Matrix
-* `scale` — float or `[sx, sy, sz]`
-* `rotate` — `[angle, ax, ay, az]` or `nil`
-* `color` / `flat` — presentation color and unlit shading (`nil` means Show chooses: PointCloud/LineSet unlit)
-
-Combine two Graphics objects with `+` / `add` (left-hand type and ids kept; right-hand ids remapped). `Scene + Graphics` is a `Scene`; `Graphics + Scene` is a `Graphics`.
-
-Optional constructor args: `title=`, `background=` (a `Color`), `light=` (anything `Lighting(...)` accepts).
-
-`Graphics.light` is a `Lighting` after construction, `setLights`, `addLight`, and `resetLights`. Default, `[]`, `"neutral"`, `"auto"`, and `resetLights()` are camera-relative **Neutral** — static Show writes no `L` line (a bare `L` is not valid). Named values: `"threepoint"` (studio key/fill/rim), `"off"` (ambient only). Custom lamps live in `Lighting.lights` (at most 4).
-
-    var g = Graphics()
-    g.setLights([[10, 10, 10], Light([-10, 5, 8], color=Red, intensity=0.4)])
-    g.addLight([0, 5, 10])
-    g.resetLights()
-
-A 3-vector (`Matrix`, `[x,y,z]`, `(x,y,z)`) is one white lamp; a list of those (or of `Light`) is several. `Light` has `position`, `color` (default `White`), and `intensity` (default `1`); the viewer RGB is `color * intensity`. `setLights` replaces the whole `Lighting`. The first `addLight` leaves Neutral; `"threepoint"` / `"off"` are replaced by a custom list. Unknown names and over-long lists error rather than silently falling back. Live `View` sends `L "neutral"` on `resetLights()`.
-
-`import graphics` also provides `Light`, `Lighting`, `setLights` / `addLight` / `resetLights` (on `Graphics`), and `cross3D(a, b)` (3-vector cross product).
-
-## Scene
-[tagScene]: # (Scene)
-
-`Scene` is a live `Graphics` with a Broadcaster. Mutations notify listeners (including an attached `View`):
-
-    var g = Scene()
-    var id = g.display(Sphere([0,0,0], 1), [0,0,0], color=Red)
-    var v = View(g)
-    g.move(id, [0.1, 0, 0])
-    g.recolor(id, Blue)
-
-### Methods
-
-* `move(id, position, scale=, rotate=)` / `move(id, scale=, rotate=)` — set any supplied pose component; omitted ones are left unchanged
-* `recolor(id, color)` — set presentation color; `recolor(id, nil)` clears the override
-* `remove(id)` — remove the entry
-* `replace(id, item)` — swap the item; entry pose/color/flat are kept
-* `morph(id, item)` — same-length mesh swap; a listening `View` uses `U V` when the vertex layout matches
-* `setLights(...)` / `addLight(...)` / `resetLights()` — replace the whole lighting, append a world-space `Light` (or position/`color=`/`intensity=`), or restore Neutral; live `View` sends `L`
-* `beginBatch()` / `endBatch()` — coalesce Moved/Recolored/Lights notifies (via Broadcaster)
-
-Mutators return `true`/`false`. Prefer `View(Scene)` for live sessions.
-
-## Primitives
-[tagprimitives]: # (primitives)
-
-Graphical elements for `display` (from `graphics`):
-
-* `Sphere(center, r, color=, transmit=, filter=)`
-* `Cylinder(start, end, aspectratio=, radius=, n=, color=, …)` — `radius=` is the shaft radius; otherwise `aspectratio × length`
-* `Arrow(start, end, aspectratio=, radius=, n=, color=, …)` — same shaft radius; `aspectratio=` is the tip length fraction
-* `Text(string, posn, font=, color=, …)` — draw-slot text; string/font via `replace`
-* `TriangleComplex(position, normals, color, connectivity, …)` — triangle mesh
-* `PointCloud` / `LineSet` — points and lines (unlit unless `flat=false`)
-* `Polygon` — convex planar n-gon; winding defines the normal; tessellates to triangles
-* `Tube` — tube along a path
-
-All of these are `GraphicsPrimitive`s sharing `color`, `filter`, and `transmit`.
-
-`transmit` / `filter` map to alpha (`alpha = 1 − clamp(transmit + filter, 0, 1)`). MorphoView sends uniform alpha as draw-slot `C`; `povray` writes POV `rgbt` with transmit `1 − a`.
-
-Every `Color` has an alpha channel (`Color(r,g,b)` sets `a=1`; use `Color(r,g,b,a)` for translucency). Uniform alpha is sent as draw-slot `C`; a `ColorTable` with a fourth row is sent as per-vertex `a` (`xnca` / `xca`).
+    v.update(newGraphics)

@@ -1,133 +1,133 @@
-# MorphoView command API
+# Morphoview command language
 
-Commands are the viewer’s public API: an ASCII language that parses into a tagged IR (`mv_command`). Only the main/GLFW thread applies commands and touches GL.
+The morphoview application is driven by an ASCII command 
+language, which forms an intermediate representation (IR). The ASCII form below is the public encoding: single-letter prefixes, whitespace-separated tokens, and `"..."` strings (`\` escapes the next character).
 
-Morpho users: `help morphoview` (or see [`share/modules/morphoview.morpho`](../share/modules/morphoview.morpho)).
+The morpho graphics system comprises a number of packages, including public packages intended for users: 
 
-## Pipeline
+* `graphics` provides `Graphics` and `Scene` together with a number of primitives. These are container objects representing a graphical scene. `Graphics` should be used for static scenes; `Scene` is used for interactive and animatable scenes. This package is part of morpho's standard distribution.
 
-```
-producer → command_parse / command_enqueue → queue
-                                              ↓
-                    command_wake → glfwWaitEvents returns
-                                              ↓
-                         command_process (apply + free)
-                                              ↓
-                              scene / display / GL
-```
+* `morphoview` provides `Show` and `View` to display graphics objects in a static or interactive viewer respectively. It is provided with the `morphoview-opengl` package.
 
-1. **Parse** (`command_parse`) — lex an ASCII buffer and **enqueue** only. Does not open windows or mutate GL. On success, appends a trailing `MVCMD_PREPARE`. On failure, discards only that chunk’s staged IR; previously enqueued batches stay.
-2. **Enqueue** (`command_enqueue`) — takes ownership of an `mv_command`. If the queue was empty, calls `command_wake()`.
-3. **Wake** (`command_wake`) — `glfwPostEmptyEvent()`, so a blocked `glfwWaitEvents` can run.
-4. **Process** (`command_process`) — apply every queued command in order on the **caller** thread, then free them. Returns the number applied. On apply failure, frees the remainder and stops.
+There are two private packages intended for those implementing viewer applications:
 
-`main` processes once after loading a file (bootstrap), starts `-b`/`-c` listening after that parse, then `display_loop` processes again after each `glfwWaitEvents`. With `-b`/`-c`, an I/O thread enqueues via ZMQ while the loop runs. Live parse replies `ok`/`err …` immediately after **parse/enqueue**; apply runs later on the GLFW thread. Apply failures are written to stderr and are not sent as ZMQ `err` (a future protocol revision may add asynchronous apply errors).
+* `graphicsserializer` is part of morpho's standard distribution. It is not intended for direct use by the user, but could be used by those implementing a viewer application to serialize `Graphics` and `Scene` into the morphoview IR.
 
-**Invariant:** only the main/GLFW thread calls `command_process` and touches GL. The queue is mutex-protected so the I/O thread can `command_enqueue` safely.
+* `morphoviewclient` is provided with this package. It is not intended for direct use by the user, but could be used by those implementing a viewer application; it provides a generic transport-independent protocol for driving viewer applications.
 
-## ASCII reference
+## Model
 
-Whitespace between tokens is ignored. Prefixes are single letters. Strings use `"..."` with `\` escaping the next character. Producers may also enqueue IR directly (typed structs embed `mv_command` as the first field).
+A **scene** has a dimension (2 or 3), a window title, bounds, background color, and lighting. It holds:
 
-| Letter | IR | Arguments | Notes |
-|--------|-----|-----------|-------|
-| `S` | `MVCMD_SCENE_CREATE` | `<id> <dim>` | Create or select scene; open window if needed (does **not** clear) |
-| `U S` | `MVCMD_UPDATE_SCENE` | `<id>` | Clear existing scene in place; keep window; select as current |
-| `U O` | `MVCMD_UPDATE_OBJECT` | `<id>` | Clear one object’s geometry for redefine |
-| `U V` | `MVCMD_UPDATE_VERTICES` | `<id> ["format"] <floats…>` | Same-length vertex replace |
-| `X S` | `MVCMD_CLOSE_SCENE` | `<id>` | Close scene window (same teardown as Escape) |
-| `X O` | `MVCMD_DELETE_OBJECT` | `<id>` | Delete object + OBJECT draws referencing it |
-| `X D` | `MVCMD_DELETE_DRAW` | `<drawId>` | Delete one draw-slot; leave the object |
-| `Q` | `MVCMD_QUIT` | — | Close all windows / quit viewer |
-| `W` | `MVCMD_WINDOW_TITLE` | `"<title>"` | Set current window title |
-| `B` | `MVCMD_BOUNDS` | `<xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Explicit scene AABB; next prepare refits unless user moved camera |
-| `L` | `MVCMD_LIGHT` | `"neutral"` \| `"threepoint"` \| `"auto"` \| `"off"` \| `<n> "x"` \| `<n> "xc"` \| `0` | Named camera-relative rig, or n world-space point lights (cap 4). Omit `L` for Neutral (a bare `L` is invalid). `L "off"` / `L 0` is ambient only |
-| `G` | `MVCMD_BACKGROUND` | `<r> <g> <b>` | Scene clear / background color |
-| `o` | `MVCMD_OBJECT` | `<id>` | Current object (requires a scene) |
-| `v` | `MVCMD_VERTICES` | `["format"] <floats…>` | Vertex data for current object |
-| `p` / `l` / `f` | `MVCMD_ELEMENT` | `<indices…>` | Points / lines / facets |
-| `c` | `MVCMD_COLOR` | `<id> <r g b [a]>…` | Color table. Length infers RGB vs RGBA; 12 floats is ambiguous (see below). Show emits one uniform RGB or RGBA |
-| `C` | `MVCMD_SELECT_COLOR` | `<id>` or (none) | Active color stamped onto subsequent `d` / `T`. Bare `C` clears the draw-slot override (restore geometry vertex colors). Parse context only |
-| `M` | `MVCMD_MATERIAL` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Unlit or Phong (default ka=kd=0.5, ks=0) |
-| `d` | `MVCMD_DRAW` | `<drawId>` \| `<drawId> <objectId>` | Draw-slot; matrix from prior transforms; stamps `C`. Existing slot → update in place |
-| `D` | `MVCMD_CLEAR_DISPLAY` | — | Clear displaylist only; keep objects/colors/fonts/pools |
-| `F` | `MVCMD_FONT` | `<id> "<path>" <size>` | Load font |
-| `T` | `MVCMD_TEXT` | `<fontid> "…"` \| `<drawId> <fontid> "…"` | Legacy append, or text draw-slot create/update |
-| — | `MVCMD_PREPARE` | *(appended by parse)* | Upload **changed** scenes to GL |
+* **Objects** — vertex data and indexed points, lines, or facets.
+* **Color tables** — named RGB or RGBA palettes.
+* **Fonts** — named typefaces for text.
+* **Draw-slots** — items on the display list. An object draw references an object and a pose; a text draw references a font and a string.
 
-## Semantics
+The current scene, object, color, material, and transform persist until they are changed. A later command stream may omit `S` and still target the last selected scene.
 
-### Scenes
+World space is right-handed: **+X right, +Y up, +Z toward the home viewer**.
 
-- `S` is find-or-create: a new id opens a window; a repeated id selects that scene (does not clear).
-- `U S` clears an existing scene’s contents while keeping its window, then selects it.
-- `X S` marks that scene’s window for close (the display loop tears it down).
-- `Q` marks every window for close. If none are open and the listener is active, emits `window.closed` and stops. Morpho `View.close` sends `Q`.
+## Commands
 
-### Sticky context
+| Command | Arguments | Meaning |
+|---------|-----------|---------|
+| `S` | `<id> <dim>` | Create or select a scene. A new id creates a scene; a repeated id selects it (does not clear). |
+| `U S` | `<id>` | Clear an existing scene in place and select it. |
+| `U O` | `<id>` | Clear one object’s geometry so it can be redefined; select it as current. |
+| `U V` | `<id> ["format"] <floats…>` | Replace an object’s vertices. Length and layout must match the existing data. |
+| `X S` | `<id>` | Close that scene. |
+| `X O` | `<id>` | Delete an object and any object draws that reference it. |
+| `X D` | `<drawId>` | Delete one draw-slot; leave the object. |
+| `Q` | — | Close all scenes. |
+| `W` | `"<title>"` | Set the current scene’s window title. |
+| `B` | `<xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` | Set an explicit axis-aligned bounding box. |
+| `L` | see [Lighting](#lighting) | Replace the scene’s lighting. |
+| `G` | `<r> <g> <b>` | Set the background color. |
+| `o` | `<id>` | Create or select the current object (requires a scene). |
+| `v` | `["format"] <floats…>` | Vertex data for the current object. |
+| `p` / `l` / `f` | `<indices…>` | Indexed points, lines, or facets on the current object. |
+| `c` | `<id> <r g b [a]>…` | Define a color table. |
+| `C` | `<id>` or (none) | Select the color for subsequent draws. Bare `C` clears a uniform override so vertex colors show. |
+| `M` | `flat` \| `shaded` [`<ka> <kd>` [`<ks>` [`<n>`]]] | Material for subsequent draws. |
+| `d` | `<drawId>` \| `<drawId> <objectId>` | Create or update an object draw-slot. |
+| `D` | — | Clear the display list. Objects, colors, and fonts remain. |
+| `F` | `<id> "<path>" <size>` | Load a font. |
+| `T` | `<fontid> "…"` \| `<drawId> <fontid> "…"` | Legacy text append, or create/update a text draw-slot. |
 
-Apply context persists across ZMQ/file batches. Follow-up chunks may omit a leading `S` and still target the last selected scene.
+A bare `L` is invalid.
 
-### Draw-slots
+## Draw-slots
 
-- `d <drawId> [objectId]` — object defaults to `drawId` if one arg. If an OBJECT or TEXT draw for that id already exists, **replaces its matrix** (and stamps color if `C` preceded this `d`) instead of appending. A no-matrix `d` without `C` preserves pose and color mode (recolor uses `C` then `d`).
-- Bare `C` then `d` clears the uniform override so ColorTable geometry shows again.
-- `D` clears only the displaylist (draws) for the current sticky scene — objects, colors, fonts, and data pools remain.
-- `T <drawId> <fontid> "…"` creates/updates a text draw-slot (matrix like `d`). Legacy `T <fontid> "…"` appends.
+`d <drawId> [objectId]` places an object on the display list. The object defaults to `drawId` if only one argument is given. If a slot with that id already exists, the command updates it in place (pose and, if `C` preceded this `d`, color) rather than appending.
 
-### Prepare
+* A `d` with a current transform sets the slot’s pose.
+* A `d` with no transform and no preceding `C` leaves pose and color mode unchanged.
+* Recolor is `C` then `d`.
+* Bare `C` then `d` clears the uniform color override.
 
-Each successful parse appends `MVCMD_PREPARE`, which calls `display_prepareall()`:
+`T <drawId> <fontid> "…"` is the text equivalent (pose like `d`). `T <fontid> "…"` appends text without a stable draw id.
 
-- Uploads only scenes marked changed by this batch (untouched open displays are left alone).
-- Auto-computes the scene AABB when no explicit `B` was given.
-- Fits the camera on first prepare (or after `B`) unless the user has already moved the view.
+## Vertices
 
-## Materials, color, lighting
+`v` and `U V` take an optional format string. Letters name fields in order:
 
-Shading uses Phong (Lambert when \(k_s=0\)):
+| Letter | Field | Size |
+|--------|-------|------|
+| `x` | position | `dim` floats |
+| `n` | normal | `dim` floats |
+| `c` | RGB | 3 floats |
+| `a` | alpha | 1 float |
+
+Missing `c` / `n` / `a` default to white, +z, and alpha 1. Typical layouts: `xn`, `xnc`, `xnca`, `x`, `xc`, `xca`.
+
+`U V` requires the same number of floats (and the same layout) as the object already has.
+
+## Color
+
+`c <id> …` defines a table. The float count infers layout: RGB triples, or RGBA if the count is 4 or a multiple of 4 that is not a multiple of 3. **12 floats is ambiguous** (4 RGB vs 3 RGBA) and is treated as RGB.
+
+`C <id>` is a uniform color on the next draw-slot. Vertex alpha is unchanged. Bare `C` then `d` restores vertex colors.
+
+A color with alpha, or a vertex format that includes `a`, is translucent.
+
+## Material
+
+* `M shaded` (default) — Phong / Lambert. Defaults \(k_a=k_d=0.5\), \(k_s=0\). Optional floats override \(k_a\), \(k_d\), \(k_s\), and shininess \(n\).
+* `M flat` — unlit albedo.
+
+Shaded intensity:
 
 \[
 I = \text{albedo}\,\Bigl(k_a\,\text{ambient}
     + \sum_i C_i\bigl(k_d \max(\mathbf{N}\cdot\mathbf{L}_i,0) + k_s (\mathbf{R}_i\cdot\mathbf{V})^n\bigr)\Bigr)
 \]
 
-- **`M shaded`** (default) — Phong/Lambert; defaults \(k_a=k_d=0.5\), \(k_s=0\). Optional floats override coeffs.
-- **`M flat`** — unlit albedo (diagrams / categorical color).
-- **Uniform color:** `c` / `C` then `v "xn"` (or `v "x"` for points/lines) — `C` sets albedo (and optional alpha) for subsequent draws.
-- **`c` length:** the float count infers one or more RGB triples, or RGBA if the count is 4 or a multiple of 4 that is not a multiple of 3. **12 floats is ambiguous** (4 RGB vs 3 RGBA) and is treated as RGB. Package Show uses `c` for a single uniform color (3 or 4 floats) and embeds per-vertex ColorTable data in vertex records, so this inference is unused on the current serializer path.
-- **Vertex format:** `v` / `U V` take a format string whose letters name fields in order: `x` position (`dim` floats), `n` normal (`dim`), `c` RGB (3), `a` alpha (1). Missing `c`/`n`/`a` use defaults (white, +z, alpha 1). Typical Show layouts: `xn`, `xnc`, `xnca`, `x`, `xc`, `xca`.
-- **Vertex color:** `v "xnc"` / `v "xc"` with a draw-slot in empty color mode — per-vertex RGB is the albedo (opaque unless `a` is also present). `C <id>` on the same draw-slot is a uniform RGB override that hides vertex colors without redefining geometry; vertex `a` is unchanged. Bare `C` then `d` clears that override. `d` without a preceding `C` preserves the current mode. Package `Show` emits `C` or `C <id>` immediately before each `d` so the color mode is self-contained (bare `C` for an intrinsic ColorTable).
-- **Opacity:** `c <id> <r g b a>` — opaque draws (`a ≈ 1`) first with depth write; transparent draws after with depth write off. A format that includes `a` is treated as transparent. Transparent objects sorted **far → near** by object centroid. Closed translucent meshes draw back faces then front. Not triangle-level / OIT — intersecting translucents can still artifact.
-- **Facet winding:** Package `Show` emits sparse face indices via `rowindices`. Plot duplicates face vertices and emits `0,2,1` when orientation requires a flip, so geometric winding already matches authored normals. At upload, the viewer still reorients triangles if they disagree (safety net for the transparent back/front pass).
-- **Graphics alpha:** Package `Show` maps uniform `Color.a` (and `Coloring.opacity`) to `c`/`C` + colorless geometry (`v "xn"` / `v "x"`). `Color(r,g,b)` is opaque with `a=1`; `Color(r,g,b,a)` sets alpha. A `ColorTable` on a vertex-bearing primitive is one color per vertex; RGB tables emit `v "xnc"` / `v "xc"`, RGBA tables emit `v "xnca"` / `v "xca"`. Draw-slot `C` is a uniform `GraphicsEntry.color` override (not a `ColorTable`).
+Ambient is white. Lamps contribute diffuse and specular only. Lighting is evaluated in view space; for an orthographic view \(\mathbf{V}=(0,0,1)\).
 
-World space is right-handed: **+X right, +Y up, +Z toward the home viewer**. Home view is `Scale * Translate(-center)` (no extra rotation). Lighting is evaluated in **view space**; ortho `V = (0,0,1)` (toward the camera). Scene ambient is white in every mode; lamps contribute diffuse and specular only.
+## Lighting
 
-- **Default (omit `L`)** — Neutral: three white view-space directionals plus white ambient (colormap-safe; key stays on the camera side when you orbit).
-- **`L "neutral"`** / **`L "auto"`** — same Neutral rig (`"auto"` is an alias).
-- **`L "threepoint"`** — key / fill / rim, also view-relative.
-- **`L <n> "x" <posn>…`** — n world-space point lights, white. Cap 4.
-- **`L <n> "xc" <posn> <color>…`** — same, with RGB per lamp. Package `Show` always emits `"xc"`.
-- **`L "off"`** / **`L 0`** — ambient only.
+One `L` replaces the whole list. If `L` is omitted, lighting is Neutral.
 
-One `L` replaces the whole list. Package `Show` writes no `L` line when `Graphics.light` is Neutral (`Lighting()`, `[]`, `"neutral"`, `"auto"`, `resetLights()`). `"threepoint"` and `"off"` emit those names. Custom lamps (`Light` / 3-vector / list of those) emit `L <n> "xc" …`. Set lighting with `Graphics(light=…)` or `g.setLights(...)` / `g.addLight(...)`; `g.light` is then a `Lighting`. Morpho accepts at most 4 lamps; unknown names error. Live `View` sends `L "neutral"` on `resetLights()` so the viewer drops prior lamps.
+* `L "neutral"` / `L "auto"` — Neutral: three white view-space directionals plus ambient. `"auto"` is an alias for `"neutral"`.
+* `L "threepoint"` — key / fill / rim, also view-relative.
+* `L <n> "x" <posn>…` — n world-space point lights, white. At most 4.
+* `L <n> "xc" <posn> <color>…` — same, with RGB per lamp.
+* `L "off"` / `L 0` — ambient only.
 
-`G <r> <g> <b>` sets the clear color (default dark bluish gray). Package `Show` emits `G` from `Graphics.background` (default `Black`).
+## Transforms
 
-## Transforms (parse-only)
+`i`, `m`, `r`, `s`, and `t` set a current model transform. They are not scene objects. The current transform is applied to the next `d` or `T` that carries a pose, then left unchanged until `i`.
 
-These update a parse-local model matrix and are **not** enqueued. On the next `d` or `T`, if the matrix changed, it is baked into that command and the dirty flag is cleared (the matrix itself is kept until `i`).
-
-| Letter | Arguments | Effect |
-|--------|-----------|--------|
+| Command | Arguments | Effect |
+|---------|-----------|--------|
 | `i` | — | Identity |
 | `m` | 16 floats | Right-multiply by 4×4 (`model = model * X`) |
-| `r` | `<phi> <ax ay az>` | Rotate about axis (left-multiply) |
-| `s` | `<scale>` or `<sx sy sz>` | Uniform or non-uniform scale (left-multiply) |
+| `r` | `<phi> <ax ay az>` | Rotate about an axis (left-multiply) |
+| `s` | `<scale>` or `<sx sy sz>` | Uniform or per-axis scale (left-multiply) |
 | `t` | `<tx ty tz>` | Translate (left-multiply) |
 
-`s` / `r` / `t` left-multiply so commands written in application order compose as usual (`t` after `s` → scale then translate). `m` right-multiplies so a matrix emitted between basis and translation (e.g. text `dirn`/`vertical`) stays in local space: `i`/`s`/`r`, then `m`, then `t` yields `T·R·S·X`.
+`s` / `r` / `t` left-multiply so commands written in application order compose as usual (`t` after `s` → scale then translate). `m` right-multiplies so a matrix between basis and translation stays in local space: `i` / `s` / `r`, then `m`, then `t` yields `T·R·S·X`.
 
 ## Example
 
@@ -148,56 +148,3 @@ i
 C 0
 d 1
 ```
-
-Fixtures under `test/command/`: `linespts`, `polyhedra`, `twoscenes`, `largebbox` (auto-fit), `flatshade`, `uniformphong`, `materials`, `opacity`, `vertexalpha`, `depthsort`, `transparentspheres`, `light`, `background`, `color-override`, plus define/draw fixtures (`definedraw-*`).
-
-## C API
-
-Declared in [`src/command.h`](../src/command.h):
-
-| Function | Role |
-|----------|------|
-| `command_initialize` / `command_finalize` | Set up / tear down the queue and parse errors |
-| `command_queue_init` / `command_queue_clear` | Init empty queue; free all pending commands |
-| `command_enqueue` | Own and append a command; edge-triggered wake |
-| `command_wake` | Post an empty GLFW event |
-| `command_process` | Apply and free the queue |
-| `command_parse` | ASCII → enqueue (+ `MVCMD_PREPARE`) |
-| `command_loadinput` | Read a file into a buffer (`MORPHO_FREE` when done) |
-| `command_removefile` | `remove()` a temp file (CLI `-t`) |
-| `command_free` | Free one command’s owned payloads |
-
-## ZeroMQ and Morpho
-
-| Flag | Meaning |
-|------|---------|
-| `-b <endpoint>` | Bind a ZMQ PAIR socket (e.g. `tcp://127.0.0.1:5555`) |
-| `-c <endpoint>` | Connect a ZMQ PAIR socket (used by Morpho `View`) |
-
-An I/O thread owns the socket. Each received string is an ASCII command chunk (`command_parse`). Replies:
-
-| Message | Meaning |
-|---------|---------|
-| `ok` | Chunk parsed and enqueued successfully. Not an apply acknowledgement |
-| `err …` | Parse failed; remainder is a user-reportable string (`Error [id] at line N char M: …`) |
-| `window.closed` | Last display window closed (also after `Q` with no windows) |
-
-Apply-time failures (missing object, `U V` length mismatch, failed font load, …) run later on the GLFW thread and are printed to stderr. They do not become ZMQ `err`.
-
-Command-line file parse (`morphoview file.cmd`) writes that same reportable string to stderr and does not use ZMQ. A live `-b`/`-c` session sends `err …` on the PAIR socket instead of printing.
-
-`import morphoview` then `View` / `Show` — see `help morphoview`. Summary:
-
-- `Show(g)` — fire-and-forget (temp file + `-t`; unlinks when the viewer exits).
-- `View.open` / `update` — ASCII string or `Graphics` / `Scene`. Graphics is serialized by package `Show`; `View.write` is the File-compatible sink.
-- `update(Graphics)` emits `U S` (full replace). Live animation uses `Scene.move` → listener → targeted `d` / `C` / `U V` / etc.
-- `View.close()` sends `Q` and waits for `window.closed` (falls back to process kill if the peer hangs).
-
-### Occasional update vs efficient animation
-
-| Use case | Path | Expectation |
-|----------|------|-------------|
-| Occasional refresh | `View.open(Graphics)` / `update(Graphics)` → `U S` | Fine for snapshot / on-demand. Not cheap for large static+dynamic scenes. |
-| Efficient animation | `Scene` + `View` → `g.move` / `recolor` / … | Define once; pose-only updates. |
-
-Do not make `update(Graphics)` auto-diff. Efficiency comes from Scene mutations → targeted viewer ops. Future work (binary transport, etc.): [`TODO.md`](../TODO.md).
