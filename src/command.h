@@ -216,7 +216,7 @@ typedef struct {
 
 /** Append an indexed element (points, lines, or facets) to the current object.
  *  Language: `p|l|f <indices...>`
- *  @param type     POINTS, LINES, or FACETS
+ *  @param type     GELEMENT_POINTS, GELEMENT_LINES, or GELEMENT_FACETS
  *  @param indices  Owned index blob (copied into scene, then freed)
  *  @param length   Number of indices */
 typedef struct {

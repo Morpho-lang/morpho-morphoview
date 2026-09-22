@@ -1296,11 +1296,11 @@ bool command_parseindex(parser *p, void *out) {
         return false;
     }
 
-    gelementtype etype = POINTS;
+    gelementtype etype = GELEMENT_POINTS;
     if (p->previous.type==MVTOKEN_LINES) {
-        etype=LINES;
+        etype=GELEMENT_LINES;
     } else if (p->previous.type==MVTOKEN_FACETS) {
-        etype=FACETS;
+        etype=GELEMENT_FACETS;
     }
 
     unsigned int n = command_countnumbersahead(p, true);

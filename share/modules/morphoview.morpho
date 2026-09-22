@@ -209,7 +209,8 @@ class Show is MorphoViewShow {
     out.close()
 
     if (isWindows) {
-      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-t', '${path}'\"")
+      /* start "" : first quoted token is the window title; /b : no extra console. */
+      system("start \"\" /b \"${bin}\" -t \"${path}\"")
     } else {
       system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
     }
@@ -235,7 +236,7 @@ class View is MorphoViewView with ZMQPairTransportMixin {
     var bin = findMorphoViewBin()
     var ep = self._transportEndpoint()
     if (System.platform()=="windows") {
-      system("powershell -Command \"Start-Process '${bin}' -ArgumentList '-c', '${ep}'\"")
+      system("start \"\" /b \"${bin}\" -c \"${ep}\"")
     } else {
       /* Keep stderr: apply errors (U V length, missing object) used to vanish. */
       system("\"${bin}\" -c \"${ep}\" >/dev/null &")
@@ -246,7 +247,7 @@ class View is MorphoViewView with ZMQPairTransportMixin {
     var ep = self._transportEndpoint()
     if (isnil(ep)) return
     if (System.platform()=="windows") {
-      system("powershell -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'morphoview' -and $_.CommandLine -like '*-c*${ep}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"")
+      system("powershell -NoProfile -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'morphoview' -and $_.CommandLine -like '*-c*${ep}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"")
     } else {
       system("pkill -9 -f \"morphoview -c ${ep}\" > /dev/null 2>&1")
     }

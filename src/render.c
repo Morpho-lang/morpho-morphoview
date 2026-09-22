@@ -831,7 +831,7 @@ int render_entrysizefromformat(scene *s, char *format) {
 static void render_orient_facets(scene *s, gobject *obj, gelement *el) {
     char *fmt;
     int stride, xpos=-1, npos=-1, pos=0;
-    if (!s || !obj || !el || el->type!=FACETS || el->length<3) return;
+    if (!s || !obj || !el || el->type!=GELEMENT_FACETS || el->length<3) return;
     if (!(fmt=obj->vertexdata.format) || obj->vertexdata.indx==SCENE_EMPTY) return;
     if (!strchr(fmt, 'x') || !strchr(fmt, 'n')) return;
     if ((stride=render_entrysizefromformat(s, fmt))<=0) return;
@@ -950,7 +950,7 @@ void render_drawobject(renderer *r, scene *s, unsigned int i) {
             for (unsigned int k=0; k<obj->obj->elements.count; k++) {
                 gelement *el=&obj->obj->elements.data[k];
 
-                if (el->type==FACETS) render_orient_facets(s, obj->obj, el);
+                if (el->type==GELEMENT_FACETS) render_orient_facets(s, obj->obj, el);
                 
                 /* Offset the vertex indices by the vertex offset */
                 if (obj->voffset>0) for (unsigned int m=0; m<el->length; m++) {
@@ -1009,19 +1009,19 @@ void render_prepareobject(renderer *r, scene *s, gdraw *drw, renderpackstate *st
         renderinstruction eins = { .instruction = RNOP, .obj=obj};
 
         switch (el->type) {
-            case FACETS:
+            case GELEMENT_FACETS:
                 eins.instruction=RTRIANGLES;
                 eins.data.triangles.offset=(void *) (sizeof(GLuint)*offset);
                 eins.data.triangles.length=el->length;
                 offset+=el->length;
                 break;
-            case LINES:
+            case GELEMENT_LINES:
                 eins.instruction=RLINES;
                 eins.data.triangles.offset=(void *) (sizeof(GLuint)*offset);
                 eins.data.triangles.length=el->length;
                 offset+=el->length;
                 break;
-            case POINTS:
+            case GELEMENT_POINTS:
                 eins.instruction=RPOINTS;
                 eins.data.triangles.offset=(void *) (sizeof(GLuint)*offset);
                 eins.data.triangles.length=el->length;

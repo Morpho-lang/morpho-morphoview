@@ -21,6 +21,14 @@ set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
 add_executable(morphoview "")
 
+# Build as windows executable, but retain main() as the entry point
+if(WIN32)
+    set_target_properties(morphoview PROPERTIES WIN32_EXECUTABLE TRUE)
+    if(MSVC)
+        target_link_options(morphoview PRIVATE "/ENTRY:mainCRTStartup")
+    endif()
+endif()
+
 #-------------------------------------------------------------------------------
 # Release LTO
 #-------------------------------------------------------------------------------

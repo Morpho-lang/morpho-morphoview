@@ -20,9 +20,9 @@ DECLARE_VARRAY(float, float);
  * ------------------------------------------------------- */
 
 typedef enum {
-    POINTS,
-    LINES,
-    FACETS
+    GELEMENT_POINTS,
+    GELEMENT_LINES,
+    GELEMENT_FACETS
 } gelementtype;
 
 typedef struct {

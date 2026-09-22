@@ -24,8 +24,13 @@
 #include <GLFW/glfw3.h>
 #pragma clang diagnostic pop
 
+#ifdef _WIN32
+#define DISPLAY_DEFAULTWIDTH 800
+#define DISPLAY_DEFAULTHEIGHT 800
+#else
 #define DISPLAY_DEFAULTWIDTH 480
 #define DISPLAY_DEFAULTHEIGHT 480
+#endif
 
 #define DISPLAY_DEFAULTTITLE "Morpho"
 
