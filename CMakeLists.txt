@@ -4,9 +4,7 @@
 
 cmake_minimum_required(VERSION 3.13)
 
-# Single-config generators (Unix Makefiles, Ninja) default to an empty
-# CMAKE_BUILD_TYPE, which means no -O3. Multi-config generators (Xcode, VS)
-# ignore CMAKE_BUILD_TYPE; --config selects the variant at build time.
+# Default to a Release build if unset
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "CMAKE_BUILD_TYPE unset; defaulting to Release")
     set(CMAKE_BUILD_TYPE Release CACHE STRING
@@ -168,8 +166,25 @@ option(MORPHOVIEW_LOCAL_INSTALL
     ON)
 
 if(MORPHOVIEW_LOCAL_INSTALL)
-    install(TARGETS morphoview RUNTIME DESTINATION "${PROJECT_SOURCE_DIR}/bin")
-    message(STATUS "MORPHOVIEW_LOCAL_INSTALL: will install to ${PROJECT_SOURCE_DIR}/bin")
+    set(MORPHOVIEW_INSTALL_BIN "${PROJECT_SOURCE_DIR}/bin")
+    message(STATUS "MORPHOVIEW_LOCAL_INSTALL: will install to ${MORPHOVIEW_INSTALL_BIN}")
 else()
-    install(TARGETS morphoview RUNTIME DESTINATION bin)
+    set(MORPHOVIEW_INSTALL_BIN bin)
+endif()
+
+install(TARGETS morphoview RUNTIME DESTINATION "${MORPHOVIEW_INSTALL_BIN}")
+
+# Install required dlls into the target directory 
+if(WIN32 AND DEFINED VCPKG_TARGET_TRIPLET)
+    if(DEFINED VCPKG_INSTALLED_DIR)
+        set(_mv_vcpkg_dll_dir "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
+    else()
+        set(_mv_vcpkg_dll_dir "${CMAKE_BINARY_DIR}/vcpkg_installed/${VCPKG_TARGET_TRIPLET}/bin")
+    endif()
+    if(EXISTS "${_mv_vcpkg_dll_dir}")
+        install(DIRECTORY "${_mv_vcpkg_dll_dir}/"
+                DESTINATION "${MORPHOVIEW_INSTALL_BIN}"
+                FILES_MATCHING PATTERN "*.dll")
+        message(STATUS "Will install vcpkg DLLs from ${_mv_vcpkg_dll_dir}")
+    endif()
 endif()
