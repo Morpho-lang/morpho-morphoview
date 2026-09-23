@@ -17,8 +17,8 @@
  *    v.close()
  * ---------------------------------------------------------------- */
 
-import morphoviewclient
 import zeromq
+import morphoviewclient
 
 // Error messages
 var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command); please upgrade morphopm.")
