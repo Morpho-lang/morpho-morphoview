@@ -1,10 +1,10 @@
 #-------------------------------------------------------------------------------
-# Morpho-morphoview/CMakeLists.txt
+# morpho-morphoview/CMakeLists.txt
 #-------------------------------------------------------------------------------
 
 cmake_minimum_required(VERSION 3.13)
 
-# Default to a Release build if unset
+# Default to a Release build when no build type is set.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     message(STATUS "CMAKE_BUILD_TYPE unset; defaulting to Release")
     set(CMAKE_BUILD_TYPE Release CACHE STRING
@@ -13,13 +13,15 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
         "Debug" "Release" "RelWithDebInfo" "MinSizeRel")
 endif()
 
-project(morpho-morphoview)
-
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+project(morpho-morphoview LANGUAGES C)
 
 add_executable(morphoview "")
 
-# Build as windows executable, but retain main() as the entry point
+# Record link directories in the installed executable's rpath.
+set_target_properties(morphoview PROPERTIES
+    INSTALL_RPATH_USE_LINK_PATH TRUE)
+
+# Build as a Windows executable, but retain main() as the entry point.
 if(WIN32)
     set_target_properties(morphoview PROPERTIES WIN32_EXECUTABLE TRUE)
     if(MSVC)
@@ -32,149 +34,96 @@ endif()
 #-------------------------------------------------------------------------------
 
 include(CheckIPOSupported)
-check_ipo_supported(RESULT MORPHOVIEW_IPO_SUPPORTED OUTPUT MORPHOVIEW_IPO_OUTPUT LANGUAGES C)
+
+check_ipo_supported(
+    RESULT MORPHOVIEW_IPO_SUPPORTED
+    OUTPUT MORPHOVIEW_IPO_OUTPUT
+    LANGUAGES C
+)
+
 if(MORPHOVIEW_IPO_SUPPORTED)
-    set_property(TARGET morphoview PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set_property(TARGET morphoview PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
-    endif()
+    set_property(TARGET morphoview PROPERTY
+        INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
     message(STATUS "IPO/LTO enabled for Release")
 else()
     message(STATUS "IPO/LTO not enabled (${MORPHOVIEW_IPO_OUTPUT})")
-endif() 
-
-#-------------------------------------------------------------------------------
-# Include the morpho library
-#-------------------------------------------------------------------------------
-
-# Locate the morpho.h header file and store in MORPHO_HEADER
-find_file(MORPHO_HEADER
-          morpho.h 
-          HINTS 
-          /usr/local/include/
-          /usr/local/include/morpho
-          /opt/homebrew/include/
-          /opt/homebrew/include/morpho
-          /home/linuxbrew/.linuxbrew/include/
-          /home/linuxbrew/.linuxbrew/include/morpho
-          "C:/Program Files/Morpho/include/morpho"
-          )
-
-# Identify folder that morpho.h is located in from MORPHO_HEADER and store in MORPHO_INCLUDE
-get_filename_component(MORPHO_INCLUDE ${MORPHO_HEADER} DIRECTORY)
-
-# Add morpho headers to MORPHO_INCLUDE
-target_include_directories(morphoview PUBLIC ${MORPHO_INCLUDE})
-
-# Add morpho headers in subfolders to MORPHO_INCLUDE
-file(GLOB morpho_subdirectories LIST_DIRECTORIES true ${MORPHO_INCLUDE}/*)
-foreach(dir ${morpho_subdirectories})
-    IF(IS_DIRECTORY ${dir})
-        target_include_directories(morphoview PUBLIC ${dir})
-    ELSE()
-        CONTINUE()
-    ENDIF()
-endforeach()
-
-# Locate libmorpho
-find_library(MORPHO_LIBRARY
-    NAMES morpho libmorpho
-    PATHS
-    "C:/Program Files/Morpho/lib/" 
-)
-
-target_link_libraries(morphoview PRIVATE ${MORPHO_LIBRARY})
-
-#-------------------------------------------------------------------------------
-# GLFW and Freetype
-#-------------------------------------------------------------------------------
-
-# Locate glfw3
-find_package(glfw3 3.3 REQUIRED)
-target_link_libraries(morphoview PRIVATE glfw)
-
-# Locate freetype
-find_package(Freetype REQUIRED)
-target_link_libraries(morphoview PRIVATE Freetype::Freetype)
-
-#-------------------------------------------------------------------------------
-# ZeroMQ / CZMQ
-#-------------------------------------------------------------------------------
-
-find_path(CZMQ_INCLUDE_DIR czmq.h
-    HINTS
-        /usr/local/include
-        /opt/homebrew/include
-        /home/linuxbrew/.linuxbrew/include
-        "C:/Program Files/Morpho/include"
-)
-find_library(CZMQ_LIBRARY
-    NAMES czmq libczmq
-    HINTS
-        /usr/local/lib
-        /opt/homebrew/lib
-        /home/linuxbrew/.linuxbrew/lib
-        "C:/Program Files/Morpho/lib"
-)
-find_library(ZMQ_LIBRARY
-    NAMES zmq libzmq
-    HINTS
-        /usr/local/lib
-        /opt/homebrew/lib
-        /home/linuxbrew/.linuxbrew/lib
-        "C:/Program Files/Morpho/lib"
-)
-
-if(NOT CZMQ_INCLUDE_DIR OR NOT CZMQ_LIBRARY)
-    message(FATAL_ERROR "czmq not found. Install czmq (e.g. brew install czmq / apt install libczmq-dev).")
 endif()
 
-target_include_directories(morphoview PRIVATE ${CZMQ_INCLUDE_DIR})
-target_link_libraries(morphoview PRIVATE ${CZMQ_LIBRARY})
-if(ZMQ_LIBRARY)
-    target_link_libraries(morphoview PRIVATE ${ZMQ_LIBRARY})
-endif()
-message(STATUS "Found czmq at ${CZMQ_LIBRARY}")
-
-find_package(Threads REQUIRED)
-target_link_libraries(morphoview PRIVATE Threads::Threads)
-
-# Link with math library [needed on linux]
-IF (NOT WIN32)
-  target_link_libraries(morphoview PRIVATE m)
-ENDIF()
-
 #-------------------------------------------------------------------------------
-# Include source files
+# Sources
 #-------------------------------------------------------------------------------
 
 add_subdirectory(src)
 
-# Add glad headers
 add_subdirectory(deps/glad)
-target_include_directories(morphoview PUBLIC deps/glad/include)
+target_include_directories(morphoview PRIVATE deps/glad/include)
 
 #-------------------------------------------------------------------------------
-# Install
+# Dependencies
 #-------------------------------------------------------------------------------
 
-# When ON, `cmake --install` places the binary in <source>/bin (package-local),
-# leaving the usual build/ artifact in place. When OFF, install uses the
-# normal prefix (e.g. /usr/local/bin) as before.
-option(MORPHOVIEW_LOCAL_INSTALL
-    "Install morphoview into the package bin/ directory instead of the system prefix"
-    ON)
+find_package(morpho CONFIG REQUIRED)
 
-if(MORPHOVIEW_LOCAL_INSTALL)
-    set(MORPHOVIEW_INSTALL_BIN "${PROJECT_SOURCE_DIR}/bin")
-    message(STATUS "MORPHOVIEW_LOCAL_INSTALL: will install to ${MORPHOVIEW_INSTALL_BIN}")
-else()
-    set(MORPHOVIEW_INSTALL_BIN bin)
+find_package(glfw3 3.3 REQUIRED)
+find_package(Freetype REQUIRED)
+
+# Locate both libraries when the CZMQ package is absent.
+find_package(czmq CONFIG QUIET)
+if(NOT TARGET czmq)
+    find_path(CZMQ_INCLUDE_DIR NAMES czmq.h)
+    find_library(CZMQ_LIBRARY NAMES czmq libczmq)
+    find_path(ZMQ_INCLUDE_DIR NAMES zmq.h)
+    find_library(ZMQ_LIBRARY NAMES zmq libzmq)
+
+    if(NOT CZMQ_INCLUDE_DIR OR NOT CZMQ_LIBRARY
+            OR NOT ZMQ_INCLUDE_DIR OR NOT ZMQ_LIBRARY)
+        message(FATAL_ERROR "Could not find CZMQ and ZeroMQ.")
+    endif()
 endif()
 
-install(TARGETS morphoview RUNTIME DESTINATION "${MORPHOVIEW_INSTALL_BIN}")
+find_package(Threads REQUIRED)
 
-# Install required dlls into the target directory 
+find_library(MATH_LIBRARY m)
+
+#-------------------------------------------------------------------------------
+# Linking
+#-------------------------------------------------------------------------------
+
+target_link_libraries(morphoview PRIVATE
+    morpho::morpho
+    glfw
+    Freetype::Freetype
+    Threads::Threads
+)
+
+if(TARGET czmq)
+    target_link_libraries(morphoview PRIVATE czmq)
+else()
+    target_include_directories(morphoview PRIVATE
+        ${CZMQ_INCLUDE_DIR}
+        ${ZMQ_INCLUDE_DIR}
+    )
+    target_link_libraries(morphoview PRIVATE ${CZMQ_LIBRARY} ${ZMQ_LIBRARY})
+endif()
+
+if(MATH_LIBRARY)
+    target_link_libraries(morphoview PRIVATE ${MATH_LIBRARY})
+endif()
+
+#-------------------------------------------------------------------------------
+# Installation
+#-------------------------------------------------------------------------------
+
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "${CMAKE_CURRENT_SOURCE_DIR}"
+        CACHE PATH "Install prefix" FORCE)
+endif()
+
+install(TARGETS morphoview
+    RUNTIME DESTINATION bin
+)
+
+# Install required DLLs next to the executable.
 if(WIN32 AND DEFINED VCPKG_TARGET_TRIPLET)
     if(DEFINED VCPKG_INSTALLED_DIR)
         set(_mv_vcpkg_dll_dir "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/bin")
@@ -183,7 +132,7 @@ if(WIN32 AND DEFINED VCPKG_TARGET_TRIPLET)
     endif()
     if(EXISTS "${_mv_vcpkg_dll_dir}")
         install(DIRECTORY "${_mv_vcpkg_dll_dir}/"
-                DESTINATION "${MORPHOVIEW_INSTALL_BIN}"
+                DESTINATION bin
                 FILES_MATCHING PATTERN "*.dll")
         message(STATUS "Will install vcpkg DLLs from ${_mv_vcpkg_dll_dir}")
     endif()
