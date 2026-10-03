@@ -1,0 +1,380 @@
+// View lifecycle: detach on shutdown, fail-closed emit,
+// model switch, close/reopen. Live parts need morphoview + display.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testviewlife.morpho
+
+import graphicsserializer
+import morphoview
+import graphics
+import color
+import broadcast
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+class MorphSink with Listener {
+  init() { self.n = 0 }
+  receive(Scene scene, GraphicsEventReplaced ev) { self.n += 1 }
+  receive(Scene scene, GraphicsEventDefined ev) { self.n += 1 }
+  receive(Scene scene, GraphicsEventMoved ev) { self.n += 1 }
+  receive(Scene scene, GraphicsEventMorphed ev) { self.n += 1 }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn tri() {
+  return TriangleComplex(
+    Matrix([[-0.5, 0.5, 0], [-0.5, -0.5, 0.5], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Matrix([[1, 1, 1], [0.4, 0.4, 0.4], [0.1, 0.1, 0.1]]),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn tri2() {
+  return TriangleComplex(
+    Matrix([[-0.4, 0.4, 0], [-0.4, -0.4, 0.4], [0, 0, 0]]),
+    Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+    Matrix([[0.2, 0.8, 0.2], [0.2, 0.8, 0.2], [0.2, 0.8, 0.2]]),
+    Matrix([[1], [1], [1]])
+  )
+}
+
+fn listenBuf(g) {
+  var buf = Buf()
+  var ser = SceneSerializer(g, buf)
+  ser.serialize()
+  var v = View()
+  v.closed = false
+  v.graphics = g
+  v.serializer = ser
+  v.listen(g)
+  buf.lines = []
+  return (v, buf, ser)
+}
+
+/* ---- coalesced Moved iterates event.ids (Buf sink, no viewer) ---- */
+var gCo = Scene()
+var idCo1 = gCo.display(tri(), [0, 0, 0])
+var idCo2 = gCo.display(tri(), [1, 0, 0])
+var bufCo = Buf()
+var serCo = SceneSerializer(gCo, bufCo)
+serCo.serialize()
+var vCo = View()
+vCo.closed = false
+vCo.graphics = gCo
+vCo.serializer = serCo
+vCo.listen(gCo)
+bufCo.lines = []
+gCo.beginBatch()
+gCo.move(idCo1, [0.1, 0, 0])
+gCo.move(idCo2, [1.1, 0, 0])
+gCo.endBatch()
+expect(countPrefix(bufCo.lines, "d ") == 2, "coalesced move poses both ids")
+vCo.ignore(gCo)
+
+/* ---- receive(Morphed) emits U V from old→new (Buf sink, no viewer) ---- */
+var gMorphBuf = Scene()
+var idMorphBuf = gMorphBuf.display(tri(), [0, 0, 0])
+var bufMorph = Buf()
+var serMorph = SceneSerializer(gMorphBuf, bufMorph)
+serMorph.serialize()
+var vMorphBuf = View()
+vMorphBuf.closed = false
+vMorphBuf.graphics = gMorphBuf
+vMorphBuf.serializer = serMorph
+vMorphBuf.listen(gMorphBuf)
+bufMorph.lines = []
+var nextMorph = tri2()
+expect(serMorph.canUpdateVertices(idMorphBuf, gMorphBuf.findEntry(idMorphBuf).item, nextMorph),
+       "same-layout U V")
+gMorphBuf.morph(idMorphBuf, nextMorph)
+expect(countPrefix(bufMorph.lines, "U V") == 1, "Morphed listener emits U V")
+vMorphBuf.ignore(gMorphBuf)
+
+/* ---- batched morph of two ids emits both ---- */
+var gAB = Scene()
+var idA = gAB.display(tri(), [0, 0, 0])
+var idB = gAB.display(tri(), [1, 0, 0])
+var ab = listenBuf(gAB)
+var vAB = ab[0]
+var bufAB = ab[1]
+gAB.beginBatch()
+gAB.morph(idA, tri2())
+gAB.morph(idB, tri2())
+gAB.endBatch()
+expect(countPrefix(bufAB.lines, "U V") == 2, "batched morph updates both ids")
+expect(countPrefix(bufAB.lines, "X D") == 0, "same-layout morphs do not replace")
+vAB.ignore(gAB)
+
+/* ---- morph A, morph B, remove A: skip A, still update B ---- */
+var gSkip = Scene()
+var idSkipA = gSkip.display(tri(), [0, 0, 0])
+var idSkipB = gSkip.display(tri(), [1, 0, 0])
+var skip = listenBuf(gSkip)
+var vSkip = skip[0]
+var bufSkip = skip[1]
+gSkip.beginBatch()
+gSkip.morph(idSkipA, tri2())
+gSkip.morph(idSkipB, tri2())
+gSkip.remove(idSkipA)
+gSkip.endBatch()
+expect(isnil(gSkip.findEntry(idSkipA)), "A removed from Scene")
+expect(!isnil(gSkip.findEntry(idSkipB)), "B remains")
+expect(countPrefix(bufSkip.lines, "U V") == 1, "B still receives U V")
+expect(countPrefix(bufSkip.lines, "X D ${idSkipA}") == 1, "A is removed")
+vSkip.ignore(gSkip)
+
+/* ---- inapplicable U V falls back to replace; later id still morphs ---- */
+var gFb = Scene()
+var idFbA = gFb.display(tri(), [0, 0, 0])
+var idFbB = gFb.display(tri(), [1, 0, 0])
+var fb = listenBuf(gFb)
+var vFb = fb[0]
+var bufFb = fb[1]
+var serFb = fb[2]
+var sph = Sphere([0, 0, 0], 1, color=Red)
+expect(!serFb.canUpdateVertices(idFbA, gFb.findEntry(idFbA).item, sph),
+       "TC -> Sphere cannot U V")
+gFb.beginBatch()
+gFb.morph(idFbA, sph)
+gFb.morph(idFbB, tri2())
+gFb.endBatch()
+expect(countPrefix(bufFb.lines, "X D ${idFbA}") == 1, "A falls back to replace")
+expect(countPrefix(bufFb.lines, "U V") == 1, "B still receives U V")
+vFb.ignore(gFb)
+
+/* ---- batched replace of two ids ---- */
+var gRepAB = Scene()
+var idRepA = gRepAB.display(tri(), [0, 0, 0])
+var idRepB = gRepAB.display(tri(), [1, 0, 0])
+var repAB = listenBuf(gRepAB)
+var vRepAB = repAB[0]
+var bufRepAB = repAB[1]
+var serRepAB = repAB[2]
+gRepAB.beginBatch()
+gRepAB.replace(idRepA, tri2())
+gRepAB.replace(idRepB, tri2())
+gRepAB.endBatch()
+expect(countPrefix(bufRepAB.lines, "X D ${idRepA}") == 1, "A replaced")
+expect(countPrefix(bufRepAB.lines, "X D ${idRepB}") == 1, "B replaced")
+expect(serRepAB.objects.contains(idRepA) && serRepAB.objects.contains(idRepB),
+       "both ids still mapped")
+vRepAB.ignore(gRepAB)
+
+/* ---- replace A, replace B, remove A: skip A, still replace B ---- */
+var gRepSkip = Scene()
+var idRSA = gRepSkip.display(tri(), [0, 0, 0])
+var idRSB = gRepSkip.display(tri(), [1, 0, 0])
+var repSkip = listenBuf(gRepSkip)
+var vRepSkip = repSkip[0]
+var bufRepSkip = repSkip[1]
+var serRepSkip = repSkip[2]
+var itemRSB = tri2()
+gRepSkip.beginBatch()
+gRepSkip.replace(idRSA, tri2())
+gRepSkip.replace(idRSB, itemRSB)
+gRepSkip.remove(idRSA)
+gRepSkip.endBatch()
+expect(isnil(gRepSkip.findEntry(idRSA)), "A removed from Scene")
+expect(gRepSkip.findEntry(idRSB).item == itemRSB, "B has final item")
+expect(countPrefix(bufRepSkip.lines, "X D ${idRSA}") == 1, "A removed once")
+expect(countPrefix(bufRepSkip.lines, "X D ${idRSB}") == 1, "B replaced")
+expect(!serRepSkip.objects.contains(idRSA), "A not in serializer")
+expect(serRepSkip.objects.contains(idRSB), "B remains in serializer")
+vRepSkip.ignore(gRepSkip)
+
+/* ---- Scene.morph notifies Morphed ---- */
+var gSilent = Scene()
+var idSilent = gSilent.display(tri(), [0, 0, 0])
+var sink = MorphSink()
+sink.listen(gSilent)
+expect(gSilent.morph(idSilent, tri2()), "Scene.morph succeeds")
+expect(sink.n == 1, "Scene.morph notifies Morphed")
+expect(gSilent.replace(idSilent, tri()), "Scene.replace succeeds")
+expect(sink.n == 2, "Scene.replace notifies")
+
+/* ---- Scene.morph; no model rollback if a listener is attached ---- */
+var gRoll = Scene()
+var idRoll = gRoll.display(tri(), [0, 0, 0])
+var nextItem = tri2()
+var vRoll = View()
+vRoll.closed = false
+vRoll.graphics = gRoll
+vRoll.serializer = SceneSerializer(gRoll, vRoll)
+expect(gRoll.morph(idRoll, nextItem), "Scene.morph updates the Scene")
+expect(gRoll.findEntry(idRoll).item == nextItem, "Scene keeps the new item")
+
+/* ---- same-layout morph still updates the Scene without a socket ---- */
+var gUV = Scene()
+var idUV = gUV.display(tri(), [0, 0, 0])
+var prevUV = gUV.findEntry(idUV).item
+var nextUV = tri2()
+var vUV = View()
+vUV.closed = false
+vUV.graphics = gUV
+var serUV = SceneSerializer(gUV, vUV)
+serUV.serialize()
+vUV.cmdLines = []
+vUV.serializer = serUV
+expect(serUV.canUpdateVertices(idUV, prevUV, nextUV), "mapped same-layout is U V")
+expect(gUV.morph(idUV, nextUV), "Scene.morph succeeds")
+expect(gUV.findEntry(idUV).item == nextUV, "U V path keeps the new item")
+
+/* ---- layout-changing morph still updates the Scene without a socket ---- */
+var gRepFail = Scene()
+var idRepFail = gRepFail.display(tri(), [0, 0, 0])
+var prevRep = gRepFail.findEntry(idRepFail).item
+var nextRep = Sphere([0, 0, 0], 1, color=Red)
+var vRepFail = View()
+vRepFail.closed = false
+vRepFail.graphics = gRepFail
+var serRepFail = SceneSerializer(gRepFail, vRepFail)
+serRepFail.serialize()
+vRepFail.cmdLines = []
+vRepFail.serializer = serRepFail
+expect(!serRepFail.canUpdateVertices(idRepFail, prevRep, nextRep),
+       "TC -> Sphere is replace")
+expect(gRepFail.morph(idRepFail, nextRep), "Scene.morph succeeds")
+expect(gRepFail.findEntry(idRepFail).item == nextRep, "replace path keeps the new item")
+
+/* ---- failed live emit detaches ---- */
+var gFail = Scene()
+var idFail = gFail.display(tri(), [0, 0, 0])
+var vFail = View()
+vFail.closed = false
+vFail.graphics = gFail
+vFail.serializer = SceneSerializer(gFail, vFail)
+vFail.listen(gFail)
+expect(gFail.listeners.contains(vFail), "listening before failed emit")
+gFail.move(idFail, [1, 0, 0])
+expect(vFail.closed, "failed emit shuts down")
+expect(isnil(vFail.graphics), "graphics cleared")
+expect(isnil(vFail.serializer), "serializer cleared")
+expect(!gFail.listeners.contains(vFail), "detached after failed emit")
+
+fn contains(s, needle) {
+  if (isnil(s)) return false
+  var n = needle.count(), m = s.count()
+  if (n > m) return false
+  for (i in 0..(m-n)) {
+    if (s.substring(i, i+n) == needle) return true
+  }
+  return false
+}
+
+/* ---- timeout waiting for ok detaches ---- */
+var vT = View(connecttimeout=80, pollms=40)
+vT.closed = false
+vT._transportBind()
+expect(!vT._waitOk(), "timeout waiting for ok")
+expect(vT.closed, "timeout shuts down")
+expect(!vT._transportReady(), "transport closed after timeout")
+expect(isnil(vT.graphics), "graphics nil after timeout")
+
+/* ---- parse error shuts down ---- */
+var vErr = View()
+expect(!vErr.open("S 1 3\nzzz\n"), "parse error fails open")
+expect(!isnil(vErr.lastErr), "lastErr is set")
+expect(contains(vErr.lastErr, "line"), "reports line")
+expect(contains(vErr.lastErr, "char"), "reports char")
+expect(vErr.closed, "parse error shuts down")
+expect(!vErr._transportReady(), "transport closed after parse error")
+
+/* ---- live: close detaches; reopen; Scene A -> B; Scene -> Graphics ---- */
+print "opening View life..."
+var gA = Scene()
+gA.title = "life-A"
+var idA = gA.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+var v = View(gA)
+expect(!v.closed, "opened A")
+expect(gA.listeners.contains(v), "listening to A")
+
+var gB = Scene()
+gB.title = "life-B"
+var idB = gB.display(Sphere([0, 0, 0], 1, color=Blue), [0.4, 0, 0], scale=0.3)
+expect(v.update(gB), "switch to B")
+System.sleep(0.15)
+v.poll(timeoutms=0)
+expect(!v.closed, "open after switch to B")
+expect(!gA.listeners.contains(v), "detached A")
+expect(gB.listeners.contains(v), "listening to B")
+
+var gStat = Graphics()
+gStat.title = "life-G"
+gStat.display(PointCloud([[0, 0, 0]], color=Green))
+expect(v.update(gStat), "switch to Graphics")
+System.sleep(0.15)
+v.poll(timeoutms=0)
+expect(!v.closed, "open after Graphics")
+expect(!gB.listeners.contains(v), "detached B")
+expect(!gStat.respondsto("subscribe"), "Graphics is not a Broadcaster")
+
+var gD = Scene()
+gD.title = "life-G2S"
+var idD = gD.display(tri(), [0, 0, 0], scale=0.8)
+expect(v.update(gD), "Graphics -> Scene")
+System.sleep(0.15)
+v.poll(timeoutms=0)
+expect(!v.closed, "open after Graphics -> Scene")
+expect(gD.listeners.contains(v), "listening after Graphics -> Scene")
+
+v.close()
+expect(v.closed, "closed")
+expect(isnil(v.graphics), "graphics nil after close")
+expect(!v._transportReady(), "transport closed after close")
+expect(!gD.listeners.contains(v), "detached D after close")
+
+var gC = Scene()
+gC.title = "life-reopen"
+var idC = gC.display(tri(), [0, 0, 0], scale=0.8)
+expect(v.open(gC), "reopen on Scene")
+expect(!v.closed, "reopened")
+expect(gC.listeners.contains(v), "listening after reopen")
+gC.move(idC, [0.1, 0, 0])
+System.sleep(0.1)
+v.poll(timeoutms=0)
+expect(!v.closed, "pose after reopen")
+
+v.close()
+expect(!gC.listeners.contains(v), "detached after close")
+
+/* ---- viewer-initiated close (Q / window.closed) ---- */
+var gQ = Scene()
+gQ.title = "life-Q"
+gQ.display(tri(), [0, 0, 0])
+var vQ = View(gQ)
+expect(gQ.listeners.contains(vQ), "listening before viewer close")
+vQ._transportSend("Q")
+var waitedQ = 0
+while (!vQ.closed && waitedQ < 5000) {
+  vQ.poll(timeoutms=50)
+  waitedQ += 50
+}
+expect(vQ.closed, "window.closed shuts down")
+expect(!gQ.listeners.contains(vQ), "detached after viewer close")
+expect(isnil(vQ.graphics), "graphics nil after viewer close")
+expect(!vQ._transportReady(), "transport closed after viewer close")
+print "ok"

@@ -1,0 +1,79 @@
+// Vector field — authored Arrows; shared unit mesh via Scene.replace.
+// Color by continuous x-projection.
+//
+//   morpho6 examples/vectors.morpho
+//
+// Close the viewer window (or wait for the run to finish) to exit.
+
+import morphoview
+import graphics
+import color
+import constants
+
+var nX = 10
+var nY = 10
+var nFrames = 600
+var dt = 1/50
+var spacing = 0.32
+var tipFrac = 0.22   // Arrow tip length fraction (= aspectratio)
+var shaftAR = 0.06   // shaft radius = length * shaftAR
+var vxScale = 0.35   // tanh scale for x-projection → color
+var cmap = TundraMap()
+
+/** Map vx → [0,1] through TundraMap. */
+fn colorByVx(vx) {
+  var u = 0.5 + 0.5*tanh(vx/vxScale)
+  return cmap.rgb(u)
+}
+
+fn field(x, y, t) {
+  var vx = -y + 0.35*sin(t + x)
+  var vy = x + 0.35*cos(t + y)
+  var vz = 0.25*sin(0.7*t + x + y)
+  return Matrix([vx, vy, vz])
+}
+
+fn fieldArrow(o, t) {
+  var f = field(o[0], o[1], t)
+  var nrm = f.norm()
+  if (!(nrm > 1e-8)) return nil
+  var len = 0.22 + 0.18*tanh(nrm)
+  var tip = o + (len/nrm)*f
+  return Arrow(o, tip, radius=len*shaftAR, aspectratio=tipFrac, n=10, color=colorByVx(f[0]))
+}
+
+var g = Scene(title="Vectors", background=Color(0.07, 0.08, 0.1))
+var arrIds = []
+var origins = []
+
+for (ix in 0...nX) {
+  for (iy in 0...nY) {
+    var ox = (Float(ix) - 0.5*Float(nX-1))*spacing
+    var oy = (Float(iy) - 0.5*Float(nY-1))*spacing
+    var o = Matrix([ox, oy, 0])
+    origins.append(o)
+    var arr = fieldArrow(o, 0)
+    if (isnil(arr)) {
+      arr = Arrow(o, o + Matrix([0, 0, 0.35]), radius=0.35*shaftAR,
+                  aspectratio=tipFrac, n=10, color=White)
+    }
+    arrIds.append(g.display(arr))
+  }
+}
+
+var v = View(g, connecttimeout=20000)
+
+for (frame in 1...nFrames) {
+  if (v.closed) break
+  var t = Float(frame)*dt
+  g.beginBatch()
+  for (i in 0...origins.count()) {
+    var arr = fieldArrow(origins[i], t)
+    if (!isnil(arr)) g.replace(arrIds[i], arr)
+  }
+  g.endBatch()
+  System.sleep(dt)
+  v.poll(timeoutms=0)
+}
+
+if (!v.closed) v.close()

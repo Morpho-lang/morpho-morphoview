@@ -1,0 +1,135 @@
+// GraphicsSerializer: sibling mixin overloads and unit-mesh cache.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testgraphicsserializer.morpho
+
+import graphicsserializer
+import graphics
+import color
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn firstPrefix(lines, prefix) {
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (j in 0...prefix.count()) {
+        if (line[j] != prefix[j]) { ok = false; break }
+      }
+      if (ok) return line
+    }
+  }
+  return nil
+}
+
+fn drawVids(lines) {
+  var vids = []
+  for (line in lines) {
+    if (line.count() >= 2 && line[0] == "d" && line[1] == " ") {
+      var tok = line.split(" ")
+      if (tok.count() >= 3) vids.append(tok[2])
+    }
+  }
+  return vids
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+var s = GraphicsSerializer(Graphics(), Buf())
+
+/* ---- sibling _vertexFormat overloads compose ---- */
+var tri = Sphere([0, 0, 0], 1).toTriangleComplex()
+var pc = PointCloud([[0, 0, 0]])
+var ls = LineSet([[0, 0, 0], [1, 0, 0]])
+s._vertexFormat(tri, White)
+s._vertexFormat(pc, White)
+s._vertexFormat(ls, White)
+expect(firstPrefix(s.out.lines, "v \"xn\"") == "v \"xn\"", "TriangleComplex xn")
+expect(firstPrefix(s.out.lines, "v \"x\"") == "v \"x\"", "PointCloud/LineSet x")
+
+/* ---- sibling _localMatrix overloads compose ---- */
+var sphM = s._localMatrix(Sphere([1, 2, 3], 0.5))
+expect(!isnil(sphM), "Sphere local matrix")
+expect(!isnil(s._localMatrix(Text("Hi", [1, 0, 0]))), "Text local matrix")
+expect(!isnil(s._localMatrix(Cylinder([0, 0, 0], [0, 0, 1], n=6))),
+       "Cylinder local matrix")
+expect(isnil(s._localMatrix(pc)), "fallback local matrix is nil")
+
+/* ---- degenerate shafts emit nothing ---- */
+var gz = Graphics()
+gz.display(Cylinder([0, 0, 0], [0, 0, 0], n=6))
+gz.display(Arrow([1, 1, 1], [1, 1, 1], n=6))
+var zbuf = Buf()
+GraphicsSerializer(gz, zbuf).serialize()
+expect(countPrefix(zbuf.lines, "o ") == 0, "degenerate emits no object")
+expect(countPrefix(zbuf.lines, "d ") == 0, "degenerate emits no draw")
+
+/* ---- cylinder cache by n; arrow cache by (n, ar) ---- */
+var gs = Graphics()
+for (i in 0...5) {
+  gs.display(Cylinder([Float(i), 0, 0], [Float(i), 0, 1],
+                      aspectratio=0.1+0.02*Float(i), n=6, color=Red))
+}
+gs.display(Arrow([0, 1, 0], [0, 2, 0], aspectratio=0.2, n=6, color=Green))
+gs.display(Arrow([1, 1, 0], [1, 2, 0], aspectratio=0.2, n=6, color=Blue))
+gs.display(Arrow([2, 1, 0], [2, 2, 0], aspectratio=0.35, n=6, color=Yellow))
+
+var buf = Buf()
+GraphicsSerializer(gs, buf).serialize()
+expect(countPrefix(buf.lines, "o ") == 3, "1 cylinder o + 2 arrow o")
+expect(countPrefix(buf.lines, "d ") == 8, "eight draw slots")
+expect(countPrefix(buf.lines, "m ") >= 8, "shaft local m")
+var vids = drawVids(buf.lines)
+expect(vids[0] == vids[4], "cylinders share o")
+expect(vids[5] == vids[6], "same-ar arrows share o")
+expect(vids[5] != vids[0], "arrow o is not cylinder o")
+expect(vids[7] != vids[5], "different-ar arrow is a new o")
+expect(firstPrefix(buf.lines, "v \"xn\"") == "v \"xn\"", "cached shaft is xn")
+
+/* ---- sphere cache by refinement level; offset sphere has m ---- */
+var gsp = Graphics()
+gsp.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.3)
+gsp.display(Sphere([0, 0, 0], 1, color=Blue), [1, 0, 0], scale=0.3)
+gsp.display(Sphere([1, 2, 3], 0.5, color=Green))
+var sbuf = Buf()
+GraphicsSerializer(gsp, sbuf).serialize()
+expect(countPrefix(sbuf.lines, "o ") == 2, "two sphere refinement levels")
+expect(countPrefix(sbuf.lines, "d ") == 3, "three sphere draws")
+expect(countPrefix(sbuf.lines, "m ") >= 1, "offset sphere emits m")
+
+/* ---- PointCloud, LineSet, Text still define ---- */
+var gm = Graphics()
+gm.display(PointCloud([[0, 0, 0], [1, 0, 0]], color=Red))
+gm.display(LineSet([[0, 0, 0], [1, 0, 0]]))
+gm.display(Text("Hi", [0, 0, 0], color=White))
+var mbuf = Buf()
+GraphicsSerializer(gm, mbuf).serialize()
+expect(countPrefix(mbuf.lines, "p") >= 1, "point cloud emitted")
+expect(countPrefix(mbuf.lines, "l ") >= 1 || countPrefix(mbuf.lines, "l") >= 1,
+       "line set emitted")
+expect(countPrefix(mbuf.lines, "T ") == 1, "text emitted")
+expect(countPrefix(mbuf.lines, "F ") == 1, "font emitted")
+
+print "ok"

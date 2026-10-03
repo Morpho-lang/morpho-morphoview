@@ -1,0 +1,23 @@
+// Smoke test: View.close() sends Q and exits via window.closed (no Escape).
+// Expect: prints "ok" then exits.
+// Requires: morphoview on PATH, morpho-zeromq package, display available.
+//
+//   cd test && morpho6 testquit.morpho
+
+import morphoview
+
+var f = File("command/polyhedra", "read")
+var commands = f.readall()
+f.close()
+
+var v = View()
+if (!v.open(commands)) {
+  print "open failed"
+} else {
+  v.close()
+  if (v.closed) {
+    print "ok"
+  } else {
+    print "close failed"
+  }
+}

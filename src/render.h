@@ -4,7 +4,6 @@
  *  @brief OpenGL rendering
  */
 
-
 #ifndef render_h
 #define render_h
 
@@ -19,12 +18,7 @@
 
 DECLARE_VARRAY(GLuint, GLuint)
 
-/** @brief Structure to hold information about OpenGL buffers.
- *  @details Each of these includes several types of OpenGL buffer:
- *  - a vertex array object that saves OpenGL state (e.g. the structure of the vertex buffer) for swift use.
- *  - a vertex buffer object to hold vertex and attribute data.
- *  - element array buffer to hold draw instruction lists.
- * The renderer consolidates objects and references into as few OpenGL objects as possible. */
+/** OpenGL VAO, VBO and element buffer for one object's vertices. */
 typedef struct {
     char *format;
     GLuint array; /* Handle for vertex array object */
@@ -36,26 +30,25 @@ typedef struct {
 
 DECLARE_VARRAY(renderglbuffers, renderglbuffers)
 
-/** @brief An object to be rendered
- *  @details Points to the appropriate OpenGL buffer. */
+/** A scene object bound to a GL buffer (index, not a raw pointer — the varray reallocates). */
 typedef struct {
     gobject *obj; /* The original object */
-    renderglbuffers *buffer; /* Pointer to OpenGL buffer collection */
+    int bufferindex; /* Index into renderer.glbuffers, or -1 if unset */
     int voffset; /* Offset into the vertex buffer */
     int eoffset; /* Offset into the element array buffer */
 } renderobject;
 
 DECLARE_VARRAY(renderobject, renderobject)
 
-/** @brief A font to be used */
+/** Font with an uploaded atlas texture. */
 typedef struct {
     textfont *font;
-    GLuint texture;
+    GLuint texture; /* Handle for atlas texture */
 } renderfont;
 
 DECLARE_VARRAY(renderfont, renderfont)
 
-/** @brief Render instructions */
+/** One packed render-list instruction. */
 typedef struct {
     enum {
         RNOP,
@@ -65,7 +58,8 @@ typedef struct {
         RLINES, /* Draw lines */
         RPOINTS, /* Draw points */
         RTEXT, /* Draw text */
-        RCOLOR, /* Set the current color */
+        RCOLOR, /* Set the current color (uniform albedo for geometry / text) */
+        RSHADE, /* Set shade mode + Phong coefficients */
     } instruction;
     
     union {
@@ -88,8 +82,17 @@ typedef struct {
         } text;
         
         struct {
-            float rgb[3]; 
+            float rgba[4];
+            int use_uniform; /* 1 = uniform-albedo program (no vColor); text always uses rgb */
         } color;
+
+        struct {
+            int mode; /* SCENE_SHADE_SHADED or SCENE_SHADE_FLAT */
+            float ka;
+            float kd;
+            float ks;
+            float shininess;
+        } shade;
     } data;
     
     renderobject *obj;
@@ -97,22 +100,77 @@ typedef struct {
 
 DECLARE_VARRAY(renderinstruction, renderinstruction)
 
+/** Cached uniform locations for the geometry program. */
+typedef struct {
+    GLint model;
+    GLint view;
+    GLint proj;
+    GLint normalMatrix;
+    GLint nLights;
+    GLint lightPos;
+    GLint lightColor;
+    GLint ambientColor;
+    GLint uColor; /* Uniform-albedo program only; -1 on the vertex-color program */
+    GLint uFlat;
+    GLint ka;
+    GLint kd;
+    GLint ks;
+    GLint shininess;
+} renderuniforms;
+
+/** Cached uniform locations for the text program. */
+typedef struct {
+    GLint model;
+    GLint view;
+    GLint proj;
+    GLint textColor;
+} rendertextuniforms;
+
+/** Transparent draw replayed after the opaque pass (sorted far to near). */
+typedef struct {
+    GLenum mode;
+    int length;
+    void *offset;
+    GLuint vao;
+    mat4x4 model;
+    float rgba[4];
+    int use_uniform;
+    int uflat;
+    float ka;
+    float kd;
+    float ks;
+    float shininess;
+    float depth; /* view-space z of object centroid; ascending = far → near */
+} rendertdraw;
+
+DECLARE_VARRAY(rendertdraw, rendertdraw)
+
 /** Renderer object. */
 typedef struct {
-    GLuint shader;
+    GLuint shader; /* Vertex-color program (vColor / vAlpha) */
+    GLuint shader_unif; /* Uniform-albedo program; no vColor (xn + C) */
     GLuint textshader;
+    renderuniforms uniforms;
+    renderuniforms uniforms_unif;
+    rendertextuniforms textuniforms;
     varray_renderobject objects;
     varray_renderfont fonts;
     varray_renderglbuffers glbuffers;
     varray_renderinstruction renderlist;
+    varray_rendertdraw tdraws; /* scratch: transparent draws (capacity retained) */
     GLuint fontvao;
     GLuint fontvbo;
+    mat4x4 frameview; /* view matrix for the current frame (normalMatrix) */
+    mat4x4 frameproj; /* projection matrix for the current frame */
 } renderer;
 
 bool render_init(renderer *r);
+void render_reset(renderer *r); /**< Drop GL geometry; keep shaders */
 void render_clear(renderer *r);
 
 void render_preparescene(renderer *r, scene *s);
-void render_render(renderer *r, float aspectratio, mat4x4 view);
+/** Upload same-length vertex data; false if no prepared buffer exists. */
+bool render_updateobjectvertices(renderer *r, scene *s, int objectid);
+void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s);
 
 #endif /* render_h */

@@ -1,0 +1,283 @@
+// povray: write() SDL for GraphicsEntry. No povray binary required.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testpovray.morpho
+
+import povray
+import graphics
+import color
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn contains(s, needle) {
+  var n = needle.count(), m = s.count()
+  if (n > m) return false
+  for (i in 0..(m-n)) {
+    if (s.substring(i, i+n) == needle) return true
+  }
+  return false
+}
+
+fn scene(g, camera=nil, transparent=false) {
+  var pov = isnil(camera) ? POVRaytracer(g) : POVRaytracer(g, camera)
+  var path = pov.write("/tmp/testpovray.pov", transparent=transparent)
+  return File(path).readall()
+}
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn joined(lines) { return String.join(lines, "\n") }
+
+/* ---- import / public veneer ---- */
+expect(POVRaytracer(Graphics()).clss() == POVRaytracer, "POVRaytracer")
+expect(POVSerializer(Graphics(), Buf()).clss() == POVSerializer, "POVSerializer")
+
+/* ---- Camera keyword + positional ---- */
+var g0 = Graphics()
+g0.display(Sphere([0,0,0], 1, color=Red))
+var cam = Camera(look_at=Matrix([0.1, 0.2, 0.3]), width=800, height=600, antialias=false)
+var povKw = POVRaytracer(g0, camera=cam)
+expect(povKw.camera.width == 800 && povKw.camera.antialias == false, "Camera kwargs")
+var kwSdl = File(povKw.write("/tmp/testpovray.pov")).readall()
+expect(contains(kwSdl, "right <-1.33333"), "aspect from width/height")
+var povPos = POVRaytracer(g0, cam)
+expect(povPos.camera.look_at[0] == 0.1, "positional Camera")
+
+/* ---- GraphicsEntry: authored sphere (no unit conversion) ---- */
+var g = Graphics()
+g.display(Sphere([0,0,0], 0.5, color=Red))
+var sdl = scene(g)
+expect(contains(sdl, "sphere { <0, 0, 0>, 0.5"), "authored sphere radius")
+expect(contains(sdl, "pigment { rgb <1, 0, 0> }"), "Red pigment")
+expect(!contains(sdl, "mesh2"), "POV Sphere is native, not tessellated")
+
+var gBig = Graphics()
+gBig.display(Sphere([0, 0, 0], 50, color=Red))
+var sBig = scene(gBig)
+expect(contains(sBig, "sphere { <0, 0, 0>, 50"), "large authored sphere")
+expect(!contains(sBig, "mesh2"), "large Sphere is not a triangle mesh")
+
+/* ---- Color.a → rgbt ---- */
+var ga = Graphics()
+ga.display(Sphere([0,0,0], 0.3, color=Color(1, 0, 0, 0.4)))
+expect(contains(scene(ga), "rgbt <1, 0, 0, 0.6>"), "Color.a → transmit 1-a")
+var gt = Graphics()
+gt.display(Sphere([1,0,0], 0.4, color=Blue.opacity(0.5)))
+var st = scene(gt)
+expect(contains(st, "rgbt <0, 0, 1, 0.5>"), "opacity → rgbt")
+expect(contains(st, "sphere { <1, 0, 0>, 0.4"), "authored center")
+expect(!contains(st, "transmit 0.5"), "no legacy transmit keyword")
+
+/* ---- Cylinder / Arrow / Tube / Text / points / lines ---- */
+var g2 = Graphics()
+g2.display(Cylinder([0,0,0], [0,0,1], color=Blue))
+g2.display(Arrow([0.5,0,0], [1,0,0], color=Green))
+g2.display(Tube([[0,0,0],[0,0,1]], 0.05, color=Orange))
+g2.display(Text("hi", [0,1,0], color=White))
+g2.display(PointCloud([[0,0,0],[1,0,0]], color=Yellow))
+g2.display(LineSet([[0,0,0],[1,0,0]], color=Cyan))
+g2.display(Polygon([[0,0,0.5],[0.4,0,0.5],[0.4,0.4,0.5],[0,0.4,0.5]], color=Magenta))
+var s2 = scene(g2)
+expect(contains(s2, "cylinder { <0, 0, 0>, <0, 0, 1>, 0.1"), "authored cylinder radius")
+expect(contains(s2, "union {"), "arrow union")
+expect(contains(s2, "cone {"), "arrow cone")
+expect(contains(s2, "sphere_sweep"), "tube sweep")
+expect(contains(s2, "text { ttf"), "text")
+expect(contains(s2, "cyrvetic.ttf"), "default POV font")
+expect(contains(s2, "sphere { <0, 0, 0>, 0.02"), "pointcloud")
+expect(contains(s2, "cylinder { <0, 0, 0>, <1, 0, 0>, 0.01"), "lineset")
+expect(contains(s2, "finish { ambient 1 diffuse 0 }"), "PointCloud/LineSet default flat")
+expect(contains(s2, "mesh2"), "Polygon tessellates to mesh2")
+
+/* ---- quoted text is escaped ---- */
+var gq = Graphics()
+gq.display(Text("say \"hi\"", [0,0,0], color=White))
+expect(contains(scene(gq), "\\\"hi\\\""), "escaped quotes in text")
+var gbsl = Graphics()
+gbsl.display(Text("a\\b", [0,0,0], color=White))
+expect(contains(scene(gbsl), "a\\\\b"), "escaped backslash in text")
+
+/* ---- flat + per-vertex colors on TriangleComplex ---- */
+var pos = Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]])
+var nrm = Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]])
+var cols = Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]])
+var conn = Matrix([[1], [1], [1]])
+var gf = Graphics()
+gf.display(TriangleComplex(pos, nrm, cols, conn), flat=true)
+var sf = scene(gf)
+expect(contains(sf, "texture_list"), "per-vertex texture_list")
+expect(contains(sf, "finish { ambient 1 diffuse 0 }"), "flat finish on vertex colors")
+
+var gu = Graphics()
+gu.display(TriangleComplex(pos, nrm, Red, conn), flat=true)
+var su = scene(gu)
+expect(!contains(su, "texture_list"), "uniform color is not texture_list")
+expect(contains(su, "finish { ambient 1 diffuse 0 }"), "flat finish on uniform color")
+
+/* ---- ColorTable + entry color=Red is uniform pigment ---- */
+var gov = Graphics()
+gov.display(TriangleComplex(pos, nrm, cols, conn), color=Red)
+var sov = scene(gov)
+expect(!contains(sov, "texture_list"), "entry override hides ColorTable")
+expect(contains(sov, "pigment { rgb <1, 0, 0> }"), "override is uniform Red")
+
+/* ---- transparent background ---- */
+var gb = Graphics(background=White)
+gb.display(Sphere([0,0,0], 1, color=Black))
+var sb = scene(gb, transparent=true)
+expect(contains(sb, "background { rgbt <1, 1, 1, 1> }"), "transparent background rgbt")
+
+/* ---- camera / lights via Camera object ---- */
+var g4 = Graphics(background=White)
+g4.display(Sphere([0,0,0], 1, color=Black))
+var pov4 = POVRaytracer(g4)
+pov4.camera.viewpoint = Matrix([0,0,8])
+pov4.camera.viewangle = 35
+pov4.camera.light = [Matrix([10,10,10])]
+var s4 = File(pov4.write("/tmp/testpovray.pov")).readall()
+expect(contains(s4, "background { rgb <1, 1, 1> }"), "white background")
+expect(contains(s4, "location <0, 0, 8>"), "viewpoint field")
+expect(contains(s4, "angle 35"), "viewangle field")
+expect(contains(s4, "light_source { <10, 10, 10>"), "custom light")
+
+/* [Compatibility shim] tracer-level camera fields (old POVRaytracer API) */
+var gLegacyCam = Graphics(background=White)
+gLegacyCam.display(Sphere([0,0,0], 1, color=Black))
+var povLegacy = POVRaytracer(gLegacyCam)
+povLegacy.viewpoint = Matrix([0, 0, 9])
+povLegacy.viewangle = 40
+povLegacy.light = [Matrix([1, 2, 3])]
+var sLegacy = File(povLegacy.write("/tmp/testpovray.pov")).readall()
+expect(contains(sLegacy, "location <0, 0, 9>"), "legacy pov.viewpoint")
+expect(contains(sLegacy, "angle 40"), "legacy pov.viewangle")
+expect(contains(sLegacy, "light_source { <1, 2, 3>"), "legacy pov.light")
+
+/* ---- partial background alpha and +UA ---- */
+var gp = Graphics(background=Color(1, 0, 0, 0.5))
+gp.display(Sphere([0,0,0], 1, color=Black))
+var povP = POVRaytracer(gp)
+expect(contains(File(povP.write("/tmp/testpovray.pov")).readall(),
+                "background { rgbt <1, 0, 0, 0.5> }"), "partial background transmit 1-a")
+expect(contains(povP._renderFlags(false, true), "+UA"), "+UA from background alpha")
+expect(!contains(pov4._renderFlags(false, true), "+UA"), "no +UA when opaque")
+expect(contains(povP._renderFlags(true, true), "+UA"), "+UA when transparent=true")
+
+/* Custom leftover .filter is ignored (legacy keywords die at construction). */
+class LegacyPrim is GraphicsPrimitive {
+  init() {
+    super.init(color=Red)
+    self.filter = 0.2
+  }
+}
+var gl = Graphics()
+gl.display(LegacyPrim())
+var sdlL = File(POVRaytracer(gl).write("/tmp/testpovray.pov")).readall()
+expect(contains(sdlL, "camera {"), "write succeeds with leftover .filter")
+expect(!contains(sdlL, "filter 0.2"), "no POV filter keyword")
+
+/* ---- named lighting (no silent [-5,-5,8]) ---- */
+var gDef = Graphics()
+gDef.display(Sphere([0, 0, 0], 1, color=Red))
+var sDef = scene(gDef)
+expect(contains(sDef, "color rgb <0.4"), "default Neutral directional-equivalent")
+expect(!contains(sDef, "<-5, -5, 8>"), "no silent old default lamp")
+
+var gTP = Graphics()
+gTP.setLights("threepoint")
+gTP.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gTP), "color rgb <0.85"), "threepoint key in camera frame")
+
+var gWL = Graphics()
+gWL.setLights(Matrix([3, 4, 5]))
+gWL.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gWL), "light_source { <3, 4, 5>"), "Graphics.light world point")
+
+var gList = Graphics()
+gList.setLights([3, 4, 5])
+gList.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gList), "light_source { <3, 4, 5>"), "[x,y,z] is one lamp")
+
+var gTup = Graphics()
+gTup.setLights((3, 4, 5))
+gTup.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gTup), "light_source { <3, 4, 5>"), "(x,y,z) is one lamp")
+
+var gOff = Graphics()
+gOff.setLights("off")
+gOff.display(Sphere([0, 0, 0], 1, color=Red))
+var sOff = scene(gOff)
+expect(!contains(sOff, "light_source"), "off emits no POV lamps")
+
+var gCol = Graphics()
+gCol.addLight(Light([1, 2, 3], color=Red, intensity=0.5))
+gCol.display(Sphere([0, 0, 0], 1, color=Red))
+expect(contains(scene(gCol), "light_source { <1, 2, 3> color rgb <0.5, 0, 0>"),
+       "Light color*intensity in POV")
+
+var badPov = false
+try {
+  var gBad = Graphics()
+  gBad.setLights("studio")
+} catch {
+  "GfxLightName" : badPov = true
+}
+expect(badPov, "unknown light name throws in POV")
+
+/* ---- POVSerializer + Buf; sibling _define; unknown is a no-op ---- */
+var gSer = Graphics()
+gSer.display(Sphere([0, 0, 0], 0.5, color=Red))
+gSer.display(Cylinder([0, 0, 0], [0, 0, 1], color=Blue))
+var buf = Buf()
+POVSerializer(gSer, buf).serialize()
+var serSdl = joined(buf.lines)
+expect(contains(serSdl, "sphere { <0, 0, 0>, 0.5"), "serializer Buf sphere")
+expect(contains(serSdl, "cylinder { <0, 0, 0>, <0, 0, 1>, 0.1"), "serializer Buf cylinder")
+expect(!contains(serSdl, "mesh2"), "serializer Sphere stays native")
+
+var gUnk = Graphics()
+gUnk.display(LegacyPrim())
+var bufUnk = Buf()
+POVSerializer(gUnk, bufUnk).serialize()
+expect(contains(joined(bufUnk.lines), "camera {"), "unknown primitive still writes preamble")
+expect(!contains(joined(bufUnk.lines), "sphere"), "unknown primitive emits no geometry")
+
+/* ---- radii pass through POVSerializer constructor ---- */
+var gRad = Graphics()
+gRad.display(PointCloud([[0, 0, 0]]))
+gRad.display(LineSet([[0, 0, 0], [1, 0, 0]]))
+var povRad = POVRaytracer(gRad)
+povRad.pointradius = 0.05
+povRad.lineradius = 0.03
+var sRad = File(povRad.write("/tmp/testpovray.pov")).readall()
+expect(contains(sRad, "sphere { <0, 0, 0>, 0.05"), "custom pointradius")
+expect(contains(sRad, "cylinder { <0, 0, 0>, <1, 0, 0>, 0.03"), "custom lineradius")
+
+/* ---- explicit unresolved font is passed through, not replaced by cyrvetic ---- */
+var gFont = Graphics()
+gFont.display(Text("hi", [0, 0, 0], font="nonesuch-font-for-povray", color=White))
+var sFont = scene(gFont)
+expect(contains(sFont, "nonesuch-font-for-povray"), "unresolved explicit font pass-through")
+expect(!contains(sFont, "cyrvetic.ttf"), "explicit miss is not cyrvetic")
+
+/* ---- PointCloud / LineSet ColorTable ---- */
+var pcCols = Matrix([[1, 0], [0, 1], [0, 0]])
+var gPc = Graphics()
+gPc.display(PointCloud([[0, 0, 0], [1, 0, 0]], color=pcCols))
+var sPc = scene(gPc)
+expect(contains(sPc, "pigment { rgb <1, 0, 0> }"), "PointCloud ColorTable first vertex")
+expect(contains(sPc, "pigment { rgb <0, 1, 0> }"), "PointCloud ColorTable second vertex")
+
+var gLs = Graphics()
+gLs.display(LineSet([[0, 0, 0], [1, 0, 0]], color=pcCols))
+var sLs = scene(gLs)
+expect(contains(sLs, "pigment { rgb <1, 0, 0> }"), "LineSet ColorTable first vertex")
+
+print "ok"

@@ -1,0 +1,203 @@
+// Graphics entries: ids, pose recording, add remap.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testgraphicsentries.morpho
+
+import graphicsserializer
+import graphics
+import color
+import broadcast
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn countPrefix(lines, prefix) {
+  var n = 0
+  for (line in lines) {
+    if (line.count() >= prefix.count()) {
+      var ok = true
+      for (i in 0...prefix.count()) {
+        if (line[i] != prefix[i]) { ok = false; break }
+      }
+      if (ok) n += 1
+    }
+  }
+  return n
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+/* ---- ids ---- */
+var g = Graphics()
+var p0 = PointCloud(Matrix([[0], [0], [0]]))
+var id1 = g.display(p0)
+var id2 = g.display(p0)
+expect(id1 == 1, "first id is 1")
+expect(id2 == 2, "second id is 2")
+expect(id1 != id2, "same primitive displayed twice → two ids")
+expect(g.displaylist.count() == 2, "two entries")
+expect(g.displaylist[0].id == id1 && g.displaylist[1].id == id2, "entry ids match")
+
+/* ---- Sphere stores authored center/r; identity entry ---- */
+var gs = Graphics()
+var sid = gs.display(Sphere([1, 2, 3], 0.5, color=Red))
+expect(sid == 1, "sphere id")
+expect(ismatrix(gs.displaylist[0].position), "position is Matrix")
+expect(gs.displaylist[0].position[0] == 0 && gs.displaylist[0].position[1] == 0 &&
+       gs.displaylist[0].position[2] == 0, "no pose args → identity translation")
+expect(gs.displaylist[0].scale == 1, "no pose args → identity scale")
+expect(isobject(gs.displaylist[0].item), "stores abstract Sphere")
+expect(gs.displaylist[0].item.r == 0.5, "authored Sphere r")
+expect(gs.displaylist[0].item.center[0] == 1 && gs.displaylist[0].item.center[1] == 2 &&
+       gs.displaylist[0].item.center[2] == 3, "authored Sphere center")
+
+/* ---- Sphere with pose args ---- */
+var gp = Graphics()
+var unit = Sphere([0, 0, 0], 1, color=Blue)
+gp.display(unit, [4, 5, 6], scale=2.5, rotate=[0.1, 0, 1, 0])
+var e = gp.displaylist[0]
+expect(e.position[0] == 4 && e.position[1] == 5 && e.position[2] == 6, "posed position")
+expect(e.scale == 2.5, "posed scale")
+expect(!isnil(e.rotate), "posed rotate recorded")
+expect(e.item.r == 1, "posed unit Sphere keeps r=1")
+expect(e.item.center[0] == 0, "posed unit Sphere keeps center origin")
+
+/* ---- display color= / flat= (Phase 5dx) ---- */
+var gc = Graphics()
+var cid = gc.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.5,
+                     color=Blue, flat=true)
+expect(gc.findEntry(cid).color == Blue, "color= overrides sphere item color")
+expect(gc.findEntry(cid).flat == true, "flat= on sphere display")
+var tc = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+var tid = gc.display(tc, flat=true)
+expect(gc.findEntry(tid).flat == true, "flat= on mesh display")
+expect(isnil(gc.findEntry(tid).color), "omitted color= leaves nil")
+
+/* ---- PointCloud / LineSet: omitted flat= is nil; serializer treats them unlit ---- */
+var gflat = Graphics()
+var pcid = gflat.display(PointCloud(Matrix([[0], [0], [0]])))
+var lsid = gflat.display(LineSet(Matrix([[0, 1], [0, 0], [0, 0]])))
+expect(isnil(gflat.findEntry(pcid).flat), "PointCloud omitted flat=")
+expect(isnil(gflat.findEntry(lsid).flat), "LineSet omitted flat=")
+var pcid2 = gflat.display(PointCloud(Matrix([[1], [0], [0]])), flat=false)
+var lsid2 = gflat.display(LineSet(Matrix([[0, 1], [1, 1], [0, 0]])), flat=false)
+expect(gflat.findEntry(pcid2).flat == false, "PointCloud flat=false override")
+expect(gflat.findEntry(lsid2).flat == false, "LineSet flat=false override")
+var sphflat = gflat.display(Sphere([0, 0, 0], 1))
+expect(isnil(gflat.findEntry(sphflat).flat), "Sphere omitted flat=")
+var fbuf = Buf()
+GraphicsSerializer(gflat, fbuf).serialize()
+expect(countPrefix(fbuf.lines, "M flat") >= 2, "unlit default for PointCloud/LineSet")
+
+/* ---- add remaps right-hand ids ---- */
+var a = Graphics()
+a.display(PointCloud(Matrix([[0], [0], [0]])))
+a.display(PointCloud(Matrix([[1], [0], [0]])))
+var b = Graphics()
+b.display(PointCloud(Matrix([[2], [0], [0]])))
+b.display(Sphere([0, 0, 0], 1))
+expect(b.displaylist[0].id == 1 && b.displaylist[1].id == 2, "right starts at 1")
+var u = a.add(b)
+expect(u.displaylist.count() == 4, "union has four entries")
+expect(u.displaylist[0].id == 1 && u.displaylist[1].id == 2, "left ids kept")
+expect(u.displaylist[2].id == 3 && u.displaylist[3].id == 4, "right ids remapped")
+expect(b.displaylist[0].id == 1, "right Graphics unchanged")
+expect(u.display(PointCloud(Matrix([[3], [0], [0]]))) == 5, "ids continue after add")
+
+var uOp = a + b
+expect(uOp.displaylist.count() == 4, "a+b operator")
+expect(uOp.clss() == Graphics, "Graphics + Graphics is Graphics")
+expect(a.displaylist.count() == 2, "+ leaves left Graphics unchanged")
+
+var sceneL = Scene()
+sceneL.display(PointCloud(Matrix([[0], [0], [0]])))
+var scG = sceneL + b
+expect(scG.clss() == Scene && scG.displaylist.count() == 3, "Scene + Graphics is Scene")
+var gSc = b + sceneL
+expect(gSc.clss() == Graphics && gSc.displaylist.count() == 3, "Graphics + Scene is Graphics")
+
+/* ---- add copies lighting metadata (no shared Lighting) ---- */
+var lit = Graphics(light=[Matrix([1, 2, 3])])
+var other = Graphics()
+other.display(PointCloud(Matrix([[0], [0], [0]])))
+var union = lit.add(other)
+expect(union.light.clss() == Lighting && union.light.lights.count() == 1,
+       "add copies explicit lights")
+union.light.addLight(Light([4, 5, 6]))
+expect(lit.light.lights.count() == 1, "source Lighting is not shared")
+
+/* ---- serializer still works from entries ---- */
+var buf = Buf()
+GraphicsSerializer(gs, buf).serialize()
+expect(countPrefix(buf.lines, "o ") == 1, "emits sphere object")
+expect(countPrefix(buf.lines, "d ") == 1, "emits sphere draw")
+
+var buf2 = Buf()
+GraphicsSerializer(g, buf2).serialize()
+expect(countPrefix(buf2.lines, "o ") == 2, "emits two point clouds")
+expect(countPrefix(buf2.lines, "d ") == 2, "draws two point clouds")
+
+/* ---- replace / U S preamble still works ---- */
+var buf3 = Buf()
+gs.title = "replace-title"
+GraphicsSerializer(gs, buf3).serialize(replace=true)
+expect(buf3.lines.count() > 0 && buf3.lines[0].count() >= 3 && buf3.lines[0][0] == "U",
+       "replace path starts with U")
+expect(countPrefix(buf3.lines, "W \"replace-title\"") == 1,
+       "replace path emits window title")
+
+/* ---- faceIndices: dense membership vs sparse winding ---- */
+var dense = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Red,
+  Matrix([[1], [1], [1]])
+)
+expect(dense.faceIndices(0).count() == 3, "dense face has 3 vertices")
+expect(dense.faceIndices(0)[0] == 0 && dense.faceIndices(0)[2] == 2, "dense ascending ids")
+var sp = Sparse(3, 1)
+sp[2, 0] = 1
+sp[0, 0] = 1
+sp[1, 0] = 1
+var sparse = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Red,
+  sp
+)
+var sidx = sparse.faceIndices(0)
+var ridx = sp.rowindices(0)
+expect(sidx.count() == ridx.count() && sidx.count() == 3, "sparse face has 3 vertices")
+expect(sidx[0] == ridx[0] && sidx[1] == ridx[1] && sidx[2] == ridx[2], "sparse faceIndices is rowindices")
+
+/* ---- Scene.setLights / addLight / resetLights notify ---- */
+class LightSink with Listener {
+  init() { self.n = 0 }
+  receive(Scene scene, GraphicsEventLights ev) { self.n += 1 }
+}
+var sc = Scene()
+var sink = LightSink()
+sink.listen(sc)
+sc.setLights([[1, 2, 3], [4, 5, 6]])
+expect(sink.n == 1, "Scene.setLights notifies")
+expect(sc.light.lights.count() == 2, "setLights replaces the list")
+sc.addLight([1, 2, 3])
+expect(sink.n == 2, "Scene.addLight notifies")
+sc.resetLights()
+expect(sink.n == 3, "resetLights notifies once via setLights")
+expect(sc.light.mode == "neutral" && sc.light.lights.count() == 0,
+       "resetLights clears to Neutral")
+
+print "ok"

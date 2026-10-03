@@ -10,16 +10,17 @@
 #include "varray.h"
 #include <stdio.h>
 #include <stdbool.h>
+#include <stdint.h>
 
 #include <ft2build.h>
 #include FT_FREETYPE_H
 
-#define GL_SILENCE_DEPRECATION
-#include <glad/glad.h>
-
 #define TEXT_DEFAULTWIDTH 1280
 #define TEXT_DEFAULTHEIGHT 960
 #define TEXTSKYLINE_EMPTY -1
+
+/** World-space scale from FreeType pixels (same as render_rendertext). */
+#define TEXT_WORLD_SCALE (1.0f/720.0f)
 
 /** Skyline data structure for rectangle packing */
 typedef struct slentry {
@@ -56,7 +57,8 @@ typedef struct {
     textskyline skyline;
     varray_textglyph glyphs;
     
-    char *texturedata; 
+    char *texturedata;
+    bool atlas_dirty; /**< true if glyphs changed since last text_generatetexture */
 } textfont;
 
 void text_test(textfont *font);

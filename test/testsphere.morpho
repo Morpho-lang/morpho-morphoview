@@ -1,0 +1,42 @@
+// Sphere tessellation: primitive converts at a requested level.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testsphere.morpho
+
+import graphics
+import color
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn nv(tri) { return tri.position.dimensions()[1] }
+
+/* ---- Direct conversion: default level=3, independent of radius ---- */
+var def = Sphere([0, 0, 0], 2).toTriangleComplex()
+var lv3 = Sphere([0, 0, 0], 2).toTriangleComplex(level=3)
+expect(nv(def) == nv(lv3), "toTriangleComplex() defaults to level=3")
+
+var tiny = Sphere([0, 0, 0], 0.01).toTriangleComplex()
+var huge = Sphere([0, 0, 0], 100).toTriangleComplex()
+expect(nv(tiny) == nv(huge), "direct conversion ignores radius")
+expect(nv(tiny) == nv(lv3), "tiny/huge match default level 3")
+
+var lv0 = Sphere([0, 0, 0], 1).toTriangleComplex(level=0)
+var lv5 = Sphere([0, 0, 0], 1).toTriangleComplex(level=5)
+expect(nv(lv0) < nv(lv3) && nv(lv3) < nv(lv5), "explicit level changes tessellation")
+
+/* ---- unit=true is a unit ball at the origin ---- */
+var unit = Sphere([4, 5, 6], 7).toTriangleComplex(unit=true, level=0)
+var pole = unit.position.column(0)
+expect(abs(pole[0]) < 1e-9 && abs(pole[1]) < 1e-9 && abs(abs(pole[2]) - 1) < 1e-9,
+       "unit mesh pole at origin ±z")
+
+var scaled = Sphere([1, 0, 0], 2).toTriangleComplex(level=0)
+var p0 = scaled.position.column(0)
+expect(abs(p0[0] - 1) < 1e-9 && abs(abs(p0[2]) - 2) < 1e-9, "authored mesh uses center and r")
+
+print "ok"

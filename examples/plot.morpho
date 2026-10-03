@@ -1,0 +1,23 @@
+// Interpolated field on a warped surface.
+// Faces are TriangleComplex; edges and points use PointCloud/LineSet
+// by default (see examples/plotmesh.morpho).
+//
+//   morpho6 examples/plot.morpho
+//
+// Close the viewer window to exit.
+
+import morphoview
+import meshtools
+import plot
+import color
+
+var m = AreaMesh(fn (u, v) [u, v, 0.15*sin(3*u)*cos(2*v)],
+                 -1..1:0.2, -1..1:0.2)
+var f = Field(m, fn (x, y, z) x)
+
+var p = Plot(f, style="interpolate", colormap=ViridisMap(),
+             title="Plot", background=Color(0.08, 0.09, 0.11))
+
+var v = View(p, connecttimeout=20000)
+v.wait()
+if (!v.closed) v.close()

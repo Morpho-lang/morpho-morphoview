@@ -1,0 +1,376 @@
+// Scene move / listeners (no viewer required). Graphics stays static.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testgraphicsmove.morpho
+
+import graphics
+import broadcast
+import color
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+class Capture with Listener {
+  init() {
+    self.events = []
+    self.movedIds = nil
+    self.recolorIds = nil
+    self.definedIds = nil
+    self.removedIds = nil
+    self.replacedIds = nil
+    self.morphed = nil
+  }
+  receive(Scene scene, event) {
+    self.events.append(self._kind(event))
+  }
+  receive(Scene scene, GraphicsEventMoved ev) {
+    self.events.append(GraphicsEventMoved)
+    self.movedIds = ev.ids
+  }
+  receive(Scene scene, GraphicsEventRecolored ev) {
+    self.events.append(GraphicsEventRecolored)
+    self.recolorIds = ev.ids
+  }
+  receive(Scene scene, GraphicsEventDefined ev) {
+    self.events.append(GraphicsEventDefined)
+    self.definedIds = ev.ids
+  }
+  receive(Scene scene, GraphicsEventRemoved ev) {
+    self.events.append(GraphicsEventRemoved)
+    self.removedIds = ev.ids
+  }
+  receive(Scene scene, GraphicsEventReplaced ev) {
+    self.events.append(GraphicsEventReplaced)
+    self.replacedIds = ev.ids
+  }
+  receive(Scene scene, GraphicsEventMorphed ev) {
+    self.events.append(GraphicsEventMorphed)
+    self.morphed = ev
+  }
+  _kind(GraphicsEventDefined ev) { return GraphicsEventDefined }
+  _kind(GraphicsEventMoved ev) { return GraphicsEventMoved }
+  _kind(GraphicsEventRecolored ev) { return GraphicsEventRecolored }
+  _kind(GraphicsEventRemoved ev) { return GraphicsEventRemoved }
+  _kind(GraphicsEventReplaced ev) { return GraphicsEventReplaced }
+  _kind(GraphicsEventMorphed ev) { return GraphicsEventMorphed }
+}
+
+/* ---- Scene is Graphics; static Graphics has no move ---- */
+var staticG = Graphics()
+expect(!isnil(staticG.displaylist), "Graphics constructs")
+expect(!staticG.respondsto("move"), "Graphics has no move")
+expect(!staticG.respondsto("subscribe"), "Graphics is not a Broadcaster")
+var sceneProbe = Scene()
+expect(sceneProbe.superclass() == Graphics, "Scene is Graphics")
+expect(sceneProbe.respondsto("move") && sceneProbe.respondsto("subscribe"), "Scene is live")
+
+/* ---- move merge ---- */
+var g = Scene()
+var tc = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+var id = g.display(tc, [1, 2, 3], scale=2, rotate=[0.1, 0, 1, 0])
+var e = g.findEntry(id)
+expect(e.position[0] == 1 && e.scale == 2, "initial pose")
+
+expect(g.move(id, [4, 5, 6]), "move position")
+expect(e.position[0] == 4 && e.position[1] == 5 && e.position[2] == 6, "position set")
+expect(e.scale == 2, "scale unchanged when omitted")
+expect(!isnil(e.rotate), "rotate unchanged when omitted")
+
+expect(g.move(id, scale=3.5), "move scale only")
+expect(e.position[0] == 4, "position unchanged on scale-only move")
+expect(e.scale == 3.5, "scale updated")
+
+expect(g.move(id, [0, 0, 0], rotate=[1, 0, 0, 1]), "move position+rotate")
+expect(e.position[0] == 0 && e.position[1] == 0 && e.position[2] == 0, "position origin")
+expect(e.scale == 3.5, "scale still 3.5")
+expect(e.rotate[0] == 1, "rotate updated")
+
+expect(!g.move(999, [0, 0, 0]), "missing id fails")
+
+/* ---- immediate listener ---- */
+var g2 = Scene()
+var cap = Capture()
+cap.listen(g2)
+var id2 = g2.display(tc, [0, 1, 0])
+expect(cap.events.count() == 1 && cap.events[0] == GraphicsEventDefined, "immediate defined")
+g2.move(id2, [1, 1, 1])
+expect(cap.events.count() == 2 && cap.events[1] == GraphicsEventMoved, "immediate moved")
+
+/* ---- ignore ---- */
+var g5 = Scene()
+var cap5 = Capture()
+cap5.listen(g5)
+cap5.ignore(g5)
+g5.display(tc)
+expect(cap5.events.count() == 0, "ignored silent")
+
+/* ---- begin/end batching ---- */
+var gBatch = Scene()
+var capBatch = Capture()
+capBatch.listen(gBatch)
+var idA = gBatch.display(tc, [0, 0, 0])
+var idB = gBatch.display(tc, [1, 0, 0])
+expect(capBatch.events.count() == 2, "display outside batch still notifies")
+capBatch.events = []
+gBatch.beginBatch()
+gBatch.move(idA, [2, 0, 0])
+gBatch.move(idB, [3, 0, 0], scale=2)
+expect(capBatch.events.count() == 0, "moves inside batch silent")
+gBatch.endBatch()
+expect(capBatch.events.count() == 1 && capBatch.events[0] == GraphicsEventMoved, "one coalesced Moved")
+capBatch.events = []
+gBatch.beginBatch()
+gBatch.endBatch()
+expect(capBatch.events.count() == 0, "empty batch silent")
+capBatch.events = []
+gBatch.beginBatch()
+gBatch.beginBatch()
+gBatch.move(idA, [4, 0, 0])
+gBatch.endBatch()
+expect(capBatch.events.count() == 0, "inner end does not flush")
+gBatch.endBatch()
+expect(capBatch.events.count() == 1 && capBatch.events[0] == GraphicsEventMoved, "outer end flushes")
+capBatch.events = []
+gBatch.beginBatch()
+var idC = gBatch.display(tc, [5, 0, 0])
+gBatch.move(idA, [6, 0, 0])
+gBatch.endBatch()
+expect(capBatch.events.count() == 2, "batch flushes Defined then Moved")
+expect(capBatch.events[0] == GraphicsEventDefined, "Defined first")
+expect(capBatch.events[1] == GraphicsEventMoved, "Moved after Defined")
+
+/* ---- event.ids ---- */
+var g7 = Scene()
+var id7a = g7.display(tc, [0, 0, 0], scale=1)
+var id7b = g7.display(tc, [1, 0, 0], scale=1)
+var cap7 = Capture()
+cap7.listen(g7)
+g7.beginBatch()
+g7.move(id7a, [2, 0, 0])
+g7.move(id7b, [3, 0, 0], scale=2)
+g7.endBatch()
+expect(cap7.events.count() == 1 && cap7.events[0] == GraphicsEventMoved, "one coalesced Moved")
+expect(!isnil(cap7.movedIds) && cap7.movedIds.count() == 2, "event.ids has both movers")
+expect(cap7.movedIds[0] == id7a && cap7.movedIds[1] == id7b, "event.ids first-seen order")
+
+/* ---- two listeners see the same full id list ---- */
+var gMulti = Scene()
+var idMa = gMulti.display(tc, [0, 0, 0])
+var idMb = gMulti.display(tc, [1, 0, 0])
+var capM1 = Capture()
+var capM2 = Capture()
+capM1.listen(gMulti)
+capM2.listen(gMulti)
+gMulti.beginBatch()
+gMulti.move(idMa, [2, 0, 0])
+gMulti.move(idMb, [3, 0, 0])
+gMulti.endBatch()
+expect(capM1.movedIds.count() == 2 && capM2.movedIds.count() == 2, "both listeners get two ids")
+expect(capM1.movedIds[0] == idMa && capM1.movedIds[1] == idMb, "listener 1 full set")
+expect(capM2.movedIds[0] == idMa && capM2.movedIds[1] == idMb, "listener 2 full set")
+
+/* ---- recolor ---- */
+var g8 = Scene()
+var id8 = g8.display(Sphere([0, 0, 0], 1, color=Red), [0, 0, 0], scale=0.5)
+expect(g8.recolor(id8, Blue), "recolor ok")
+expect(g8.findEntry(id8).color == Blue, "entry color updated")
+expect(!g8.recolor(999, Red), "missing id fails")
+
+var cap8 = Capture()
+cap8.listen(g8)
+g8.beginBatch()
+g8.recolor(id8, Green)
+g8.recolor(id8, Yellow)
+expect(cap8.events.count() == 0, "recolor inside batch silent")
+g8.endBatch()
+expect(cap8.events.count() == 1 && cap8.events[0] == GraphicsEventRecolored, "one coalesced Recolored")
+expect(!isnil(cap8.recolorIds) && cap8.recolorIds.count() == 1, "recolor event.ids")
+expect(cap8.recolorIds[0] == id8, "recolor id on event")
+
+/* ---- remove / replace (Phase 5d) ---- */
+var g9 = Scene()
+var id9a = g9.display(tc, [0, 0, 0])
+var id9b = g9.display(tc, [1, 0, 0])
+var cap9 = Capture()
+cap9.listen(g9)
+expect(g9.remove(id9a), "remove ok")
+expect(isnil(g9.findEntry(id9a)), "entry gone")
+expect(!isnil(g9.findEntry(id9b)), "other entry kept")
+expect(cap9.events.count() == 1 && cap9.events[0] == GraphicsEventRemoved, "Removed event")
+expect(!g9.remove(id9a), "remove missing fails")
+
+var g10 = Scene()
+var id10 = g10.display(tc, [0, 0, 0], scale=2)
+var cap10 = Capture()
+cap10.listen(g10)
+var tc2 = TriangleComplex(
+  Matrix([[0, 2, 0], [0, 0, 2], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[0, 0, 0], [1, 1, 1], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+expect(g10.replace(id10, tc2), "replace ok")
+expect(g10.findEntry(id10).item == tc2, "item replaced")
+expect(g10.findEntry(id10).scale == 2, "SRT unchanged on replace")
+expect(cap10.events.count() == 1 && cap10.events[0] == GraphicsEventReplaced, "Replaced event")
+
+/* ---- batched replace coalesces ---- */
+var gRep = Scene()
+var idRa = gRep.display(tc, [0, 0, 0])
+var idRb = gRep.display(tc, [1, 0, 0])
+var capRep = Capture()
+capRep.listen(gRep)
+gRep.beginBatch()
+gRep.replace(idRa, tc2)
+gRep.replace(idRa, tc2)
+gRep.replace(idRb, tc2)
+expect(capRep.events.count() == 0, "replace inside batch silent")
+gRep.endBatch()
+expect(capRep.events.count() == 1 && capRep.events[0] == GraphicsEventReplaced,
+       "one coalesced Replaced")
+expect(capRep.replacedIds.count() == 2, "Replaced.ids both")
+expect(capRep.replacedIds[0] == idRa && capRep.replacedIds[1] == idRb,
+       "Replaced first-seen order")
+
+gRep.beginBatch()
+gRep.replace(idRa, tc2)
+gRep.replace(idRb, tc2)
+gRep.remove(idRa)
+capRep.events = []
+gRep.endBatch()
+expect(capRep.events.count() == 2, "Replaced then Removed")
+expect(capRep.events[0] == GraphicsEventReplaced, "Replaced first")
+expect(capRep.replacedIds.count() == 2, "Replaced still lists A and B")
+expect(capRep.events[1] == GraphicsEventRemoved, "Removed after")
+expect(capRep.removedIds.count() == 1 && capRep.removedIds[0] == idRa, "Removed A")
+expect(isnil(gRep.findEntry(idRa)), "A gone from Scene")
+expect(gRep.findEntry(idRb).item == tc2, "B has final item")
+
+/* ---- Graphics.extend remaps ids ---- */
+var gExtL = Graphics()
+var idL = gExtL.display(tc, [0, 0, 0])
+var gExtR = Graphics()
+var idR = gExtR.display(tc, [1, 0, 0], scale=2, color=Red, flat=true)
+var newIds = gExtL.extend(gExtR)
+expect(newIds.count() == 1, "extend returns one id")
+expect(newIds[0] != idR, "right-hand id remapped")
+expect(gExtL.displaylist.count() == 2, "extend appends in place")
+var eR = gExtL.findEntry(newIds[0])
+expect(eR.scale == 2 && eR.flat == true, "extend preserves pose/flat")
+expect(!isnil(eR.color), "extend preserves color")
+
+/* ---- Scene.extend batched Defined ---- */
+var gExtS = Scene()
+var capExt = Capture()
+capExt.listen(gExtS)
+var bundle = Graphics()
+bundle.display(tc, [0, 0, 0])
+bundle.display(tc, [1, 0, 0])
+var extIds = gExtS.extend(bundle)
+expect(extIds.count() == 2, "Scene.extend two ids")
+expect(capExt.events.count() == 1 && capExt.events[0] == GraphicsEventDefined,
+       "Scene.extend one coalesced Defined")
+expect(capExt.definedIds.count() == 2, "Defined.ids has both")
+expect(capExt.definedIds[0] == extIds[0] && capExt.definedIds[1] == extIds[1],
+       "Defined.ids match extend return")
+
+/* ---- batched displays coalesce Defined ---- */
+var gDef = Scene()
+var capDef = Capture()
+capDef.listen(gDef)
+gDef.beginBatch()
+var idDa = gDef.display(tc, [0, 0, 0])
+var idDb = gDef.display(tc, [1, 0, 0])
+expect(capDef.events.count() == 0, "display inside batch silent")
+gDef.endBatch()
+expect(capDef.events.count() == 1 && capDef.events[0] == GraphicsEventDefined,
+       "one coalesced Defined")
+expect(capDef.definedIds.count() == 2, "Defined.ids both displays")
+expect(capDef.definedIds[0] == idDa && capDef.definedIds[1] == idDb, "Defined first-seen order")
+
+/* ---- batched remove coalesces Removed ---- */
+var gRm = Scene()
+var idRa = gRm.display(tc, [0, 0, 0])
+var idRb = gRm.display(tc, [1, 0, 0])
+var capRm = Capture()
+capRm.listen(gRm)
+gRm.beginBatch()
+gRm.remove(idRa)
+gRm.remove(idRb)
+gRm.endBatch()
+expect(capRm.events.count() == 1 && capRm.events[0] == GraphicsEventRemoved,
+       "one coalesced Removed")
+expect(capRm.removedIds.count() == 2, "Removed.ids both")
+expect(capRm.removedIds[0] == idRa && capRm.removedIds[1] == idRb, "Removed first-seen order")
+
+/* ---- morph notifies with old→new; A→B→C coalesces to A→C ---- */
+var gMorph = Scene()
+var capMorph = Capture()
+capMorph.listen(gMorph)
+var idM = gMorph.display(tc)
+expect(capMorph.events.count() == 1, "display Defined")
+var tcA = gMorph.findEntry(idM).item
+var tcB = TriangleComplex(
+  Matrix([[0, 1.1, 0], [0, 0, 1.1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[1, 1, 1], [0, 0, 0], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+var tcC = TriangleComplex(
+  Matrix([[0, 1.2, 0], [0, 0, 1.2], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[0, 0, 0], [1, 1, 1], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+var tcD = TriangleComplex(
+  Matrix([[0, 1.3, 0], [0, 0, 1.3], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  Matrix([[1, 1, 1], [1, 1, 1], [0, 0, 0]]),
+  Matrix([[1], [1], [1]])
+)
+expect(gMorph.morph(idM, tcB), "morph ok")
+expect(gMorph.findEntry(idM).item == tcB, "morph sets item")
+expect(capMorph.events.count() == 2 && capMorph.events[1] == GraphicsEventMorphed,
+       "morph notifies Morphed")
+expect(capMorph.morphed.oldItems[idM] == tcA, "Morphed old is pre-morph item")
+expect(capMorph.morphed.newItems[idM] == tcB, "Morphed new is post-morph item")
+expect(!gMorph.morph(999, tcB), "morph missing id fails")
+expect(!gMorph.morph(idM, 1), "morph bad item fails")
+
+var gABC = Scene()
+var capABC = Capture()
+capABC.listen(gABC)
+var idABC = gABC.display(tc)
+var itemA = gABC.findEntry(idABC).item
+gABC.beginBatch()
+gABC.morph(idABC, tcB)
+gABC.morph(idABC, tcC)
+gABC.morph(idABC, tcD)
+expect(capABC.events.count() == 1, "display Defined already flushed")
+gABC.endBatch()
+expect(capABC.events.count() == 2 && capABC.events[1] == GraphicsEventMorphed,
+       "A0→A3 one Morphed")
+expect(capABC.morphed.oldItems[idABC] == itemA, "coalesce keeps first old")
+expect(capABC.morphed.newItems[idABC] == tcD, "coalesce keeps last new")
+
+var idM2 = gMorph.display(tc, [2, 0, 0])
+capMorph.events = []
+gMorph.beginBatch()
+gMorph.morph(idM, tcA)
+gMorph.morph(idM2, tcC)
+gMorph.endBatch()
+expect(capMorph.morphed.ids.count() == 2, "Morphed collects distinct ids")
+expect(capMorph.morphed.oldItems[idM] == tcB, "idM first old")
+expect(capMorph.morphed.newItems[idM] == tcA, "idM last new")
+expect(capMorph.morphed.newItems[idM2] == tcC, "idM2 new")
+
+print "ok"

@@ -1,0 +1,77 @@
+// Traveling-wave membrane.
+// Mutate the mesh, rebuild the Field snapshot, then Plot.refresh().
+// View only observes the resulting Scene.morph.
+//
+//   morpho6 examples/plotripple.morpho
+//
+// Close the viewer window to exit.
+
+import morphoview
+import meshtools
+import plot
+import color
+
+var dt = 1/60
+var maps = [ViridisMap(), MagmaMap(), PlasmaMap(), InfernoMap(), BlueWhiteRedMap]
+var mapNames = ["Viridis", "Magma", "Plasma", "Inferno", "BlueWhiteRed"]
+var mapIdx = 0
+
+/** Radial packet plus an interfering sheet. */
+fn wave(x, y, t) {
+  var r = sqrt(x*x + y*y)
+  var packet = 0.55*exp(-0.35*r*r)*sin(6.5*r - 5*t)
+  var sheet = 0.22*sin(2.5*x + 2.2*t)*cos(2*y - 1.8*t)
+  return packet + sheet
+}
+
+fn applyWave(mesh, t) { // Set vertex z from the wave at time t
+  var vert = mesh.vertexmatrix().clone()
+  var nv = vert.dimensions()[1]
+  for (i in 0...nv) {
+    vert[2, i] = wave(vert[0, i], vert[1, i], t)
+  }
+  mesh.setvertexmatrix(vert)
+}
+
+fn heightField(mesh) { // Field of vertex z (sampled once at construction)
+  return Field(mesh, fn (x, y, z) z)
+}
+
+var mesh = AreaMesh(fn (u, v) [u, v, 0], -1.5..1.5:0.1, -1.5..1.5:0.1)
+applyWave(mesh, 0)
+
+var zHi = 0.8 // packet+sheet; Plot axes expand but do not retract
+var p = Plot(heightField(mesh), style="interpolate", colormap=maps[0],
+             cmin=-0.7, cmax=0.7,
+             axes=true,
+             title="Plot ripple (Viridis)",
+             background=Color(0.08, 0.09, 0.11))
+p.axesBounds = [p.bounds[0], p.bounds[1], (-zHi, zHi)]
+p.axes(false) // redraw the frame at the pinned z range
+p.axes(true)
+
+var v = View(p, connecttimeout=20000)
+var t = 0.0
+var frame = 0
+
+while (!v.closed) {
+  t += dt
+  frame += 1
+
+  applyWave(mesh, t)
+  p.source = heightField(mesh) // Field samples z once; rebuild from the current mesh
+
+  if (mod(frame, 90) == 0) {
+    mapIdx = mod(mapIdx + 1, maps.count())
+    p.colormap = maps[mapIdx]
+    p.center = (mapIdx == 4) ? 0 : nil
+    p.title = "Plot ripple (${mapNames[mapIdx]})"
+  }
+
+  if (!p.refresh()) break
+
+  v.poll(timeoutms=0)
+  System.sleep(dt)
+}
+
+if (!v.closed) v.close()

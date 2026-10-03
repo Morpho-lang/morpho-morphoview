@@ -1,0 +1,29 @@
+// ImplicitMesh torus with domain-frame axes, colored by height.
+//
+//   morpho6 examples/plottorus.morpho
+//
+// Close the viewer window to exit.
+
+import morphoview
+import implicitmesh
+import plot
+import color
+
+var r = 1.0 // major radius
+var a = 0.35 // tube radius
+
+var impl = ImplicitMeshBuilder(
+  fn (x, y, z) (x^2+y^2+z^2+r^2-a^2)^2 - 4*r^2*(x^2+y^2)
+)
+var mesh = impl.build(start=Matrix([1, 0, 0.5]), stepsize=0.2, maxiterations=800)
+mesh.addgrade(1)
+
+var f = Field(mesh, fn (x, y, z) z)
+var p = Plot(f, style="interpolate", colormap=Opacity(ViridisMap(), 0.4),
+             axes=true,
+             title="Plot torus",
+             background=Color(0.08, 0.09, 0.11))
+
+var v = View(p, connecttimeout=20000)
+v.wait()
+if (!v.closed) v.close()

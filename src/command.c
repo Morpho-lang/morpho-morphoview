@@ -5,15 +5,1934 @@
  */
 #include <string.h>
 #include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdarg.h>
 
-#include "command.h"
+#include "morpho.h"
+#include "platform.h"
+#include "parse.h"
 #include "memory.h"
 #include "varray.h"
-#include "display.h"
 
-/** Get the size of an open file
- *  @param[in] f file handle
- *  @param[out] s The file size */
+#include "command.h"
+#include "scene.h"
+#include "display.h"
+#include "render.h"
+#include "matrix3d.h"
+#include "listener.h"
+
+DEFINE_VARRAY(mv_commandptr, mv_command *);
+
+/* -------------------------------------------------------
+ * Parse / apply contexts
+ * ------------------------------------------------------- */
+
+typedef struct {
+    mat4x4 model;
+    bool modelchanged;
+    bool has_scene;
+    bool has_object;
+} command_parsectx;
+
+typedef enum {
+    COLORSTAMP_NONE = 0, /**< No `C` in this batch — preserve draw colorid */
+    COLORSTAMP_SET,      /**< `C <id>` — stamp uniform override */
+    COLORSTAMP_CLEAR     /**< Bare `C` — clear override (restore vertex colors) */
+} colorstamp_kind;
+
+typedef struct {
+    scene *scene;
+    display *display;
+    gobject *cobject;
+    int current_colorid; /**< Last `C` id, or SCENE_EMPTY */
+    colorstamp_kind colorstamp;
+} command_applyctx;
+
+void command_parsectx_init(command_parsectx *ctx) {
+    mat3d_identity4x4(ctx->model);
+    ctx->modelchanged=false;
+    ctx->has_scene=false;
+    ctx->has_object=false;
+}
+
+static void command_reset_colorstamp(command_applyctx *ctx) {
+    ctx->current_colorid=SCENE_EMPTY;
+    ctx->colorstamp=COLORSTAMP_NONE;
+}
+
+void command_applyctx_init(command_applyctx *ctx) {
+    ctx->scene=NULL;
+    ctx->display=NULL;
+    ctx->cobject=NULL;
+    command_reset_colorstamp(ctx);
+}
+
+/** Resolve `C` for this `d` / `T`, then consume it. */
+static void command_draw_colorstamp(command_applyctx *ctx, bool *stamp_color, int *colorid) {
+    if (ctx->colorstamp==COLORSTAMP_SET) {
+        *stamp_color=true;
+        *colorid=ctx->current_colorid;
+    } else if (ctx->colorstamp==COLORSTAMP_CLEAR) {
+        *stamp_color=true;
+        *colorid=SCENE_EMPTY;
+    } else {
+        *stamp_color=false;
+        *colorid=SCENE_EMPTY;
+    }
+    command_reset_colorstamp(ctx);
+}
+
+/** Apply context kept across command batches. */
+static command_applyctx g_applyctx;
+static bool g_applyctx_ready=false;
+
+static command_applyctx *command_sticky_applyctx(void) {
+    if (!g_applyctx_ready) {
+        command_applyctx_init(&g_applyctx);
+        g_applyctx_ready=true;
+    }
+    return &g_applyctx;
+}
+
+static void command_sticky_applyctx_reset(void) {
+    command_applyctx_init(&g_applyctx);
+    g_applyctx_ready=false;
+}
+
+/** Drop apply context if it refers to this scene. */
+void command_invalidate_scene(scene *s) {
+    if (!g_applyctx_ready || !s) return;
+    if (g_applyctx.scene == s) command_sticky_applyctx_reset();
+}
+
+/* -------------------------------------------------------
+ * Allocation / free
+ * ------------------------------------------------------- */
+
+/** Allocate a typed command and set its header type. */
+void *command_new(mv_command_type type, size_t size) {
+    mv_command *cmd = calloc(1, size);
+    if (cmd) cmd->type=type;
+    return cmd;
+}
+
+/** Free a command and any owned payloads. */
+void command_free(mv_command *cmd) {
+    if (!cmd) return;
+
+    switch (cmd->type) {
+        case MVCMD_WINDOW_TITLE:
+            free(MVCMD_AS_WINDOW(cmd)->title);
+            break;
+        case MVCMD_VERTICES:
+            free(MVCMD_AS_VERTICES(cmd)->format);
+            free(MVCMD_AS_VERTICES(cmd)->data);
+            break;
+        case MVCMD_UPDATE_VERTICES:
+            free(MVCMD_AS_UPDATE_VERTICES(cmd)->format);
+            free(MVCMD_AS_UPDATE_VERTICES(cmd)->data);
+            break;
+        case MVCMD_ELEMENT:
+            free(MVCMD_AS_ELEMENT(cmd)->indices);
+            break;
+        case MVCMD_COLOR:
+            free(MVCMD_AS_COLOR(cmd)->rgb);
+            break;
+        case MVCMD_FONT:
+            free(MVCMD_AS_FONT(cmd)->path);
+            break;
+        case MVCMD_TEXT:
+            free(MVCMD_AS_TEXT(cmd)->string);
+            break;
+        default:
+            break;
+    }
+
+    free(cmd);
+}
+
+/* -------------------------------------------------------
+ * Command queue
+ * ------------------------------------------------------- */
+
+static varray_mv_commandptr command_queue;
+static MorphoMutex command_queue_mutex;
+
+/** Commands parsed from the current chunk. */
+static varray_mv_commandptr *command_parse_staging = NULL;
+
+void command_queue_init(void) {
+    varray_mv_commandptrinit(&command_queue);
+}
+
+void command_queue_clear(void) {
+    MorphoMutex_lock(&command_queue_mutex);
+    for (unsigned int i=0; i<command_queue.count; i++) {
+        command_free(command_queue.data[i]);
+    }
+    varray_mv_commandptrclear(&command_queue);
+    MorphoMutex_unlock(&command_queue_mutex);
+}
+
+static void command_free_list(varray_mv_commandptr *list) {
+    if (!list) return;
+    for (unsigned int i = 0; i < list->count; i++) {
+        command_free(list->data[i]);
+    }
+    list->count = 0;
+    varray_mv_commandptrclear(list);
+}
+
+void command_wake(void) {
+    glfwPostEmptyEvent();
+}
+
+bool command_enqueue(mv_command *cmd) {
+    if (command_parse_staging) {
+        return varray_mv_commandptradd(command_parse_staging, &cmd, 1);
+    }
+    MorphoMutex_lock(&command_queue_mutex);
+    bool ok = varray_mv_commandptradd(&command_queue, &cmd, 1);
+    MorphoMutex_unlock(&command_queue_mutex);
+    if (!ok) return false;
+    command_wake();
+    return true;
+}
+
+/** Append a staging list onto the shared queue; frees staging storage on success. */
+static bool command_commit_staging(varray_mv_commandptr *staging) {
+    if (!staging || staging->count == 0) {
+        if (staging) varray_mv_commandptrclear(staging);
+        return true;
+    }
+    MorphoMutex_lock(&command_queue_mutex);
+    bool ok = varray_mv_commandptradd(&command_queue, staging->data,
+                                     (int) staging->count);
+    if (ok) staging->count = 0; /* ownership moved; do not free cmds */
+    MorphoMutex_unlock(&command_queue_mutex);
+    if (!ok) return false;
+    varray_mv_commandptrclear(staging);
+    command_wake();
+    return true;
+}
+
+/* **********************************************************************
+ * Apply
+ * ********************************************************************** */
+
+static char command_apply_msg[256];
+
+/** Report an apply failure. */
+static bool command_apply_error(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(command_apply_msg, sizeof(command_apply_msg), fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "morphoview: %s\n", command_apply_msg);
+    return false;
+}
+
+static bool command_needscene(command_applyctx *ctx) {
+    if (ctx->scene) return true;
+    return command_apply_error("%s", COMMAND_NOSCENE_MSG);
+}
+
+static bool command_needobject(command_applyctx *ctx) {
+    if (!ctx->scene) return command_apply_error("%s", COMMAND_NOSCENE_MSG);
+    if (ctx->cobject) return true;
+    return command_apply_error("%s", COMMAND_NOOBJECT_MSG);
+}
+
+/** Mark the current scene as changed. */
+static void command_touchscene(command_applyctx *ctx) {
+    if (ctx->scene) scene_markchanged(ctx->scene);
+}
+
+/** Apply one IR command. */
+bool command_apply(mv_command *cmd, command_applyctx *ctx) {
+    switch (cmd->type) {
+        case MVCMD_SCENE_CREATE: {
+            mv_cmd_scene *c = MVCMD_AS_SCENE(cmd);
+            bool created = false;
+            scene *s = scene_find(c->id);
+
+            if (!s) {
+                s = scene_new(c->id, c->dim);
+                if (!s) return command_apply_error("Could not create scene '%i'.", c->id);
+                created = true;
+            }
+
+            ctx->display = display_findforscene(s);
+            if (!ctx->display) {
+                ctx->display = display_open(s);
+                if (!ctx->display) {
+                    if (created) scene_free(s);
+                    return command_apply_error("Could not open a window for scene '%i'.", c->id);
+                }
+            }
+
+            ctx->scene = s;
+            ctx->cobject = NULL;
+            command_reset_colorstamp(ctx);
+            return true;
+        }
+
+        case MVCMD_UPDATE_SCENE: {
+            mv_cmd_update_scene *c = MVCMD_AS_UPDATE_SCENE(cmd);
+            scene *s = scene_find(c->id);
+            if (!s) {
+                return command_apply_error("No scene with id '%i'.", c->id);
+            }
+
+            scene_clear(s);
+            scene_markchanged(s);
+
+            ctx->display = display_findforscene(s);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
+            }
+
+            ctx->scene = s;
+            ctx->cobject = NULL;
+            command_reset_colorstamp(ctx);
+            return true;
+        }
+
+        case MVCMD_UPDATE_OBJECT: {
+            mv_cmd_update_object *c = MVCMD_AS_UPDATE_OBJECT(cmd);
+            if (!command_needscene(ctx)) return false;
+            if (!scene_clearobject(ctx->scene, c->id)) {
+                return command_apply_error("No object with id '%i'.", c->id);
+            }
+            ctx->cobject = scene_getgobjectfromid(ctx->scene, c->id);
+            scene_markchanged(ctx->scene);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
+            }
+            return true;
+        }
+
+        case MVCMD_UPDATE_VERTICES: {
+            mv_cmd_update_vertices *c = MVCMD_AS_UPDATE_VERTICES(cmd);
+            if (!command_needscene(ctx)) return false;
+            gobject *obj = scene_getgobjectfromid(ctx->scene, c->id);
+            if (!obj) {
+                return command_apply_error("No object with id '%i'.", c->id);
+            }
+            int have = obj->vertexdata.length;
+            if (!scene_replacevertices(ctx->scene, c->id, c->data, c->length)) {
+                return command_apply_error(
+                    "U V length mismatch for object '%i' (have %d, got %d).",
+                    c->id, have, c->length);
+            }
+            if (c->format) {
+                if (obj->vertexdata.format) free(obj->vertexdata.format);
+                obj->vertexdata.format = c->format;
+                c->format = NULL;
+                obj->centroid_valid = false;
+            }
+            command_touchscene(ctx);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_updateobjectvertices(&ctx->display->render, ctx->scene, c->id);
+            }
+            return true;
+        }
+
+        case MVCMD_CLOSE_SCENE: {
+            mv_cmd_close_scene *c = MVCMD_AS_CLOSE_SCENE(cmd);
+            scene *s = scene_find(c->id);
+            if (!s) {
+                return command_apply_error("No scene with id '%i'.", c->id);
+            }
+
+            display *d = display_findforscene(s);
+            display_requestclose(d);
+
+            if (ctx->scene == s) {
+                ctx->scene = NULL;
+                ctx->display = NULL;
+                ctx->cobject = NULL;
+            }
+            return true;
+        }
+
+        case MVCMD_DELETE_OBJECT: {
+            mv_cmd_delete_object *c = MVCMD_AS_DELETE_OBJECT(cmd);
+            if (!command_needscene(ctx)) return false;
+            int curid = (ctx->cobject) ? ctx->cobject->id : SCENE_EMPTY;
+            if (!scene_deleteobject(ctx->scene, c->id)) {
+                return command_apply_error("No object with id '%i'.", c->id);
+            }
+            /* objectlist may have shifted — re-resolve or clear. */
+            ctx->cobject = (curid != SCENE_EMPTY && curid != c->id)
+                ? scene_getgobjectfromid(ctx->scene, curid) : NULL;
+            scene_markchanged(ctx->scene);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
+            }
+            return true;
+        }
+
+        case MVCMD_DELETE_DRAW: {
+            mv_cmd_delete_draw *c = MVCMD_AS_DELETE_DRAW(cmd);
+            if (!command_needscene(ctx)) return false;
+            if (!scene_deletedraw(ctx->scene, c->id)) {
+                return command_apply_error("No draw with id '%i'.", c->id);
+            }
+            scene_markchanged(ctx->scene);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
+            }
+            return true;
+        }
+
+        case MVCMD_QUIT:
+            display_requestcloseall();
+            if (!display_anyopen() && listener_isactive()) {
+                listener_reply(LISTENER_WINDOW_CLOSED);
+                listener_stop();
+            }
+            command_sticky_applyctx_reset();
+            return true;
+
+        case MVCMD_CLEAR_DISPLAY: {
+            if (!command_needscene(ctx)) return false;
+            scene_cleardisplaylist(ctx->scene);
+            scene_markchanged(ctx->scene);
+            command_reset_colorstamp(ctx);
+            if (ctx->display && ctx->display->window) {
+                glfwMakeContextCurrent(ctx->display->window);
+                render_reset(&ctx->display->render);
+            }
+            return true;
+        }
+
+        case MVCMD_WINDOW_TITLE: {
+            mv_cmd_window *c = MVCMD_AS_WINDOW(cmd);
+            if (ctx->display && c->title) {
+                display_setwindowtitle(ctx->display, c->title);
+            }
+            return true;
+        }
+
+        case MVCMD_BOUNDS: {
+            mv_cmd_bounds *c = MVCMD_AS_BOUNDS(cmd);
+            if (!command_needscene(ctx)) return false;
+            scene_setbbox(ctx->scene, c->bbox[0], c->bbox[1], c->bbox[2],
+                          c->bbox[3], c->bbox[4], c->bbox[5]);
+            command_touchscene(ctx);
+            return true;
+        }
+
+        case MVCMD_LIGHT: {
+            /* Lighting is sampled each frame from the scene; no GL rebuild. */
+            mv_cmd_light *c = MVCMD_AS_LIGHT(cmd);
+            if (!command_needscene(ctx)) return false;
+            if (c->mode==SCENE_LIGHT_EXPLICIT) {
+                scene_setexplicitlights(ctx->scene, c->nlights, c->pos, c->color);
+            } else {
+                scene_setlightmode(ctx->scene, c->mode);
+            }
+            return true;
+        }
+
+        case MVCMD_BACKGROUND: {
+            /* Background is sampled each frame from the scene; no GL rebuild. */
+            mv_cmd_background *c = MVCMD_AS_BACKGROUND(cmd);
+            if (!command_needscene(ctx)) return false;
+            scene_setbackground(ctx->scene, c->rgb[0], c->rgb[1], c->rgb[2]);
+            return true;
+        }
+
+        case MVCMD_OBJECT:
+            if (!command_needscene(ctx)) return false;
+            ctx->cobject=scene_addobject(ctx->scene, MVCMD_AS_OBJECT(cmd)->id);
+            if (!ctx->cobject) return command_apply_error("Could not create object '%i'.",
+                                                         MVCMD_AS_OBJECT(cmd)->id);
+            command_touchscene(ctx);
+            return true;
+
+        case MVCMD_VERTICES: {
+            mv_cmd_vertices *c = MVCMD_AS_VERTICES(cmd);
+            if (!command_needobject(ctx)) return false;
+
+            if (c->format) {
+                if (ctx->cobject->vertexdata.format)
+                    free(ctx->cobject->vertexdata.format);
+                ctx->cobject->vertexdata.format=c->format;
+                c->format=NULL;
+                ctx->cobject->centroid_valid=false;
+            }
+
+            if (c->length>0 && c->data) {
+                int ret=scene_adddata_take(ctx->scene, &c->data, c->length);
+                if (ret<0) return command_apply_error("Could not store vertex data.");
+                if (ctx->cobject->vertexdata.indx==SCENE_EMPTY) {
+                    ctx->cobject->vertexdata.indx=ret;
+                    ctx->cobject->vertexdata.length=0;
+                }
+                ctx->cobject->vertexdata.length += c->length;
+                ctx->cobject->centroid_valid=false;
+            }
+            command_touchscene(ctx);
+            return true;
+        }
+
+        case MVCMD_ELEMENT: {
+            mv_cmd_element *c = MVCMD_AS_ELEMENT(cmd);
+            if (!command_needobject(ctx)) return false;
+
+            gelement el = {
+                .type = c->type,
+                .indx = SCENE_EMPTY,
+                .length = 0
+            };
+
+            if (c->length>0 && c->indices) {
+                int ret=scene_addindex_take(ctx->scene, &c->indices, c->length);
+                if (ret<0) return command_apply_error("Could not store index data.");
+                el.indx=ret;
+                el.length=c->length;
+            }
+
+            if (scene_addelement(ctx->cobject, &el) < 0)
+                return command_apply_error("Could not store element data.");
+            command_touchscene(ctx);
+            return true;
+        }
+
+        case MVCMD_COLOR: {
+            mv_cmd_color *c = MVCMD_AS_COLOR(cmd);
+            if (!command_needscene(ctx)) return false;
+
+            if (c->length>0 && c->rgb) {
+                int ncomp = (c->components==4) ? 4 : 3;
+                int nfloats = c->length*ncomp;
+                int indx=scene_adddata_take(ctx->scene, &c->rgb, nfloats);
+                if (indx<0) return command_apply_error("Could not store color data.");
+                if (scene_addcolor(ctx->scene, c->id, c->length, ncomp, indx)<0)
+                    return command_apply_error("Could not store color data.");
+            }
+            command_touchscene(ctx);
+            return true;
+        }
+
+        case MVCMD_SELECT_COLOR: {
+            mv_cmd_select_color *c = MVCMD_AS_SELECT_COLOR(cmd);
+            if (!command_needscene(ctx)) return false;
+            /* Context only: stamp onto subsequent `d` / `T`.
+             * Do not append COLOR displaylist entries (unbounded on live recolor)
+             * or mark the scene changed — draw-slot color lives on the OBJECT/TEXT. */
+            if (c->clear) {
+                ctx->colorstamp = COLORSTAMP_CLEAR;
+                ctx->current_colorid = SCENE_EMPTY;
+            } else {
+                ctx->colorstamp = COLORSTAMP_SET;
+                ctx->current_colorid = c->id;
+            }
+            return true;
+        }
+
+        case MVCMD_MATERIAL: {
+            mv_cmd_material *c = MVCMD_AS_MATERIAL(cmd);
+            if (!command_needscene(ctx)) return false;
+            float coeffs[4] = { c->ka, c->kd, c->ks, c->shininess };
+            int matindx=scene_adddata(ctx->scene, coeffs, 4);
+            if (matindx<0) return command_apply_error("Could not store material.");
+            if (!scene_adddraw(ctx->scene, SHADE, c->mode, matindx))
+                return command_apply_error("Could not store material.");
+            command_touchscene(ctx);
+            return true;
+        }
+
+        case MVCMD_DRAW: {
+            mv_cmd_draw *c = MVCMD_AS_DRAW(cmd);
+            if (!command_needscene(ctx)) return false;
+
+            int objectid = c->has_objectid ? c->objectid : c->drawid;
+            bool stamp_color;
+            int stamp;
+            command_draw_colorstamp(ctx, &stamp_color, &stamp);
+            gdraw *drw = scene_finddrawbydrawid(ctx->scene, c->drawid);
+
+            /* Legacy single-arg: fall back to first OBJECT with this object id. */
+            if (!drw && !c->has_objectid)
+                drw = scene_findobjectdraw(ctx->scene, c->drawid);
+
+            if (drw) {
+                bool need_prepare = false;
+                if (drw->type == OBJECT) {
+                    if (c->has_objectid) {
+                        scene_setobjectdrawobject(drw, objectid);
+                        need_prepare = true; /* rebind → renderlist object refs */
+                    }
+                    /* Ensure legacy draws get a stable drawid for later pose updates. */
+                    if (drw->drawid == SCENE_EMPTY) drw->drawid = c->drawid;
+                }
+
+                bool had_matrix = (drw->matindx != SCENE_EMPTY);
+                int old_color = drw->colorid;
+                if (!scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
+                                            c->has_matrix ? c->matrix : NULL,
+                                            stamp_color, stamp))
+                    return command_apply_error("Could not update draw '%i'.", c->drawid);
+
+                /* Color is baked into the renderlist at prepare time. */
+                if (stamp_color && stamp != old_color)
+                    need_prepare = true;
+                /* First matrix on a draw needs prepare so RMODEL enters the list. */
+                if (c->has_matrix && !had_matrix)
+                    need_prepare = true;
+                /* else: in-place matrix memcpy — renderlist already points at scene data */
+
+                if (need_prepare) command_touchscene(ctx);
+            } else {
+                if (!scene_addobjectdraw(ctx->scene, c->drawid, objectid,
+                                         c->has_matrix ? c->matrix : NULL,
+                                         stamp_color ? stamp : SCENE_EMPTY))
+                    return command_apply_error("Could not create draw '%i'.", c->drawid);
+                command_touchscene(ctx);
+            }
+            return true;
+        }
+
+        case MVCMD_FONT: {
+            mv_cmd_font *c = MVCMD_AS_FONT(cmd);
+            if (!command_needscene(ctx)) return false;
+            if (!scene_addfont(ctx->scene, c->id, c->path, c->size, NULL))
+                return command_apply_error("Could not load font '%i'.", c->id);
+            command_touchscene(ctx);
+            return true;
+        }
+
+        case MVCMD_TEXT: {
+            mv_cmd_text *c = MVCMD_AS_TEXT(cmd);
+            if (!command_needscene(ctx)) return false;
+            if (!scene_getfontfromid(ctx->scene, c->fontid)) {
+                return command_apply_error("Font id '%i' not found.", c->fontid);
+            }
+
+            bool stamp_color;
+            int stamp;
+            command_draw_colorstamp(ctx, &stamp_color, &stamp);
+            const float *matrix = c->has_matrix ? c->matrix : NULL;
+
+            if (c->drawid != SCENE_EMPTY) {
+                gdraw *drw = scene_finddrawbydrawid(ctx->scene, c->drawid);
+                if (drw && drw->type == TEXT) {
+                    gtext *txt = &ctx->scene->textlist.data[drw->id];
+                    textfont *font = scene_getfontfromid(ctx->scene, c->fontid);
+                    if (!text_prepare(font, c->string))
+                        return command_apply_error("Could not prepare text.");
+                    char *old = txt->text;
+                    txt->text = c->string;
+                    c->string = NULL;
+                    txt->fontid = c->fontid;
+                    free(old);
+                    if (!scene_updateobjectdraw(ctx->scene, drw, c->has_matrix,
+                                                matrix, stamp_color, stamp))
+                        return command_apply_error("Could not update text.");
+                    command_touchscene(ctx);
+                    return true;
+                }
+
+                int tid = scene_addtext(ctx->scene, c->fontid, c->string);
+                if (tid < 0) return command_apply_error("Could not add text.");
+                c->string = NULL;
+                if (!scene_addtextdraw(ctx->scene, c->drawid, tid, matrix,
+                                       stamp_color ? stamp : SCENE_EMPTY))
+                    return command_apply_error("Could not add text.");
+                command_touchscene(ctx);
+                return true;
+            }
+
+            /* Legacy: append TEXT draw with no draw-slot id; stamp active `C`. */
+            int tid = scene_addtext(ctx->scene, c->fontid, c->string);
+            if (tid < 0) return command_apply_error("Could not add text.");
+            c->string = NULL;
+
+            int matindx = SCENE_EMPTY;
+            if (c->has_matrix) {
+                matindx = scene_adddata(ctx->scene, c->matrix, 16);
+                if (matindx<0) return command_apply_error("Could not add text.");
+            }
+            if (!scene_adddraw(ctx->scene, TEXT, tid, matindx))
+                return command_apply_error("Could not add text.");
+            if (stamp_color && ctx->scene->displaylist.count > 0) {
+                gdraw *last = &ctx->scene->displaylist.data[
+                    ctx->scene->displaylist.count - 1];
+                last->colorid = stamp;
+            }
+            command_touchscene(ctx);
+            return true;
+        }
+
+        case MVCMD_PREPARE:
+            display_prepareall();
+            return true;
+    }
+
+    return command_apply_error("Unrecognized command.");
+}
+
+/** Apply queued commands.
+ * @returns number applied before an error, or the full batch count */
+int command_process(void) {
+    command_applyctx *ctx = command_sticky_applyctx();
+    /* Drop a `C` that arrived with no following `d`/`T` in this chunk. */
+    command_reset_colorstamp(ctx);
+
+    /* Steal the queue under the lock so apply (GL) does not block the I/O thread. */
+    varray_mv_commandptr batch;
+    MorphoMutex_lock(&command_queue_mutex);
+    batch = command_queue;
+    varray_mv_commandptrinit(&command_queue);
+    MorphoMutex_unlock(&command_queue_mutex);
+
+    int applied=0;
+    for (unsigned int i=0; i<batch.count; i++) {
+        mv_command *cmd = batch.data[i];
+        if (!command_apply(cmd, ctx)) {
+            for (unsigned int j=i; j<batch.count; j++) {
+                command_free(batch.data[j]);
+            }
+            batch.count=0;
+            varray_mv_commandptrclear(&batch);
+            return applied;
+        }
+        command_free(cmd);
+        applied++;
+    }
+
+    batch.count=0;
+    varray_mv_commandptrclear(&batch);
+    return applied;
+}
+
+/* **********************************************************************
+ * Morphoview lexer
+ * ********************************************************************** */
+
+enum {
+    MVTOKEN_INTEGER,
+    MVTOKEN_FLOAT,
+    MVTOKEN_STRING,
+
+    MVTOKEN_COLOR,
+    MVTOKEN_SELECTCOLOR,
+    MVTOKEN_DRAW,
+    MVTOKEN_CLEAR_DISPLAY,
+    MVTOKEN_OBJECT,
+    MVTOKEN_VERTICES,
+    MVTOKEN_POINTS,
+    MVTOKEN_LINES,
+    MVTOKEN_FACETS,
+    MVTOKEN_IDENTITY,
+    MVTOKEN_MATRIX,
+    MVTOKEN_ROTATE,
+    MVTOKEN_SCALE,
+    MVTOKEN_SCENE,
+    MVTOKEN_UPDATE,
+    MVTOKEN_DELETE,
+    MVTOKEN_QUIT,
+    MVTOKEN_TRANSLATE,
+    MVTOKEN_WINDOW,
+    MVTOKEN_BOUNDS,
+    MVTOKEN_LIGHT,
+    MVTOKEN_BACKGROUND,
+    MVTOKEN_FONT,
+    MVTOKEN_TEXT,
+    MVTOKEN_MATERIAL,
+    MVTOKEN_SHADED,
+    MVTOKEN_FLAT,
+
+    MVTOKEN_QUOTE,
+    MVTOKEN_MINUS,
+
+    MVTOKEN_EOF
+};
+
+bool command_lexstring(lexer *l, token *tok, error *err);
+bool command_lexnumber(lexer *l, token *tok, error *err);
+
+tokendefn mvtokens[] = {
+    { "c",          MVTOKEN_COLOR                 , NULL },
+    { "C",          MVTOKEN_SELECTCOLOR           , NULL },
+    { "d",          MVTOKEN_DRAW                  , NULL },
+    { "D",          MVTOKEN_CLEAR_DISPLAY         , NULL },
+    { "o",          MVTOKEN_OBJECT                , NULL },
+    { "O",          MVTOKEN_OBJECT                , NULL },
+    { "p",          MVTOKEN_POINTS                , NULL },
+    { "l",          MVTOKEN_LINES                 , NULL },
+    { "f",          MVTOKEN_FACETS                , NULL },
+    { "F",          MVTOKEN_FONT                  , NULL },
+    { "i",          MVTOKEN_IDENTITY              , NULL },
+    { "m",          MVTOKEN_MATRIX                , NULL },
+    { "r",          MVTOKEN_ROTATE                , NULL },
+    { "s",          MVTOKEN_SCALE                 , NULL },
+    { "S",          MVTOKEN_SCENE                 , NULL },
+    { "U",          MVTOKEN_UPDATE                , NULL },
+    { "X",          MVTOKEN_DELETE                , NULL },
+    { "Q",          MVTOKEN_QUIT                  , NULL },
+    { "t",          MVTOKEN_TRANSLATE             , NULL },
+    { "T",          MVTOKEN_TEXT                  , NULL },
+    { "v",          MVTOKEN_VERTICES              , NULL },
+    { "V",          MVTOKEN_VERTICES              , NULL },
+    { "W",          MVTOKEN_WINDOW                , NULL },
+    { "B",          MVTOKEN_BOUNDS                , NULL },
+    { "L",          MVTOKEN_LIGHT                 , NULL },
+    { "G",          MVTOKEN_BACKGROUND            , NULL },
+    { "M",          MVTOKEN_MATERIAL              , NULL },
+    { "shaded",     MVTOKEN_SHADED                , NULL },
+    { "flat",       MVTOKEN_FLAT                  , NULL },
+
+    { "\"",         MVTOKEN_QUOTE                 , command_lexstring },
+    { "-",          MVTOKEN_MINUS                 , command_lexnumber },
+
+    { "",           TOKEN_NONE                    , NULL }
+};
+
+/** Skip morphoview whitespace (spaces and newlines) */
+bool command_lexwhitespace(lexer *l, token *tok, error *err) {
+    for (;;) {
+        char c = lex_peek(l);
+
+        switch (c) {
+            case '\n':
+                lex_newline(l); /* intentional fallthrough */
+            case ' ':
+            case '\t':
+            case '\r':
+                lex_advance(l);
+                break;
+            default:
+                return true;
+        }
+    }
+    return true;
+}
+
+/** Record command-file strings as a token */
+bool command_lexstring(lexer *l, token *tok, error *err) {
+    unsigned int startline = l->line, startpsn = l->posn;
+
+    while (lex_peek(l) != '"' && !lex_isatend(l)) {
+        if (lex_peek(l)=='\n') lex_newline(l);
+        if (lex_peek(l)=='\\') lex_advance(l);
+        lex_advance(l);
+    }
+
+    if (lex_isatend(l)) {
+        morpho_writeerrorwithid(err, LEXER_UNTERMINATEDSTRING, NULL, startline, startpsn);
+        return false;
+    }
+
+    lex_advance(l); /* closing quote */
+    lex_recordtoken(l, MVTOKEN_STRING, tok);
+    return true;
+}
+
+/** Record numbers as tokens (morpho lex_number style, plus leading '-' via processfn) */
+bool command_lexnumber(lexer *l, token *tok, error *err) {
+    tokentype type = l->inttype;
+
+    if (!lex_isdigit(lex_peek(l))) {
+        morpho_writeerrorwithid(err, COMMAND_INVLDNMBR, NULL, l->line, l->posn);
+        return false;
+    }
+
+    while (lex_isdigit(lex_peek(l))) lex_advance(l);
+
+    /* Fractional part — allow trailing '.' as in morpho / existing scene files (e.g. 0.) */
+    char next = '\0';
+    if (lex_peek(l)!='\0') next=lex_peekahead(l, 1);
+    if (lex_peek(l) == '.' && (lex_isdigit(next) || lex_isspace(next) || next=='\0')) {
+        type = l->flttype;
+        lex_advance(l);
+        while (lex_isdigit(lex_peek(l))) lex_advance(l);
+    }
+
+    if (lex_peek(l)=='e' || lex_peek(l)=='E') {
+        type = l->flttype;
+        lex_advance(l);
+        if (lex_peek(l)=='+' || lex_peek(l)=='-') lex_advance(l);
+        if (!lex_isdigit(lex_peek(l))) {
+            morpho_writeerrorwithid(err, COMMAND_INVLDNMBR, NULL, l->line, l->posn);
+            return false;
+        }
+        while (lex_isdigit(lex_peek(l))) lex_advance(l);
+    }
+
+    lex_recordtoken(l, type, tok);
+    return true;
+}
+
+/** Lexer preprocess: leading digits start a number */
+bool command_lexpreprocess(lexer *l, token *tok, error *err) {
+    if (lex_isdigit(lex_peek(l))) return command_lexnumber(l, tok, err);
+    return false;
+}
+
+/** Initialize a lexer for morphoview command files */
+void command_initializelexer(lexer *l, char *src) {
+    lex_init(l, src, 1);
+    lex_settokendefns(l, mvtokens);
+    lex_setnumbertype(l, MVTOKEN_INTEGER, MVTOKEN_FLOAT, MVTOKEN_FLOAT);
+    lex_setprefn(l, command_lexpreprocess);
+    lex_setwhitespacefn(l, command_lexwhitespace);
+    lex_setstringinterpolation(l, false);
+    lex_seteof(l, MVTOKEN_EOF);
+    lex_setmatchkeywords(l, false);
+}
+
+/* **********************************************************************
+ * Helpers
+ * ********************************************************************** */
+
+bool command_isnumerical(parser *p) {
+    return parse_checktoken(p, MVTOKEN_INTEGER) ||
+           parse_checktoken(p, MVTOKEN_FLOAT);
+}
+
+bool command_parseinteger(parser *p, int *out) {
+    if (!parse_checktokenadvance(p, MVTOKEN_INTEGER)) {
+        parse_error(p, false, COMMAND_EXPECTINTEGER);
+        return false;
+    }
+
+    long f;
+    PARSE_CHECK(parse_tokentointeger(p, &f));
+    *out = (int) f;
+    return true;
+}
+
+bool command_parsefloat(parser *p, float *out) {
+    if (!command_isnumerical(p)) {
+        parse_error(p, false, COMMAND_EXPECTNUMBER);
+        return false;
+    }
+
+    PARSE_CHECK(parse_advance(p));
+
+    double x;
+    PARSE_CHECK(parse_tokentodouble(p, &x));
+    *out = (float) x;
+    return true;
+}
+
+/** Copy a quoted-token body, turning \\ and \" into \ and ". */
+static bool command_unescapestring(const char *src, int n, char **out) {
+    if (!out) return false;
+    if (n < 0) n = 0;
+    if (n > 0 && !src) return false;
+
+    char *str = malloc((size_t) n + 1);
+    if (!str) return false;
+
+    int j = 0;
+    for (int i = 0; i < n; i++) {
+        if (src[i]=='\\' && i+1<n) i++;
+        str[j++]=src[i];
+    }
+    str[j]='\0';
+    *out = str;
+    return true;
+}
+
+bool command_parsestring(parser *p, char **out) {
+    if (!parse_checktokenadvance(p, MVTOKEN_STRING)) {
+        parse_error(p, false, COMMAND_EXPECTSTRING);
+        return false;
+    }
+
+    int length = (int) p->previous.length - 2;
+    if (length < 0) length = 0;
+
+    if (!command_unescapestring(p->previous.start+1, length, out)) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    return true;
+}
+
+bool command_enqueue_owned(parser *p, mv_command *cmd) {
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    if (command_enqueue(cmd)) return true;
+    command_free(cmd);
+    parse_error(p, true, ERROR_ALLOCATIONFAILED);
+    return false;
+}
+
+/* **********************************************************************
+ * Bulk number parse (count → one alloc → fill)
+ * ********************************************************************** */
+
+static const char *command_skipws(const char *s) {
+    while (*s==' ' || *s=='\t' || *s=='\r' || *s=='\n') s++;
+    return s;
+}
+
+/** Advance *sp past one number matching the morphoview lexer; return false if none. */
+static bool command_scannumber(const char **sp, bool integers_only) {
+    const char *p = *sp;
+
+    if (*p=='-') {
+        if (!isdigit((unsigned char) p[1])) return false;
+        p++;
+    }
+    if (!isdigit((unsigned char) *p)) return false;
+    while (isdigit((unsigned char) *p)) p++;
+
+    bool isfloat = false;
+    if (*p=='.') {
+        char next = p[1];
+        if (isdigit((unsigned char) next) || next==' ' || next=='\t' ||
+            next=='\r' || next=='\n' || next=='\0') {
+            isfloat = true;
+            p++;
+            while (isdigit((unsigned char) *p)) p++;
+        }
+    }
+
+    if (*p=='e' || *p=='E') {
+        const char *e = p + 1;
+        if (*e=='+' || *e=='-') e++;
+        if (!isdigit((unsigned char) *e)) {
+            /* Incomplete exponent — not a valid number token. */
+            return false;
+        }
+        isfloat = true;
+        p = e;
+        while (isdigit((unsigned char) *p)) p++;
+    }
+
+    if (integers_only && isfloat) return false;
+
+    *sp = p;
+    return true;
+}
+
+/** Count consecutive number tokens starting at the current (unconsumed) token. */
+static unsigned int command_countnumbersahead(parser *p, bool integers_only) {
+    if (integers_only) {
+        if (!parse_checktoken(p, MVTOKEN_INTEGER)) return 0;
+    } else if (!command_isnumerical(p)) {
+        return 0;
+    }
+
+    const char *s = p->current.start;
+    unsigned int n = 0;
+    for (;;) {
+        s = command_skipws(s);
+        if (!command_scannumber(&s, integers_only)) break;
+        n++;
+    }
+    return n;
+}
+
+/** Parse n floats into a pre-sized buffer (stops early if fewer numbers remain). */
+static bool command_parsefloatsinto(parser *p, float *out, unsigned int n, unsigned int *written) {
+    unsigned int i = 0;
+    while (i<n && command_isnumerical(p)) {
+        if (!command_parsefloat(p, &out[i])) return false;
+        i++;
+    }
+    *written = i;
+    return true;
+}
+
+/** Parse n integers into a pre-sized buffer. */
+static bool command_parseintsinto(parser *p, int *out, unsigned int n, unsigned int *written) {
+    unsigned int i = 0;
+    while (i<n && parse_checktoken(p, MVTOKEN_INTEGER)) {
+        if (!command_parseinteger(p, &out[i])) return false;
+        i++;
+    }
+    *written = i;
+    return true;
+}
+
+/* **********************************************************************
+ * Parse handlers (emit only)
+ * ********************************************************************** */
+
+bool command_parsecolor(parser *p, void *out) {
+    (void) out;
+    int id;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+
+    unsigned int n = command_countnumbersahead(p, false);
+    float *rgb = NULL;
+    unsigned int written = 0;
+
+    if (n>0) {
+        rgb = malloc(sizeof(float)*n);
+        if (!rgb) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        if (!command_parsefloatsinto(p, rgb, n, &written)) {
+            free(rgb);
+            return false;
+        }
+    }
+
+    int components=3;
+    int length=0;
+    if (written==0) {
+        components=3;
+        length=0;
+    } else if (written==4) {
+        components=4;
+        length=1;
+    } else if (written%3==0) {
+        components=3;
+        length=(int) (written/3);
+    } else if (written%4==0) {
+        components=4;
+        length=(int) (written/4);
+    } else {
+        free(rgb);
+        parse_error(p, false, COMMAND_INVLDCOLOR);
+        return false;
+    }
+
+    mv_cmd_color *cmd = command_new(MVCMD_COLOR, sizeof(mv_cmd_color));
+    if (!cmd) {
+        free(rgb);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    cmd->length=length;
+    cmd->components=components;
+    cmd->rgb=rgb;
+
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parseselectcolor(parser *p, void *out) {
+    (void) out;
+    bool clear = !parse_checktoken(p, MVTOKEN_INTEGER);
+    int id = SCENE_EMPTY;
+    if (!clear) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+    }
+
+    mv_cmd_select_color *cmd = command_new(MVCMD_SELECT_COLOR, sizeof(mv_cmd_select_color));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    cmd->clear=clear;
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parsematerial(parser *p, void *out) {
+    (void) out;
+
+    int shademode;
+    if (parse_checktokenadvance(p, MVTOKEN_SHADED)) {
+        shademode=SCENE_SHADE_SHADED;
+    } else if (parse_checktokenadvance(p, MVTOKEN_FLAT)) {
+        shademode=SCENE_SHADE_FLAT;
+    } else {
+        parse_error(p, false, COMMAND_INVLDMATERIAL);
+        return false;
+    }
+
+    float ka=SCENE_MATERIAL_KA_DEFAULT;
+    float kd=SCENE_MATERIAL_KD_DEFAULT;
+    float ks=SCENE_MATERIAL_KS_DEFAULT;
+    float shininess=SCENE_MATERIAL_SHININESS_DEFAULT;
+
+    if (shademode==SCENE_SHADE_SHADED && command_isnumerical(p)) {
+        PARSE_CHECK(command_parsefloat(p, &ka));
+        if (!command_isnumerical(p)) {
+            parse_error(p, false, COMMAND_EXPECTNUMBER);
+            return false;
+        }
+        PARSE_CHECK(command_parsefloat(p, &kd));
+        if (command_isnumerical(p)) {
+            PARSE_CHECK(command_parsefloat(p, &ks));
+            if (command_isnumerical(p)) {
+                PARSE_CHECK(command_parsefloat(p, &shininess));
+            }
+        }
+    }
+
+    mv_cmd_material *cmd = command_new(MVCMD_MATERIAL, sizeof(mv_cmd_material));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->mode=shademode;
+    cmd->ka=ka;
+    cmd->kd=kd;
+    cmd->ks=ks;
+    cmd->shininess=shininess;
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parsedraw(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    int drawid;
+    int objectid = 0;
+    bool has_objectid = false;
+
+    PARSE_CHECK(command_parseinteger(p, &drawid));
+    if (parse_checktoken(p, MVTOKEN_INTEGER)) {
+        PARSE_CHECK(command_parseinteger(p, &objectid));
+        has_objectid = true;
+    }
+
+    mv_cmd_draw *cmd = command_new(MVCMD_DRAW, sizeof(mv_cmd_draw));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->drawid = drawid;
+    cmd->has_objectid = has_objectid;
+    cmd->objectid = objectid;
+    cmd->has_matrix = ctx->modelchanged;
+    if (ctx->modelchanged) {
+        memcpy(cmd->matrix, ctx->model, sizeof(float)*16);
+        ctx->modelchanged = false;
+    }
+
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+/** Clear the displaylist. */
+bool command_parsecleardisplay(parser *p, void *out) {
+    (void) p;
+    (void) out;
+
+    mv_command *cmd = command_new(MVCMD_CLEAR_DISPLAY, sizeof(mv_command));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    return command_enqueue_owned(p, cmd);
+}
+
+bool command_parseobject(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    int id;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+
+    mv_cmd_object *cmd = command_new(MVCMD_OBJECT, sizeof(mv_cmd_object));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    ctx->has_object=true;
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parsevertices(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    char *format=NULL;
+
+    if (!ctx->has_object) {
+        parse_error(p, true, COMMAND_NOOBJECT);
+        return false;
+    }
+
+    if (parse_checktoken(p, MVTOKEN_STRING)) {
+        PARSE_CHECK(command_parsestring(p, &format));
+    }
+
+    unsigned int n = command_countnumbersahead(p, false);
+    float *data = NULL;
+    unsigned int written = 0;
+
+    if (n>0) {
+        data = malloc(sizeof(float)*n);
+        if (!data) {
+            free(format);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        if (!command_parsefloatsinto(p, data, n, &written)) {
+            free(format);
+            free(data);
+            return false;
+        }
+    }
+
+    mv_cmd_vertices *cmd = command_new(MVCMD_VERTICES, sizeof(mv_cmd_vertices));
+    if (!cmd) {
+        free(format);
+        free(data);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->format=format;
+    cmd->length=(int) written;
+    cmd->data=data;
+
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parseindex(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+
+    if (!ctx->has_object) {
+        parse_error(p, true, COMMAND_NOOBJECT);
+        return false;
+    }
+
+    gelementtype etype = GELEMENT_POINTS;
+    if (p->previous.type==MVTOKEN_LINES) {
+        etype=GELEMENT_LINES;
+    } else if (p->previous.type==MVTOKEN_FACETS) {
+        etype=GELEMENT_FACETS;
+    }
+
+    unsigned int n = command_countnumbersahead(p, true);
+    int *indices = NULL;
+    unsigned int written = 0;
+
+    if (n>0) {
+        indices = malloc(sizeof(int)*n);
+        if (!indices) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        if (!command_parseintsinto(p, indices, n, &written)) {
+            free(indices);
+            return false;
+        }
+    }
+
+    mv_cmd_element *cmd = command_new(MVCMD_ELEMENT, sizeof(mv_cmd_element));
+    if (!cmd) {
+        free(indices);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->type=etype;
+    cmd->length=(int) written;
+    cmd->indices=indices;
+
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parseidentity(parser *p, void *out) {
+    (void) p;
+    command_parsectx *ctx = (command_parsectx *) out;
+    mat3d_identity4x4(ctx->model);
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parsematrix(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    mat4x4 x, m;
+
+    for (int i=0; i<16; i++) {
+        PARSE_CHECK(command_parsefloat(p, &x[i]));
+    }
+
+    mat3d_copy4x4(ctx->model, m);
+    mat3d_mul4x4(m, x, ctx->model);
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parserotate(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    float phi, x[3];
+
+    PARSE_CHECK(command_parsefloat(p, &phi));
+    for (int i=0; i<3; i++) {
+        PARSE_CHECK(command_parsefloat(p, &x[i]));
+    }
+
+    mat3d_rotate(ctx->model, x, phi, ctx->model);
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parsescale(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    float s[3];
+
+    PARSE_CHECK(command_parsefloat(p, &s[0]));
+    if (command_isnumerical(p)) {
+        PARSE_CHECK(command_parsefloat(p, &s[1]));
+        PARSE_CHECK(command_parsefloat(p, &s[2]));
+        mat3d_scale3(ctx->model, s, ctx->model);
+    } else {
+        mat3d_scale(ctx->model, s[0], ctx->model);
+    }
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parsetranslate(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    float x[3];
+
+    for (int i=0; i<3; i++) {
+        PARSE_CHECK(command_parsefloat(p, &x[i]));
+    }
+
+    mat3d_translate(ctx->model, x, ctx->model);
+    ctx->modelchanged=true;
+    return true;
+}
+
+bool command_parsescene(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    int id, dim;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+    PARSE_CHECK(command_parseinteger(p, &dim));
+
+    mv_cmd_scene *cmd = command_new(MVCMD_SCENE_CREATE, sizeof(mv_cmd_scene));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    cmd->dim=dim;
+    ctx->has_scene=true;
+    ctx->has_object=false;
+
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+/** `U S|O|V ...` — update scene, object, or vertices. */
+bool command_parseupdate(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    int id;
+
+    if (parse_checktokenadvance(p, MVTOKEN_SCENE)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        mv_cmd_update_scene *cmd = command_new(MVCMD_UPDATE_SCENE, sizeof(mv_cmd_update_scene));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        ctx->has_scene=true;
+        ctx->has_object=false;
+        return command_enqueue_owned(p, &cmd->cmd);
+    }
+
+    if (parse_checktokenadvance(p, MVTOKEN_OBJECT)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        mv_cmd_update_object *cmd = command_new(MVCMD_UPDATE_OBJECT, sizeof(mv_cmd_update_object));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        ctx->has_scene=true;
+        ctx->has_object=true;
+        return command_enqueue_owned(p, &cmd->cmd);
+    }
+
+    if (parse_checktokenadvance(p, MVTOKEN_VERTICES)) {
+        char *format=NULL;
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        if (parse_checktoken(p, MVTOKEN_STRING)) {
+            PARSE_CHECK(command_parsestring(p, &format));
+        }
+
+        unsigned int n = command_countnumbersahead(p, false);
+        float *data = NULL;
+        unsigned int written = 0;
+
+        if (n>0) {
+            data = malloc(sizeof(float)*n);
+            if (!data) {
+                free(format);
+                parse_error(p, true, ERROR_ALLOCATIONFAILED);
+                return false;
+            }
+            if (!command_parsefloatsinto(p, data, n, &written)) {
+                free(format);
+                free(data);
+                return false;
+            }
+        }
+
+        mv_cmd_update_vertices *cmd = command_new(MVCMD_UPDATE_VERTICES, sizeof(mv_cmd_update_vertices));
+        if (!cmd) {
+            free(format);
+            free(data);
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        cmd->format=format;
+        cmd->length=(int) written;
+        cmd->data=data;
+        ctx->has_scene=true;
+        return command_enqueue_owned(p, &cmd->cmd);
+    }
+
+    parse_error(p, true, COMMAND_INVLDUPDATE);
+    return false;
+}
+
+/** `X S|O|D <id>` — close scene, delete object, or delete draw-slot. */
+bool command_parsedelete(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    int id;
+
+    if (parse_checktokenadvance(p, MVTOKEN_SCENE)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        mv_cmd_close_scene *cmd = command_new(MVCMD_CLOSE_SCENE, sizeof(mv_cmd_close_scene));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        return command_enqueue_owned(p, &cmd->cmd);
+    }
+
+    if (parse_checktokenadvance(p, MVTOKEN_OBJECT)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        mv_cmd_delete_object *cmd = command_new(MVCMD_DELETE_OBJECT, sizeof(mv_cmd_delete_object));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        ctx->has_scene=true;
+        return command_enqueue_owned(p, &cmd->cmd);
+    }
+
+    if (parse_checktokenadvance(p, MVTOKEN_CLEAR_DISPLAY)) {
+        PARSE_CHECK(command_parseinteger(p, &id));
+
+        mv_cmd_delete_draw *cmd = command_new(MVCMD_DELETE_DRAW, sizeof(mv_cmd_delete_draw));
+        if (!cmd) {
+            parse_error(p, true, ERROR_ALLOCATIONFAILED);
+            return false;
+        }
+        cmd->id=id;
+        ctx->has_scene=true;
+        return command_enqueue_owned(p, &cmd->cmd);
+    }
+
+    parse_error(p, true, COMMAND_INVLDDELETE);
+    return false;
+}
+
+/** `Q` — quit the viewer. */
+bool command_parsequit(parser *p, void *out) {
+    (void) p;
+    (void) out;
+
+    mv_command *cmd = command_new(MVCMD_QUIT, sizeof(mv_command));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+
+    return command_enqueue_owned(p, cmd);
+}
+
+bool command_parsewindow(parser *p, void *out) {
+    (void) out;
+    char *name=NULL;
+
+    PARSE_CHECK(command_parsestring(p, &name));
+
+    mv_cmd_window *cmd = command_new(MVCMD_WINDOW_TITLE, sizeof(mv_cmd_window));
+    if (!cmd) {
+        free(name);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->title=name;
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+/** `B <xmin> <xmax> <ymin> <ymax> <zmin> <zmax>` — explicit scene AABB. */
+bool command_parsebounds(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    float bbox[6];
+
+    for (int i=0; i<6; i++) {
+        PARSE_CHECK(command_parsefloat(p, &bbox[i]));
+    }
+
+    if (!ctx->has_scene) {
+        parse_error(p, true, COMMAND_NOSCENE);
+        return false;
+    }
+
+    mv_cmd_bounds *cmd = command_new(MVCMD_BOUNDS, sizeof(mv_cmd_bounds));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    for (int i=0; i<6; i++) cmd->bbox[i]=bbox[i];
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+/** `L "neutral"|"threepoint"|"auto"|"off"` | `L <n> "x"|"xc" ...` | `L 0`. */
+bool command_parselight(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+
+    scene_light_mode mode=SCENE_LIGHT_NEUTRAL;
+    int nlights=0;
+    float pos[SCENE_MAX_LIGHTS][3];
+    float color[SCENE_MAX_LIGHTS][3];
+    memset(pos, 0, sizeof(pos));
+    memset(color, 0, sizeof(color));
+
+    if (parse_checktoken(p, MVTOKEN_STRING)) {
+        char *name=NULL;
+        PARSE_CHECK(command_parsestring(p, &name));
+        if (strcmp(name, "neutral")==0 || strcmp(name, "auto")==0) {
+            mode=SCENE_LIGHT_NEUTRAL;
+        } else if (strcmp(name, "threepoint")==0) {
+            mode=SCENE_LIGHT_THREEPOINT;
+        } else if (strcmp(name, "off")==0) {
+            mode=SCENE_LIGHT_EXPLICIT;
+            nlights=0;
+        } else {
+            free(name);
+            parse_error(p, false, COMMAND_INVLDLIGHT);
+            return false;
+        }
+        free(name);
+    } else if (command_isnumerical(p)) {
+        int n=0;
+        PARSE_CHECK(command_parseinteger(p, &n));
+        if (n<0 || n>SCENE_MAX_LIGHTS) {
+            parse_error(p, false, COMMAND_INVLDLIGHT);
+            return false;
+        }
+        mode=SCENE_LIGHT_EXPLICIT;
+        nlights=n;
+        if (n>0) {
+            char *fmt=NULL;
+            PARSE_CHECK(command_parsestring(p, &fmt));
+            bool has_color = strcmp(fmt, "xc")==0;
+            if (!has_color && strcmp(fmt, "x")!=0) {
+                free(fmt);
+                parse_error(p, false, COMMAND_INVLDLIGHT);
+                return false;
+            }
+            free(fmt);
+
+            for (int i=0; i<n; i++) {
+                PARSE_CHECK(command_parsefloat(p, &pos[i][0]));
+                PARSE_CHECK(command_parsefloat(p, &pos[i][1]));
+                PARSE_CHECK(command_parsefloat(p, &pos[i][2]));
+                if (has_color) {
+                    PARSE_CHECK(command_parsefloat(p, &color[i][0]));
+                    PARSE_CHECK(command_parsefloat(p, &color[i][1]));
+                    PARSE_CHECK(command_parsefloat(p, &color[i][2]));
+                } else {
+                    color[i][0]=1.0f; color[i][1]=1.0f; color[i][2]=1.0f;
+                }
+            }
+        }
+    } else {
+        parse_error(p, false, COMMAND_INVLDLIGHT);
+        return false;
+    }
+
+    (void) ctx;
+
+    mv_cmd_light *cmd = command_new(MVCMD_LIGHT, sizeof(mv_cmd_light));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->mode=mode;
+    cmd->nlights=nlights;
+    memcpy(cmd->pos, pos, sizeof(pos));
+    memcpy(cmd->color, color, sizeof(color));
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+/** `G <r> <g> <b>` — scene clear / background color. */
+bool command_parsebackground(parser *p, void *out) {
+    (void) out;
+    float rgb[3];
+
+    for (int i=0; i<3; i++) {
+        PARSE_CHECK(command_parsefloat(p, &rgb[i]));
+    }
+
+    mv_cmd_background *cmd = command_new(MVCMD_BACKGROUND, sizeof(mv_cmd_background));
+    if (!cmd) {
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    for (int i=0; i<3; i++) cmd->rgb[i]=rgb[i];
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parsefont(parser *p, void *out) {
+    (void) out;
+    int id;
+    char *file=NULL;
+    float size;
+
+    PARSE_CHECK(command_parseinteger(p, &id));
+    PARSE_CHECK(command_parsestring(p, &file));
+    if (!command_parsefloat(p, &size)) {
+        free(file);
+        return false;
+    }
+
+    mv_cmd_font *cmd = command_new(MVCMD_FONT, sizeof(mv_cmd_font));
+    if (!cmd) {
+        free(file);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->id=id;
+    cmd->path=file;
+    cmd->size=size;
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+bool command_parsetext(parser *p, void *out) {
+    command_parsectx *ctx = (command_parsectx *) out;
+    int first;
+    int fontid;
+    int drawid = SCENE_EMPTY;
+    char *string = NULL;
+
+    PARSE_CHECK(command_parseinteger(p, &first));
+    if (parse_checktoken(p, MVTOKEN_INTEGER)) {
+        /* T <drawId> <fontid> "..." */
+        drawid = first;
+        PARSE_CHECK(command_parseinteger(p, &fontid));
+        PARSE_CHECK(command_parsestring(p, &string));
+    } else {
+        /* Legacy: T <fontid> "..." */
+        fontid = first;
+        PARSE_CHECK(command_parsestring(p, &string));
+    }
+
+    mv_cmd_text *cmd = command_new(MVCMD_TEXT, sizeof(mv_cmd_text));
+    if (!cmd) {
+        free(string);
+        parse_error(p, true, ERROR_ALLOCATIONFAILED);
+        return false;
+    }
+    cmd->drawid = drawid;
+    cmd->fontid = fontid;
+    cmd->string = string;
+    cmd->has_matrix = ctx->modelchanged;
+    if (ctx->modelchanged) {
+        memcpy(cmd->matrix, ctx->model, sizeof(float)*16);
+        ctx->modelchanged = false;
+    }
+
+    return command_enqueue_owned(p, &cmd->cmd);
+}
+
+/* **********************************************************************
+ * Parser driver
+ * ********************************************************************** */
+
+/** Null-terminated copy of [start, start+len) into @p out (caller clears). */
+static void command_token_cstring(const char *start, int len, varray_char *out) {
+    varray_charinit(out);
+    if (start && len > 0) varray_charadd(out, (char *) start, len);
+    varray_charwrite(out, '\0');
+}
+
+/** Morpho's UnrgnzdTkn has no token arg; rewrite via the shared '%s' template. */
+static void command_enrich_lexerror(error *err, lexer *l) {
+    if (!err || !l || !morpho_matcherror(err, LEXER_UNRECOGNIZEDTOKEN)) return;
+
+    const char *s = l->start;
+    int len = 0;
+    if (s) {
+        while (s[len] && !lex_isspace(s[len])) len++;
+    }
+
+    varray_char tok;
+    command_token_cstring(s, len, &tok);
+    morpho_writeerrorwithid(err, COMMAND_UNRCGNZDCMND, NULL,
+                            err->line, err->posn, tok.data ? tok.data : "");
+    varray_charclear(&tok);
+}
+
+bool command_parseelements(parser *p, void *out) {
+    while (!parse_checktoken(p, MVTOKEN_EOF)) {
+        PARSE_CHECK(parse_advance(p));
+
+        parserule *rule = parse_getrule(p, p->previous.type);
+        if (!rule || !rule->prefix) {
+            varray_char tok;
+            command_token_cstring(p->previous.start, p->previous.length, &tok);
+            /* Use morpho_writeerrorwithid (not parse_error) so '%s' is filled. */
+            morpho_writeerrorwithid(p->err, COMMAND_UNRCGNZDCMND, NULL,
+                                    p->previous.line, p->previous.posn,
+                                    tok.data ? tok.data : "");
+            varray_charclear(&tok);
+            return false;
+        }
+
+        PARSE_CHECK(rule->prefix(p, out));
+    }
+    return true;
+}
+
+parserule mv_parserules[] = {
+    PARSERULE_PREFIX(MVTOKEN_COLOR, command_parsecolor),
+    PARSERULE_PREFIX(MVTOKEN_SELECTCOLOR, command_parseselectcolor),
+    PARSERULE_PREFIX(MVTOKEN_DRAW, command_parsedraw),
+    PARSERULE_PREFIX(MVTOKEN_CLEAR_DISPLAY, command_parsecleardisplay),
+    PARSERULE_PREFIX(MVTOKEN_OBJECT, command_parseobject),
+    PARSERULE_PREFIX(MVTOKEN_VERTICES, command_parsevertices),
+    PARSERULE_PREFIX(MVTOKEN_POINTS, command_parseindex),
+    PARSERULE_PREFIX(MVTOKEN_LINES, command_parseindex),
+    PARSERULE_PREFIX(MVTOKEN_FACETS, command_parseindex),
+    PARSERULE_PREFIX(MVTOKEN_IDENTITY, command_parseidentity),
+    PARSERULE_PREFIX(MVTOKEN_MATRIX, command_parsematrix),
+    PARSERULE_PREFIX(MVTOKEN_ROTATE, command_parserotate),
+    PARSERULE_PREFIX(MVTOKEN_SCALE, command_parsescale),
+    PARSERULE_PREFIX(MVTOKEN_SCENE, command_parsescene),
+    PARSERULE_PREFIX(MVTOKEN_UPDATE, command_parseupdate),
+    PARSERULE_PREFIX(MVTOKEN_DELETE, command_parsedelete),
+    PARSERULE_PREFIX(MVTOKEN_QUIT, command_parsequit),
+    PARSERULE_PREFIX(MVTOKEN_TRANSLATE, command_parsetranslate),
+    PARSERULE_PREFIX(MVTOKEN_WINDOW, command_parsewindow),
+    PARSERULE_PREFIX(MVTOKEN_BOUNDS, command_parsebounds),
+    PARSERULE_PREFIX(MVTOKEN_LIGHT, command_parselight),
+    PARSERULE_PREFIX(MVTOKEN_BACKGROUND, command_parsebackground),
+    PARSERULE_PREFIX(MVTOKEN_FONT, command_parsefont),
+    PARSERULE_PREFIX(MVTOKEN_TEXT, command_parsetext),
+    PARSERULE_PREFIX(MVTOKEN_MATERIAL, command_parsematerial),
+    PARSERULE_UNUSED(TOKEN_NONE)
+};
+
+void command_initializeparser(parser *p, lexer *l, error *err, void *out) {
+    parse_init(p, l, err, out);
+    parse_setbaseparsefn(p, command_parseelements);
+    parse_setparsetable(p, mv_parserules);
+    parse_setskipnewline(p, false, TOKEN_NONE);
+}
+
+/** Format a user-reportable parse error into @p out (no protocol prefix).
+ *  Caller inits/clears @p out; result is null-terminated in out->data. */
+void command_formaterror(const error *err, varray_char *out) {
+    if (!out) return;
+    if (!err) {
+        varray_charwrite(out, '\0');
+        return;
+    }
+
+    const char *id = (err->id && err->id[0]) ? err->id : ERROR_ERROR;
+    const char *msg = err->msg;
+    bool have_line = (err->line != ERROR_POSNUNIDENTIFIABLE);
+    bool have_char = (err->posn != ERROR_POSNUNIDENTIFIABLE);
+    char buf[MORPHO_ERRORSTRINGSIZE + 96];
+    int n;
+
+    if (have_line && have_char) {
+        n = snprintf(buf, sizeof(buf), "Error [%s] at line %i char %i: %s",
+                     id, err->line, err->posn, msg);
+    } else if (have_line) {
+        n = snprintf(buf, sizeof(buf), "Error [%s] at line %i: %s",
+                     id, err->line, msg);
+    } else {
+        n = snprintf(buf, sizeof(buf), "Error [%s]: %s", id, msg);
+    }
+
+    if (n > 0 && (size_t) n < sizeof(buf)) varray_charadd(out, buf, n);
+    varray_charwrite(out, '\0');
+}
+
+/** Parse ASCII into the command queue.
+ * @param[in] in - command text
+ * @param[out] err - filled on failure; not printed
+ * @returns true on success; failed chunks discard only their own IR */
+bool command_parse(char *in, error *err) {
+    if (!err) return false;
+    error_init(err);
+    if (!in) return false;
+
+    command_parsectx ctx;
+    command_parsectx_init(&ctx);
+
+    varray_mv_commandptr staging;
+    varray_mv_commandptrinit(&staging);
+    command_parse_staging = &staging;
+
+    lexer l;
+    command_initializelexer(&l, in);
+
+    parser p;
+    command_initializeparser(&p, &l, err, &ctx);
+
+    bool success=parse(&p);
+
+    if (!success || ERROR_FAILED(*err)) {
+        command_enrich_lexerror(err, &l);
+        parse_clear(&p);
+        lex_clear(&l);
+        command_parse_staging = NULL;
+        command_free_list(&staging);
+        return false;
+    }
+
+    parse_clear(&p);
+    lex_clear(&l);
+
+    command_parse_staging = NULL;
+
+    mv_command *prep = command_new(MVCMD_PREPARE, sizeof(mv_command));
+    if (!prep || !varray_mv_commandptradd(&staging, &prep, 1)) {
+        command_free(prep);
+        command_free_list(&staging);
+        morpho_writeerrorwithid(err, ERROR_ALLOCATIONFAILED, NULL,
+                                ERROR_POSNUNIDENTIFIABLE, ERROR_POSNUNIDENTIFIABLE);
+        return false;
+    }
+
+    if (!command_commit_staging(&staging)) {
+        command_free_list(&staging);
+        morpho_writeerrorwithid(err, ERROR_ALLOCATIONFAILED, NULL,
+                                ERROR_POSNUNIDENTIFIABLE, ERROR_POSNUNIDENTIFIABLE);
+        return false;
+    }
+
+    return true;
+}
+
+/* **********************************************************************
+ * File I/O
+ * ********************************************************************** */
+
+/** Size of an open file.
+ * @param[in] f - file handle
+ * @param[out] s - size in bytes */
 bool command_getfilesize(FILE *f, size_t *s) {
     long int curr, size;
     curr=ftell(f);
@@ -24,54 +1943,38 @@ bool command_getfilesize(FILE *f, size_t *s) {
     return true;
 }
 
-/** Removes a command file (for temporary files)
- *  @param[in] in file name */
+/** Delete a command file (temporary Show output). */
 void command_removefile(const char *in) {
-    size_t len = strlen(in) + 16;
-    char remove[len];
-    
-#ifdef _WIN32
-    sprintf(remove, "del \"%s\"", in);
-    for (char *c = remove; *c != '\0'; c++) if (*c=='/') *c='\\'; // Ensure filepath is normalized
-#else
-    sprintf(remove, "rm %s", in);
-#endif
-    
-    int systemRet = system(remove);
-    if(systemRet == -1){
-        // The system method failed
-        printf("Warning: the system method to remove a temporary file (command.c:34.5) has failed.");
+    if (remove(in) != 0) {
+        printf("Warning: failed to remove temporary file '%s'.\n", in);
     }
 }
 
-/** Returns the contents of a file as a string
- *  @param[in] in file name
- *  @param[out] out a string with the contents of the file. Call MORPHO_FREE on this once done.
- *  @returns bool indicating success. */
+/** Read a file into a newly allocated string.
+ * @param[in] in - path
+ * @param[out] out - contents; caller MORPHO_FREE
+ * @returns true on success */
 bool command_loadinput(const char *in, char **out) {
     FILE *f=NULL;
     varray_char buffer;
-    
+
     varray_charinit(&buffer);
-    
+
     f=fopen(in, "r");
     if (!f) {
         fprintf(stderr, "morphoview: Couldn't open input file %s.\n", in);
         goto loadinput_cleanup;
     }
-    
-    /* Determine the file size */
+
     size_t size;
     if (!command_getfilesize(f, &size)) goto loadinput_cleanup;
-    
+
     if (size) {
-        /* Size the buffer to match */
         if (!varray_charresize(&buffer, (int) size+1)) {
             fprintf(stderr, "morphoview: Couldn't allocate buffer to load input file.\n");
             goto loadinput_cleanup;
         }
-        
-        /* Read in the file */
+
         for (char *c=buffer.data; !feof(f); c=c+strlen(c)) {
             if (!fgets(c, (int) (buffer.data+buffer.capacity-c), f)) { c[0]='\0'; break; }
         }
@@ -79,629 +1982,40 @@ bool command_loadinput(const char *in, char **out) {
     *out = buffer.data;
     fclose(f);
     return true;
-    
+
 loadinput_cleanup:
     if (f) fclose(f);
     varray_charclear(&buffer);
     return false;
 }
 
-/* -------------------------------------------------------
- * Lexer
- * ------------------------------------------------------- */
+/* **********************************************************************
+ * Initialization
+ * ********************************************************************** */
 
-/** @brief Records a token
- *  @param[in]  l     The lexer in use
- *  @param[in]  type  Type of token to record
- *  @param[out] tok   Token structure to fill out */
-void command_lexrecordtoken(lexer *l, tokentype type, token *tok) {
-    tok->type=type;
-    tok->start=l->start;
-    tok->length=(int) (l->current - l->start);
+/** Initialize lexer, parser, queue and error ids. */
+void command_initialize(void) {
+    MorphoMutex_init(&command_queue_mutex);
+    command_queue_init();
+
+    morpho_defineerror(COMMAND_UNRCGNZDCMND, ERROR_PARSE, COMMAND_UNRCGNZDCMND_MSG);
+    morpho_defineerror(COMMAND_INVLDNMBR, ERROR_LEX, COMMAND_INVLDNMBR_MSG);
+    morpho_defineerror(COMMAND_NOSCENE, ERROR_PARSE, COMMAND_NOSCENE_MSG);
+    morpho_defineerror(COMMAND_NOOBJECT, ERROR_PARSE, COMMAND_NOOBJECT_MSG);
+    morpho_defineerror(COMMAND_EXPECTINTEGER, ERROR_PARSE, COMMAND_EXPECTINTEGER_MSG);
+    morpho_defineerror(COMMAND_EXPECTNUMBER, ERROR_PARSE, COMMAND_EXPECTNUMBER_MSG);
+    morpho_defineerror(COMMAND_EXPECTSTRING, ERROR_PARSE, COMMAND_EXPECTSTRING_MSG);
+    morpho_defineerror(COMMAND_INVLDUPDATE, ERROR_PARSE, COMMAND_INVLDUPDATE_MSG);
+    morpho_defineerror(COMMAND_INVLDDELETE, ERROR_PARSE, COMMAND_INVLDDELETE_MSG);
+    morpho_defineerror(COMMAND_INVLDVERTICES, ERROR_PARSE, COMMAND_INVLDVERTICES_MSG);
+    morpho_defineerror(COMMAND_INVLDMATERIAL, ERROR_PARSE, COMMAND_INVLDMATERIAL_MSG);
+    morpho_defineerror(COMMAND_INVLDCOLOR, ERROR_PARSE, COMMAND_INVLDCOLOR_MSG);
+    morpho_defineerror(COMMAND_INVLDLIGHT, ERROR_PARSE, COMMAND_INVLDLIGHT_MSG);
 }
 
-/** @brief Checks if we're at the end of the string. Doesn't advance. */
-static bool command_lexisatend(lexer *l) {
-    return (*(l->current) == '\0');
-}
-
-/** @brief Checks if a character is a digit. Doesn't advance. */
-static bool command_lexisdigit(char c) {
-    return (c>='0' && c<= '9');
-}
-
-/** @brief Checks if a character is alphanumeric or underscore.  Doesn't advance. */
-/*static bool command_lexisalpha(char c) {
-    return (c>='a' && c<= 'z') || (c>='A' && c<= 'Z') || (c=='_');
-}*/
-
-/** @brief Advances the lexer by one character, returning the character */
-static char command_lexadvance(lexer *l) {
-    char c = *(l->current);
-    l->current++;
-    return c;
-}
-
-/** @brief Returns the next character */
-static char command_lexpeek(lexer *l) {
-    return *(l->current);
-}
-
-/** @brief Returns n characters ahead. Caller should check that this is meaningfull. */
-/*static char command_lexpeekahead(lexer *l, int n) {
-    return *(l->current + n);
-}*/
-
-/** @brief Initialize the lexer */
-void command_lexinit(lexer *l, const char *start) {
-    l->start=start;
-    l->current=start;
-}
-
-/** @brief Lex numbers
- *  @param[in]  l    the lexer
- *  @param[out] tok  token record to fill out
- *  @returns true on success, false if an error occurs */
-static bool command_lexnumber(lexer *l, token *tok) {
-    tokentype type=TOKEN_INTEGER;
-    
-    /* Handle initial negative sign */
-    if (command_lexpeek(l) == '-') command_lexadvance(l);
-    
-    while (command_lexisdigit(command_lexpeek(l))) command_lexadvance(l);
-    
-    /* Fractional part */
-    if (command_lexpeek(l) == '.') {
-        type=TOKEN_FLOAT;
-        command_lexadvance(l); /* Consume the '.' */
-        while (command_lexisdigit(command_lexpeek(l))) command_lexadvance(l);
-    }
-    
-    /* Exponent */
-    if (command_lexpeek(l) == 'e' || command_lexpeek(l) == 'E') {
-        type=TOKEN_FLOAT;
-        command_lexadvance(l); /* Consume the 'e' */
-        
-        /* Optional sign */
-        if (command_lexpeek(l) == '+' || command_lexpeek(l) == '-') command_lexadvance(l);
-        
-        /* Exponent digits */
-        while (command_lexisdigit(command_lexpeek(l))) command_lexadvance(l);
-    }
-    
-    command_lexrecordtoken(l, type, tok);
-    
-    return true;
-}
-
-/** @brief Lex strings
- *  @param[in]  l    the lexer
- *  @param[out] tok  token record to fill out
- *  @returns true on success, false if an error occurs */
-static bool command_lexstring(lexer *l, token *tok) {
-    while (command_lexpeek(l) != '"' && !command_lexisatend(l)) {
-        command_lexadvance(l);
-    }
-    
-    if (command_lexisatend(l)) {
-        return false;
-    }
-    
-    command_lexadvance(l); /* Closing quote */
-    
-    command_lexrecordtoken(l, TOKEN_STRING, tok);
-    return true;
-}
-
-/** @brief Obtain the next token */
-bool command_lex(lexer *l, token *tok) {
-    /** Skip leading white space */
-    while (isspace(command_lexpeek(l))) command_lexadvance(l);
-    
-    l->start = l->current;
-    
-    if (command_lexisatend(l)) {
-        command_lexrecordtoken(l, TOKEN_EOF, tok);
-        return true;
-    }
-    
-    char c = command_lexadvance(l);
-    
-    if (command_lexisdigit(c) || c == '-') return command_lexnumber(l, tok);
-    
-    switch (c) {
-        case 'c': command_lexrecordtoken(l, TOKEN_COLOR, tok); return true;
-        case 'C': command_lexrecordtoken(l, TOKEN_SELECTCOLOR, tok); return true;
-        case 'd': command_lexrecordtoken(l, TOKEN_DRAW, tok); return true;
-        case 'o': command_lexrecordtoken(l, TOKEN_OBJECT, tok); return true;
-        case 'p': command_lexrecordtoken(l, TOKEN_POINTS, tok); return true;
-        case 'l': command_lexrecordtoken(l, TOKEN_LINES, tok); return true;
-        case 'f': command_lexrecordtoken(l, TOKEN_FACETS, tok); return true;
-        case 'F': command_lexrecordtoken(l, TOKEN_FONT, tok); return true;
-        case 'i': command_lexrecordtoken(l, TOKEN_IDENTITY, tok); return true;
-        case 'm': command_lexrecordtoken(l, TOKEN_MATRIX, tok); return true;
-        case 'r': command_lexrecordtoken(l, TOKEN_ROTATE, tok); return true;
-        case 's': command_lexrecordtoken(l, TOKEN_SCALE, tok); return true;
-        case 'S': command_lexrecordtoken(l, TOKEN_SCENE, tok); return true;
-        case 't': command_lexrecordtoken(l, TOKEN_TRANSLATE, tok); return true;
-        case 'T': command_lexrecordtoken(l, TOKEN_TEXT, tok); return true;
-        case 'v': command_lexrecordtoken(l, TOKEN_VERTICES, tok); return true;
-        case 'W': command_lexrecordtoken(l, TOKEN_WINDOW, tok); return true;
-        case '"': return command_lexstring(l, tok);
-    }
-    
-    return false;
-}
-
-/* -------------------------------------------------------
- * Parser
- * ------------------------------------------------------- */
-
-/** Initialize the parser */
-void command_parseinit(parser *p, char *in) {
-    command_lexinit(&p->l, in);
-    p->current.type=TOKEN_NONE;
-    p->prev.type=TOKEN_NONE;
-    p->modelchanged=false;
-}
-
-/** Advance the parser one token */
-bool command_parseisatend(parser *p) {
-    return command_lexisatend(&p->l);
-}
-
-/** Advance the parser one token */
-bool command_parseadvance(parser *p) {
-    p->prev = p->current;
-    bool success=command_lex(&p->l, &p->current);
-    if (!success) fprintf(stderr, "morphoview: Unrecognized token.\n");
-    return success;
-}
-
-/** Parses the current token as an integer */
-bool command_parseinteger(parser *p, int *out) {
-    if (p->current.type==TOKEN_INTEGER) {
-        long f = strtol(p->current.start, NULL, 10);
-        *out = (int) f;
-        return command_parseadvance(p);
-    }
-    return false;
-}
-
-/** Parses the current token as a float */
-bool command_parsefloat(parser *p, float *out) {
-    if (p->current.type==TOKEN_INTEGER || p->current.type==TOKEN_FLOAT) {
-        float f = strtof(p->current.start, NULL);
-        *out = f;
-        return command_parseadvance(p);
-    }
-    return false;
-}
-
-/** Parses the current token as a string */
-bool command_parsestring(parser *p, char **out) {
-    if (p->current.type==TOKEN_INTEGER || p->current.type==TOKEN_STRING) {
-        int length = p->current.length-2;
-        char *str = malloc(sizeof(char)*(length+1));
-        if (str) {
-            strncpy(str, p->current.start+1, length);
-            str[length]='\0';
-            *out = str;
-            
-            return command_parseadvance(p);
-        }
-    }
-    return false;
-}
-
-/** Checks the current token type */
-tokentype command_parsecurrenttype(parser *p) {
-    return p->current.type;
-}
-
-/** Checks if the current token is an integer */
-bool command_iscurrentnumerical(parser *p) {
-    tokentype t=command_parsecurrenttype(p);
-    return (t==TOKEN_FLOAT || t==TOKEN_INTEGER);
-}
-
-/* ---------------
- * Parse functions
- * --------------- */
-
-#define ERRCHK(f) if (!(f)) return false;
-
-/** Parses a color definition */
-bool command_parsecolor(parser *p) {
-    int id, indx=-1;
-    int length=0;
-    ERRCHK(command_parseinteger(p, &id));
-    
-#ifdef DEBUG_PARSER
-    printf("Color %i ", id);
-#endif
-    
-    while (command_iscurrentnumerical(p)) {
-        float r[3];
-        for (int i=0; i<3; i++) ERRCHK(command_parsefloat(p, &r[i]));
-        
-        /* Add to the scene's data array */
-        int ret=scene_adddata(p->scene, r, 3);
-        if (indx<0) indx=ret;
-        
-        length++;
-        
-#ifdef DEBUG_PARSER
-        printf("%f %f %f ", r[0], r[1], r[2]);
-#endif
-    }
-    
-    if (length>0) {
-        scene_addcolor(p->scene, id, length, indx);
-    }
-    
-#ifdef DEBUG_PARSER
-    printf("\n");
-#endif
-    
-    return true;
-}
-
-/** Parses a color selection */
-bool command_parseselectcolor(parser *p) {
-    int id;
-    
-    ERRCHK(command_parseinteger(p, &id));
-#ifdef DEBUG_PARSER
-    printf("Select color %i\n", id);
-#endif
-    
-    scene_adddraw(p->scene, COLOR, id, -1);
-    
-    return true;
-}
-
-/** Parses a draw command */
-bool command_parsedraw(parser *p) {
-    int id, indx = SCENE_EMPTY;
-    ERRCHK(command_parseinteger(p, &id));
-#ifdef DEBUG_PARSER
-    printf("Draw %i\n", id);
-#endif
-    
-    if (p->modelchanged) {
-        indx=scene_adddata(p->scene, p->model, 16);
-        p->modelchanged=false;
-#ifdef DEBUG_PARSER
-        mat3d_print4x4(p->model);
-#endif
-    }
-    
-    scene_adddraw(p->scene, OBJECT, id, indx);
-    
-    return true;
-}
-
-/** Parses an object */
-bool command_parseobject(parser *p) {
-    int id;
-    ERRCHK(command_parseinteger(p, &id));
-#ifdef DEBUG_PARSER
-    printf("Object %i\n", id);
-#endif
-    
-    if (p->scene) {
-        p->cobject=scene_addobject(p->scene, id);
-    } else {
-        fprintf(stderr, "morphoview: No scene defined.\n");
-        return false;
-    }
-    
-    return true;
-}
-
-/** Parses a vertex list */
-bool command_parsevertices(parser *p) {
-    if (!p->scene || !p->cobject) {
-        fprintf(stderr, "morphoview: No object defined.\n");
-        return false;
-    }
-    
-    char *format=NULL;
-    if (command_parsestring(p, &format)) {
-#ifdef DEBUG_PARSER
-        printf("Vertices '%s'\n", format);
-#endif
-        p->cobject->vertexdata.format=format;
-    }
-    
-    while (command_iscurrentnumerical(p)) {
-        float f;
-        ERRCHK(command_parsefloat(p, &f));
-        
-        /* Add to the scene's vertex data array */
-        int ret=scene_adddata(p->scene, &f, 1);
-        
-        if (p->cobject->vertexdata.indx==SCENE_EMPTY) {
-            p->cobject->vertexdata.indx=ret;
-            p->cobject->vertexdata.length=0;
-        }
-        p->cobject->vertexdata.length++;
-        
-#ifdef DEBUG_PARSER
-        printf("%f ", f);
-#endif
-    }
-    
-#ifdef DEBUG_PARSER
-    printf("\n");
-#endif
-    
-    return true;
-}
-
-/** Parses a graphics object that is a list of vertex array indices */
-bool command_parseindex(parser *p) {
-    if (!p->scene || !p->cobject) {
-        fprintf(stderr, "morphoview: No object defined.\n");
-        return false;
-    }
-    
-    gelement el = { .type = POINTS, .indx = SCENE_EMPTY, .length = 0 };
-    
-    /* Remember the element type */
-    if (p->prev.type==TOKEN_LINES) {
-        el.type=LINES;
-    } else if (p->prev.type==TOKEN_FACETS) {
-        el.type=FACETS;
-    }
-    
-#ifdef DEBUG_PARSER
-    printf("Indexed list type %u\n", el.type);
-#endif
-    
-    while (command_parsecurrenttype(p)==TOKEN_INTEGER) {
-        int i;
-        ERRCHK(command_parseinteger(p, &i));
-        
-#ifdef DEBUG_PARSER
-        printf("%i ", i);
-#endif
-        
-        /* Add to the scene's index data array */
-        int ret=scene_addindex(p->scene, &i, 1);
-        
-        /* And remember the starting point and length */
-        if (el.indx==SCENE_EMPTY) el.indx=ret;
-        el.length++;
-    }
-#ifdef DEBUG_PARSER
-    printf("\n");
-#endif
-    
-    scene_addelement(p->cobject, &el);
-    
-    return true;
-}
-
-/** Parse an identity command */
-bool command_parseidentity(parser *p) {
-#ifdef DEBUG_PARSER
-    printf("Identity\n");
-#endif
-    
-    mat3d_identity4x4(p->model);
-    p->modelchanged=true;
-    return true;
-}
-
-/** Parse a matrix command */
-bool command_parsematrix(parser *p) {
-    mat4x4 x, m;
-    for (int i=0; i<16; i++) {
-        ERRCHK(command_parsefloat(p, &x[i]));
-    }
-    
-#ifdef DEBUG_PARSER
-    printf("Matrix:\n");
-    mat3d_print4x4(x);
-#endif
-    
-    mat3d_copy4x4(p->model, m);
-    mat3d_mul4x4(m, x, p->model);
-    
-    p->modelchanged=true;
-    
-    return true;
-}
-
-/** Parse a rotate command */
-bool command_parserotate(parser *p) {
-    float phi, x[3];
-    ERRCHK(command_parsefloat(p, &phi));
-    for (int i=0; i<3; i++) {
-        ERRCHK(command_parsefloat(p, &x[i]));
-    }
-#ifdef DEBUG_PARSER
-    printf("Rotate %f (%f,%f,%f)\n", phi, x[0], x[1], x[2]);
-#endif
-    
-    mat3d_rotate(p->model, x, phi, p->model);
-    p->modelchanged=true;
-    
-    return true;
-}
-
-/** Parse a scale command */
-bool command_parsescale(parser *p) {
-    float s;
-    ERRCHK(command_parsefloat(p, &s));
-#ifdef DEBUG_PARSER
-    printf("Scale %f\n", s);
-#endif
-    mat3d_scale(p->model, s, p->model);
-    p->modelchanged=true;
-    
-    return true;
-}
-
-/** Parse a translate command */
-bool command_parsetranslate(parser *p) {
-    float x[3];
-    for (int i=0; i<3; i++) {
-        ERRCHK(command_parsefloat(p, &x[i]));
-    }
-#ifdef DEBUG_PARSER
-    printf("Translate (%f,%f,%f)\n", x[0], x[1], x[2]);
-#endif
-    
-    mat3d_translate(p->model, x, p->model);
-    p->modelchanged=true;
-    
-    return true;
-}
-
-/** Parses a scene command */
-bool command_parsescene(parser *p) {
-    int id, dim;
-    ERRCHK(command_parseinteger(p, &id));
-    ERRCHK(command_parseinteger(p, &dim));
-    
-#ifdef DEBUG_PARSER
-    printf("Scene id: %i dim: %i\n", id, dim);
-#endif
-    
-    p->scene = scene_new(id, dim);
-    if (p->scene) p->display=display_open(p->scene);
-    
-    return (p->scene!=NULL);
-}
-
-/** Parses a window command */
-bool command_parsewindow(parser *p) {
-    char *name;
-    
-    if (command_parsestring(p, &name)) {
-#ifdef DEBUG_PARSER
-        printf("Window '%s'\n", name);
-#endif
-        if (name) {
-            display_setwindowtitle(p->display, name);
-            free(name);
-        }
-        return true;
-    }
-    
-    return false;
-}
-
-/** Parses a font definition */
-bool command_parsefont(parser *p) {
-    int id;
-    char *file;
-    float size;
-    
-    ERRCHK(command_parseinteger(p, &id));
-    ERRCHK(command_parsestring(p, &file));
-    ERRCHK(command_parsefloat(p, &size));
-    
-#ifdef DEBUG_PARSER
-    printf("Font %i '%s' %g\n", id, file, size);
-#endif
-    
-    return scene_addfont(p->scene, id, file, size, NULL);
-}
-
-/** Parses a text command */
-bool command_parsetext(parser *p) {
-    int fontid;
-    char *string;
-    
-    ERRCHK(command_parseinteger(p, &fontid));
-    ERRCHK(command_parsestring(p, &string));
-    
-#ifdef DEBUG_PARSER
-    printf("Text %i '%s'\n", fontid, string);
-#endif
-    
-    int matindx=SCENE_EMPTY;
-    int tid=scene_addtext(p->scene, fontid, string);
-    
-    if (p->modelchanged) {
-        matindx=scene_adddata(p->scene, p->model, 16);
-        p->modelchanged=false;
-#ifdef DEBUG_PARSER
-        mat3d_print4x4(p->model);
-#endif
-    }
-    
-    scene_adddraw(p->scene, TEXT, tid, matindx);
-    
-    return true;
-}
-
-#define UNDEFINED NULL
-/** The parse table defines which function handles which token type */
-parsefunction parsetable[] = {
-    UNDEFINED,              // TOKEN_NONE
-    
-    UNDEFINED,              // TOKEN_INTEGER
-    UNDEFINED,              // TOKEN_FLOAT
-    UNDEFINED,              // TOKEN_STRING
-    
-    command_parsecolor,     // TOKEN_COLOR
-    command_parseselectcolor,// TOKEN_SELECTCOLOR
-    command_parsedraw,      // TOKEN_DRAW
-    command_parseobject,    // TOKEN_OBJECT
-    command_parsevertices,  // TOKEN_VERTICES
-    command_parseindex,     // TOKEN_POINTS
-    command_parseindex,     // TOKEN_LINES
-    command_parseindex,     // TOKEN_FACETS
-    command_parseidentity,  // TOKEN_IDENTITY
-    command_parsematrix,    // TOKEN_MATRIX
-    command_parserotate,    // TOKEN_ROTATE
-    command_parsescale,     // TOKEN_SCALE
-    command_parsescene,     // TOKEN_SCENE
-    command_parsetranslate, // TOKEN_TRANSLATE
-    UNDEFINED,              // TOKEN_VIEWDIRECTION
-    UNDEFINED,              // TOKEN_VIEWVERTICAL
-    command_parsewindow,    // TOKEN_WINDOW
-    command_parsefont,      // TOKEN_FONT
-    command_parsetext,      // TOKEN_TEXT
-    
-    UNDEFINED, // TOKEN_EOF
-};
-
-/** @brief Parses a command sequence */
-bool command_parse(char *in) {
-    parser p;
-    
-    command_parseinit(&p, in);
-    ERRCHK(command_parseadvance(&p));
-    
-    do {
-        /* Lookup the current parse function */
-        if (p.current.type>TOKEN_EOF) {
-            fprintf(stderr, "morphoview: Inconsistent token definitions.\n");
-            return false;
-        }
-        
-        parsefunction fn = parsetable[p.current.type];
-        if (fn==UNDEFINED) {
-            fprintf(stderr, "morphoview: Couldn't parse token.\n");
-            return false;
-        }
-        
-        ERRCHK(command_parseadvance(&p));
-        
-        bool result = (*fn) (&p);
-        if (!result) return false;
-    } while (!command_parseisatend(&p));
-    
-    /** Prepare the scene for display */
-    if (p.scene && p.display) {
-        render_preparescene(&p.display->render, p.scene);
-    }
-    
-    return true;
+/** Shut down the command queue. */
+void command_finalize(void) {
+    command_queue_clear();
+    MorphoMutex_clear(&command_queue_mutex);
+    command_sticky_applyctx_reset();
 }

@@ -1,130 +1,116 @@
 /** @file matrix3d.c
  *  @author T J Atherton
  *
- *  @brief Matrix math for 3d graphics
+ *  @brief Matrix math for 3d graphics (4x4 and 3x3 matrices)
+ *  @details Implements simple matrix operations with no dependencies.
  */
 
 #include "matrix3d.h"
 #include <math.h>
-#include <string.h> 
-
-/** Use Apple's Accelerate library for LAPACK and BLAS */
-#ifdef __APPLE__
-#define ACCELERATE_NEW_LAPACK
-#include <Accelerate/Accelerate.h>
-#else
-#include <cblas.h>
-#include <lapacke.h>
-#define USE_LAPACKE
-#endif
-
-
+#include <string.h>
 
 #define EPS 1e-16
 
-/** @brief Normalizes a vector
- * @param[in] in - input vector
- * @param[out] out - output vector. */
+/** Determinant of a 3x3 matrix given in column-major order */
+#define DET3(a,b,c, d,e,f, g,h,i) \
+    ((a)*((e)*(i)-(f)*(h)) - (b)*((d)*(i)-(f)*(g)) + (c)*((d)*(h)-(e)*(g)))
+
+/** Normalize a vector; out may alias in. */
 void mat3d_vectornormalize(vec3 in, vec3 out) {
-    float norm=cblas_snrm2(3, in, 1);
-    if (norm>EPS) norm = 1.0/norm;
-    if (out!=in) cblas_scopy(3, in, 1, out, 1);
-    cblas_sscal(3, norm, out, 1);
+    float norm = sqrtf(in[0]*in[0] + in[1]*in[1] + in[2]*in[2]);
+    if (norm>EPS) norm = 1.0f/norm;
+    if (out!=in) memcpy(out, in, sizeof(float)*3);
+    out[0] *= norm; out[1] *= norm; out[2] *= norm;
 }
 
-/** @brief Stores the identity matrix in out.
- * @param[out] out - output matrix. */
+/** Store the 4x4 identity in out. */
 void mat3d_identity4x4(mat4x4 out) {
-    static float ident[] = { 1.0f, 0.0f, 0.0f, 0.0f,
-                            0.0f, 1.0f, 0.0f, 0.0f,
-                            0.0f, 0.0f, 1.0f, 0.0f,
-                            0.0f, 0.0f, 0.0f, 1.0f };
-    cblas_scopy(16, ident, 1, out, 1);
+    static const float ident[] = { 1.0f, 0.0f, 0.0f, 0.0f,
+                                   0.0f, 1.0f, 0.0f, 0.0f,
+                                   0.0f, 0.0f, 1.0f, 0.0f,
+                                   0.0f, 0.0f, 0.0f, 1.0f };
+    memcpy(out, ident, sizeof(ident));
 }
 
-/** @brief Stores the identity matrix in out.
- * @param[out] out - output matrix. */
-void mat3d_identity3x3(mat4x4 out) {
-    static float ident[] = { 1.0f, 0.0f, 0.0f,
-                             0.0f, 1.0f, 0.0f,
-                             0.0f, 0.0f, 1.0f };
-    cblas_scopy(9, ident, 1, out, 1);
+/** Store the 3x3 identity in out. */
+void mat3d_identity3x3(mat3x3 out) {
+    static const float ident[] = { 1.0f, 0.0f, 0.0f,
+                                   0.0f, 1.0f, 0.0f,
+                                   0.0f, 0.0f, 1.0f };
+    memcpy(out, ident, sizeof(ident));
 }
 
-/** @brief Multiply out = a*b
- * @param[in] a input matrix
- * @param[in] b input matrix
- * @param[out] out filled with a*b
- * @warning: out must be distinct from a and b */
+/** Multiply 4x4 matrices: out = a*b. out must be distinct from a and b. */
 void mat3d_mul4x4(mat4x4 a, mat4x4 b, mat4x4 out) {
-    cblas_sgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, 4, 4, 4, 1.0, a, 4, b, 4, 0.0, out, 4);
-}
-
-/** @brief Multiply: out = a*b
- * @param[in] a input matrix
- * @param[in] b input matrix
- * @param[out] out filled with a*b
- * @warning: out must be distinct from a and b */
-void mat3d_mul3x3(mat3x3 a, mat3x3 b, mat3x3 out) {
-    cblas_sgemm(CblasColMajor, CblasNoTrans, CblasNoTrans, 3, 3, 3, 1.0, a, 3, b, 3, 0.0, out, 3);
-}
-
-/** @brief Add with scale: out = a + alpha*b
- * @param[in] a input matrix
- * @param[in] b input matrix
- * @param[out] out filled with a + alpha*b  */
-void mat3d_addscale3x3(mat3x3 a, float alpha, mat3x3 b, mat3x3 out) {
-    if (a!=out) cblas_scopy(9, a, 1, out, 1);
-    cblas_saxpy(9, alpha, b, 1, out, 1);
-}
-
-/** @brief Copy: out = a
- * @param[in] a input matrix
- * @param[out] out filled with a*b */
-void mat3d_copy4x4(mat4x4 a, mat4x4 out) {
-    cblas_scopy(16, a, 1, out, 1);
-}
-
-/** @brief Matrix inversion
- * @param[in] a input matrix
- * @param[out] out filled with inverse(a)  */
-void mat3d_invert4x4(mat4x4 a, mat4x4 out) {
-    int m = 4, n = 4;
-    int piv[4];
-    int info;
-    /* Copy a into out */
-    memcpy(out, a, sizeof(float)*16);
-    /* Compute LU decomposition, storing result in place */
-#ifdef USE_LAPACKE
-    info = LAPACKE_sgetrf(LAPACK_COL_MAJOR, m, n, out, m, piv);
-#else
-    sgetrf_(&m, &n, out, &m, piv, &info);
-#endif
-    
-    if (!info) {
-        /* Now compute inverse */
-#ifdef USE_LAPACKE
-        info=LAPACKE_sgetri(LAPACK_COL_MAJOR, n, out, n, piv);
-#else
-        float work[16];
-        int lwork=16;
-        sgetri_(&n, out, &n, piv, work, &lwork, &info);
-#endif
+    for (unsigned int col=0; col<4; col++) {
+        for (unsigned int row=0; row<4; row++) {
+            out[col*4+row] = a[row]*b[col*4] + a[4+row]*b[col*4+1] +
+                             a[8+row]*b[col*4+2] + a[12+row]*b[col*4+3];
+        }
     }
 }
 
-/** @brief Convert a 3x3 matrix to a 4x4 matrix
- * @param[in] in input matrix
- * @param[out] out filled with inverse(a)  */
+/** Multiply 3x3 matrices: out = a*b. out must be distinct from a and b. */
+void mat3d_mul3x3(mat3x3 a, mat3x3 b, mat3x3 out) {
+    for (unsigned int col=0; col<3; col++) {
+        for (unsigned int row=0; row<3; row++) {
+            out[col*3+row] = a[row]*b[col*3] + a[3+row]*b[col*3+1] + a[6+row]*b[col*3+2];
+        }
+    }
+}
+
+/** out = a + alpha*b; a and out may alias. */
+void mat3d_addscale3x3(mat3x3 a, float alpha, mat3x3 b, mat3x3 out) {
+    if (a!=out) memcpy(out, a, sizeof(float)*9);
+    for (unsigned int i=0; i<9; i++) out[i] += alpha*b[i];
+}
+
+/** Copy a 4x4 matrix: out = a. */
+void mat3d_copy4x4(mat4x4 a, mat4x4 out) {
+    memcpy(out, a, sizeof(float)*16);
+}
+
+/** Invert a 4x4 matrix via cofactors; copies a into out if singular. */
+void mat3d_invert4x4(mat4x4 a, mat4x4 out) {
+    /* Adjugate of a in column-major order (transpose of cofactor matrix) */
+    float c[16];
+    c[0]  =  DET3(a[5],a[6],a[7], a[9],a[10],a[11], a[13],a[14],a[15]);
+    c[1]  = -DET3(a[1],a[2],a[3], a[9],a[10],a[11], a[13],a[14],a[15]);
+    c[2]  =  DET3(a[1],a[2],a[3], a[5],a[6],a[7],   a[13],a[14],a[15]);
+    c[3]  = -DET3(a[1],a[2],a[3], a[5],a[6],a[7],   a[9],a[10],a[11]);
+
+    c[4]  = -DET3(a[4],a[6],a[7], a[8],a[10],a[11], a[12],a[14],a[15]);
+    c[5]  =  DET3(a[0],a[2],a[3], a[8],a[10],a[11], a[12],a[14],a[15]);
+    c[6]  = -DET3(a[0],a[2],a[3], a[4],a[6],a[7],   a[12],a[14],a[15]);
+    c[7]  =  DET3(a[0],a[2],a[3], a[4],a[6],a[7],   a[8],a[10],a[11]);
+
+    c[8]  =  DET3(a[4],a[5],a[7], a[8],a[9],a[11],  a[12],a[13],a[15]);
+    c[9]  = -DET3(a[0],a[1],a[3], a[8],a[9],a[11],  a[12],a[13],a[15]);
+    c[10] =  DET3(a[0],a[1],a[3], a[4],a[5],a[7],   a[12],a[13],a[15]);
+    c[11] = -DET3(a[0],a[1],a[3], a[4],a[5],a[7],   a[8],a[9],a[11]);
+
+    c[12] = -DET3(a[4],a[5],a[6], a[8],a[9],a[10],  a[12],a[13],a[14]);
+    c[13] =  DET3(a[0],a[1],a[2], a[8],a[9],a[10],  a[12],a[13],a[14]);
+    c[14] = -DET3(a[0],a[1],a[2], a[4],a[5],a[6],   a[12],a[13],a[14]);
+    c[15] =  DET3(a[0],a[1],a[2], a[4],a[5],a[6],   a[8],a[9],a[10]);
+
+    float det = a[0]*c[0] + a[4]*c[1] + a[8]*c[2] + a[12]*c[3];
+    if (fabsf(det) < EPS) { memcpy(out, a, sizeof(float)*16); return; }
+
+    float id = 1.0f/det;
+    for (unsigned int i=0; i<16; i++) out[i] = c[i]*id;
+}
+
+/** Embed a 3x3 into a 4x4 (last row/column [0,0,0,1]). */
 void mat3d_lift(mat3x3 in, mat4x4 out) {
     mat4x4 new = { in[0], in[1], in[2], 0.0f, // Col major order!
                    in[3], in[4], in[5], 0.0f,
                    in[6], in[7], in[8], 0.0f,
                     0.0f,  0.0f,  0.0f, 1.0f };
-    cblas_scopy(16, new, 1, out, 1);
+    memcpy(out, new, sizeof(new));
 }
 
-/** @brief Print a 3x3 matrix */
+/** Print a 3x3 matrix (column-major storage, rows across). */
 void mat3d_print3x3(mat3x3 in) {
     for (unsigned int j=0; j<3; j++) { // row
         printf("[ ");
@@ -135,7 +121,7 @@ void mat3d_print3x3(mat3x3 in) {
     }
 }
 
-/** @brief Print a 3x3 matrix */
+/** Print a 4x4 matrix (column-major storage, rows across). */
 void mat3d_print4x4(mat4x4 in) {
     for (unsigned int j=0; j<4; j++) { // row
         printf("[ ");
@@ -146,10 +132,10 @@ void mat3d_print4x4(mat4x4 in) {
     }
 }
 
-/** @brief Translate by a vector
- * @param[in] in input matrix
- * @param[in] vec translation vector
- * @param[out] out on output, contains T*in where T is the translation matrix computed from vec */
+/** Translate: out = T*in (or T if in is NULL). in and out may alias.
+ * @param[in] in - input matrix, or NULL
+ * @param[in] vec - translation
+ * @param[out] out - result */
 void mat3d_translate(mat4x4 in, vec3 vec, mat4x4 out) {
     mat4x4 tr = { 1.0f, 0.0f, 0.0f, 0.0f, // Col major order!
                   0.0f, 1.0f, 0.0f, 0.0f,
@@ -161,14 +147,17 @@ void mat3d_translate(mat4x4 in, vec3 vec, mat4x4 out) {
     else mat3d_copy4x4(tr, out);
 }
 
-/** @brief Scale by a factor
- * @param[in] in input matrix
- * @param[in] scale scale factor
- * @param[out] out on output, contains T*in where T is the translation matrix computed from vec */
+/** Uniform scale: out = S*in (or S if in is NULL). in and out may alias. */
 void mat3d_scale(mat4x4 in, float scale, mat4x4 out) {
-    mat4x4 tr = { scale, 0.0f, 0.0f, 0.0f, // Col major order!
-                  0.0f, scale, 0.0f, 0.0f,
-                  0.0f, 0.0f, scale, 0.0f,
+    vec3 s = { scale, scale, scale };
+    mat3d_scale3(in, s, out);
+}
+
+/** Non-uniform scale: out = S*in (or S if in is NULL). in and out may alias. */
+void mat3d_scale3(mat4x4 in, vec3 scale, mat4x4 out) {
+    mat4x4 tr = { scale[0], 0.0f, 0.0f, 0.0f, // Col major order!
+                  0.0f, scale[1], 0.0f, 0.0f,
+                  0.0f, 0.0f, scale[2], 0.0f,
                   0.0f, 0.0f,  0.0f, 1.0f };
     mat4x4 in2;
     if (in==out) mat3d_copy4x4(in, in2); /* Use a copy if in and out are the same matrix */
@@ -176,11 +165,11 @@ void mat3d_scale(mat4x4 in, float scale, mat4x4 out) {
     else mat3d_copy4x4(tr, out);
 }
 
-/** @brief Rotate by angle around an axis
- * @param[in] in input matrix
- * @param[in] axis rotation axis
- * @param[in] angle rotation angle
- * @param[out] out on output, contains R*in where R is the translation matrix computed from vec */
+/** Rotate by angle (radians) about axis: out = R*in (or R if in is NULL).
+ * @param[in] in - input matrix, or NULL
+ * @param[in] axis - rotation axis (normalized internally)
+ * @param[in] angle - radians
+ * @param[out] out - result; in and out may alias */
 void mat3d_rotate(mat4x4 in, vec3 axis, float angle, mat4x4 out) {
     vec3 u;
     mat3x3 rot;
@@ -210,20 +199,14 @@ void mat3d_rotate(mat4x4 in, vec3 axis, float angle, mat4x4 out) {
     else mat3d_copy4x4(rot4, out);
 }
 
-/** @brief Orthographic projection matrix
- * @param[in] in input matrix
- * @param[in] left     } Bounds of the viewing area
- * @param[in] right   }
- * @param[in] bottom }
- * @param[in] top        }
- * @param[in] near      }
- * @param[in] far        }
- * @param[out] out on output, contains R*in where R is the translation matrix computed from vec */
+/** Orthographic projection: out = P*in (or P if in is NULL). in and out may alias. */
 void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float near, float far) {
     mat4x4 pr = { 2.0f/(right-left), 0.0f, 0.0f, 0.0f, // Col major order!
                   0.0f, 2.0f/(top-bottom), 0.0f, 0.0f,
                   0.0f, 0.0f, -2.0f/(far-near), 0.0f,
-                  0.0f, 0.0f, 0.0f, 1.0f };
+                  -(right+left)/(right-left),
+                  -(top+bottom)/(top-bottom),
+                  -(far+near)/(far-near), 1.0f };
     mat4x4 in2;
     if (in==out) mat3d_copy4x4(in, in2); /* Use a copy if in and out are the same matrix */
     
@@ -232,15 +215,7 @@ void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, f
     else mat3d_copy4x4(pr, out);
 }
 
-/** @brief Perspective projection matrix
- * @param[in] in input matrix
- * @param[in] left     } Bounds of the viewing area
- * @param[in] right   }
- * @param[in] bottom }
- * @param[in] top        }
- * @param[in] near      }
- * @param[in] far        }
- * @param[out] out on output, contains R*in where R is the translation matrix computed from vec */
+/** Perspective (frustum) projection: out = P*in (or P if in is NULL). in and out may alias. */
 void mat3d_frustum(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float near, float far) {
     mat4x4 pr = { 2*near/(right-left), 0.0f, 0.0f, 0.0f, // Col major order!
                   0.0f, 2*near/(top-bottom), 0.0f, 0.0f,

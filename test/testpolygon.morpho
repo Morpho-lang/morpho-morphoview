@@ -1,0 +1,171 @@
+// Polygon → TriangleComplex fan (viewer `f`). Convex; winding defines the normal.
+// Expect: prints "ok" then exits.
+//
+//   cd test && morpho6 testpolygon.morpho
+
+import graphics
+import color
+import graphicsserializer
+import povray
+
+class Buf {
+  init() { self.lines = [] }
+  write(line) { self.lines.append(line) }
+}
+
+fn expect(cond, msg) {
+  if (!cond) {
+    print "FAIL: ${msg}"
+    System.exit()
+  }
+}
+
+fn approx(a, b) { return abs(a - b) < 1e-9 }
+fn approxEps(a, b, eps) { return abs(a - b) < eps }
+
+fn contains(s, needle) {
+  var n = needle.count(), m = s.count()
+  if (n > m) return false
+  for (i in 0..(m-n)) {
+    if (s.substring(i, i+n) == needle) return true
+  }
+  return false
+}
+
+fn anyHas(lines, needle) {
+  for (line in lines) {
+    if (contains(line, needle)) return true
+  }
+  return false
+}
+
+fn anyExact(lines, want) {
+  for (line in lines) {
+    if (line == want) return true
+  }
+  return false
+}
+
+fn colorImmediatelyBeforeEachDraw(lines) {
+  for (i in 0...lines.count()) {
+    var line = lines[i]
+    if (line.count() < 1 || line[0] != "d") continue
+    if (line.count() > 1 && line[1] != " ") continue
+    if (i == 0) return false
+    var prev = lines[i-1]
+    if (prev == "C") continue
+    if (prev.count() >= 2 && prev[0] == "C" && prev[1] == " ") continue
+    return false
+  }
+  return true
+}
+
+fn threwPoly(blk) {
+  var ok = false
+  try {
+    blk()
+  } catch {
+    "GfxPoly" : ok = true
+  }
+  return ok
+}
+
+fn threwTbl(blk) {
+  var ok = false
+  try {
+    blk()
+  } catch {
+    "GfxClrTblLen" : ok = true
+  }
+  return ok
+}
+
+/* ---- triangle: one fan face, +z normal ---- */
+var tri = Polygon([[0, 0, 0], [1, 0, 0], [0, 1, 0]], color=Red)
+expect(tri.position.dimensions()[1] == 3, "triangle vertex count")
+var n = tri.normal()
+expect(approx(n[0], 0) && approx(n[1], 0) && approx(n[2], 1), "+z winding")
+var tc = tri.toTriangleComplex()
+expect(tc.clss() == TriangleComplex, "tessellates to TriangleComplex")
+expect(tc.connectivity.dimensions()[1] == 1, "triangle: one face")
+var fi = tc.faceIndices(0)
+expect(fi.count() == 3 && fi[0] == 0 && fi[1] == 1 && fi[2] == 2, "fan winding 0 1 2")
+expect(approx(tc.normals.column(0)[2], 1), "flat vertex normals")
+
+/* ---- reverse winding flips the normal ---- */
+var flip = Polygon([[0, 0, 0], [0, 1, 0], [1, 0, 0]], color=Blue)
+var nf = flip.normal()
+expect(approx(nf[0], 0) && approx(nf[1], 0) && approx(nf[2], -1), "reversed winding → -z")
+
+/* ---- square: two fan faces ---- */
+var sq = Polygon([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], color=Green)
+expect(sq.toTriangleComplex().connectivity.dimensions()[1] == 2, "square: two triangles")
+expect(approx(sq.normal()[2], 1), "square +z")
+
+/* ---- ColorTable length ---- */
+var tbl = ColorTable(Matrix([[1, 0, 0], [0, 1, 0], [0, 0, 1]]))
+var pT = Polygon([[0, 0, 0], [1, 0, 0], [0, 1, 0]], color=tbl)
+expect(pT.color.count() == 3, "ColorTable per vertex")
+expect(threwTbl(fn () Polygon([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], color=tbl)),
+       "ColorTable length mismatch throws")
+
+/* ---- degenerate / non-convex / non-planar ---- */
+expect(threwPoly(fn () Polygon([[0, 0, 0], [1, 0, 0]])), "two vertices throws")
+expect(threwPoly(fn () Polygon([[0, 0, 0], [1, 0, 0], [2, 0, 0]])), "collinear throws")
+expect(threwPoly(fn () Polygon([[0, 0, 0], [1, 0, 0], [0.2, 0.2, 0], [0, 1, 0]])),
+       "concave throws")
+expect(threwPoly(fn () Polygon([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 1]])),
+       "non-planar throws")
+
+/* ---- display keeps Polygon; serializer tessellates to f ---- */
+var g = Graphics()
+var id = g.display(sq, flat=true)
+expect(g.findEntry(id).item.clss() == Polygon, "display stores Polygon")
+var buf = Buf()
+GraphicsSerializer(g, buf).serialize()
+expect(anyHas(buf.lines, "f"), "emits facets")
+expect(anyHas(buf.lines, "0 1 2"), "fan triangle 0 1 2")
+expect(anyHas(buf.lines, "0 2 3"), "fan triangle 0 2 3")
+expect(anyHas(buf.lines, "v \"xn\""), "uniform color uses xn")
+expect(anyExact(buf.lines, "M flat"), "flat polygon emits M flat")
+expect(anyExact(buf.lines, "M shaded"), "M shaded after the draw so shade does not leak")
+expect(colorImmediatelyBeforeEachDraw(buf.lines), "C immediately before d")
+
+var sdl = File(POVRaytracer(g).write("/tmp/testpolygon.pov")).readall()
+expect(contains(sdl, "mesh2"), "POV-Ray mesh2 for Polygon")
+expect(contains(sdl, "vertex_vectors { 4,"), "four vertices")
+expect(contains(sdl, "face_indices { 2,"), "two tessellated faces")
+
+/* ---- boing-like: translucent flat xn oval + vertex-colored mesh ---- */
+var oval = Polygon([
+  [1, 0, 0], [0.707, 0, 0.707], [0, 0, 1], [-0.707, 0, 0.707],
+  [-1, 0, 0], [-0.707, 0, -0.707], [0, 0, -1], [0.707, 0, -0.707]
+], color=Color(0.22, 0.22, 0.22).opacity(0.65))
+var checkers = TriangleComplex(
+  Matrix([[0, 1, 0], [0, 0, 1], [0, 0, 0]]),
+  Matrix([[0, 0, 0], [0, 0, 0], [1, 1, 1]]),
+  ColorTable(Matrix([[1, 0, 0], [1, 1, 1], [1, 0, 0]])),
+  Matrix([[1], [1], [1]])
+)
+var gB = Graphics()
+gB.display(oval, [0, 0, 0], scale=1.2, flat=true)
+gB.display(checkers, [0, 1, 0], scale=0.5, flat=true)
+var bufB = Buf()
+GraphicsSerializer(gB, bufB).serialize()
+expect(anyExact(bufB.lines, "v \"xn\""), "oval uniform color → xn")
+expect(anyExact(bufB.lines, "v \"xnc\""), "checkers keep vertex colors")
+expect(anyHas(bufB.lines, "0.22"), "oval grey albedo")
+expect(anyHas(bufB.lines, "0.65"), "oval opacity")
+expect(colorImmediatelyBeforeEachDraw(bufB.lines), "boing-like: C immediately before each d")
+
+/* ---- Sphere(flat=true) sandwiches M like TriangleComplex ---- */
+var gS = Graphics()
+gS.display(Sphere([0, 0, 0], 1, color=Color(0.22, 0.22, 0.22).opacity(0.65)),
+           [0, 0, 0], scale=0.5, flat=true)
+var bufS = Buf()
+GraphicsSerializer(gS, bufS).serialize()
+expect(anyExact(bufS.lines, "M flat"), "flat sphere emits M flat")
+expect(anyExact(bufS.lines, "M shaded"), "flat sphere restores M shaded")
+expect(colorImmediatelyBeforeEachDraw(bufS.lines), "flat sphere: C immediately before d")
+
+print "ok"

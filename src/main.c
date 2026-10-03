@@ -7,49 +7,108 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "morpho.h"
 #include "command.h"
 #include "display.h"
 #include "text.h"
+#include "listener.h"
+#include "mvversion.h"
+
+/** Next argv token or embedded -xVALUE; advances *i when consuming argv[++]. */
+static const char *main_optarg(const char *option, unsigned int *i, int argc, const char *argv[]) {
+    if (option[2]!='\0') return option+2;
+    if (*i+1<(unsigned int)argc) return argv[++(*i)];
+    return NULL;
+}
 
 int main(int argc, const char * argv[]) {
+    for (unsigned int i=1; i<(unsigned int)argc; i++) {
+        const char *option = argv[i];
+        if (option && (strcmp(option, "-v")==0 || strcmp(option, "--version")==0)) {
+            printf("morphoview %s protocol %d\n",
+                   MORPHOVIEW_VERSIONSTRING, MORPHOVIEW_PROTOCOL);
+            return 0;
+        }
+    }
+
+    morpho_initialize();
+    command_initialize();
+    listener_initialize();
     scene_initialize();
     display_initialize();
     text_initialize();
     bool temp = false;
     bool parsed = false;
-    
-    // Process arguments
+    bool listening = false;
+    /* Defer ZMQ start until after file parse so listener I/O cannot race staging. */
+    char listen_mode = 0; /* 'b' bind, 'c' connect, 0 none */
+    const char *listen_ep = NULL;
+
     const char *file=NULL;
-    for (unsigned int i=1; i<argc; i++) {
+    for (unsigned int i=1; i<(unsigned int)argc; i++) {
         const char *option = argv[i];
         if (argv[i] && option[0]=='-') {
             switch (option[1]) {
                 case 't': /* Temporary file; delete after */
                     temp=true;
                     break;
+                case 'b': /* Bind ZMQ PAIR (deferred) */
+                case 'c': /* Connect ZMQ PAIR (deferred) */
+                    listen_ep = main_optarg(option, &i, argc, argv);
+                    if (listen_ep) {
+                        listen_mode = option[1];
+                    } else {
+                        fprintf(stderr, "morphoview: -%c requires an endpoint.\n", option[1]);
+                    }
+                    break;
             }
         } else {
             file = option;
         }
     }
-    
-    // Parse a command file if provided
+
     if (file) {
         char *buffer = NULL;
         printf("Loading %s\n", file);
-        
+        fflush(stdout);
+
         if (command_loadinput(file, &buffer)) {
-            parsed=command_parse(buffer);
+            error err;
+            error_init(&err);
+            parsed=command_parse(buffer, &err);
+            if (!parsed) {
+                varray_char msg;
+                varray_charinit(&msg);
+                command_formaterror(&err, &msg);
+                fprintf(stderr, "morphoview: %s\n", msg.data ? msg.data : "");
+                varray_charclear(&msg);
+            }
+            error_clear(&err);
         }
-        
+
         if (buffer) MORPHO_FREE(buffer);
     }
-    
-    if (parsed) display_loop();
-    
+
+    if (parsed) command_process();
+
+    /* Start listener after file parse/process so staging is not concurrent. */
+    if (listen_mode == 'b' && listen_ep) {
+        listening = listener_bind(listen_ep);
+    } else if (listen_mode == 'c' && listen_ep) {
+        listening = listener_connect(listen_ep);
+    }
+
+    if (parsed || listening) {
+        display_loop();
+    }
+
+    listener_finalize();
+
+    scene_finalize();
     text_finalize();
     display_finalize();
-    scene_finalize();
-    
+    command_finalize();
+    morpho_finalize();
+
     if (temp && file) command_removefile(file);
 }

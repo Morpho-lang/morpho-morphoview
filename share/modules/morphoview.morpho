@@ -1,0 +1,255 @@
+/* ***************************************************************
+ * MorphoView
+ * =========
+ * Show and View for the GLFW / OpenGL morphoview binary. 
+ **************************************************************** */
+
+/* ----------------------------------------------------------------
+ * Example usage:
+ *    Show(g)                        // temp file + morphoview -t
+ *    var v = View(scene)            // open + listen
+ *    v.open(commands)               // raw morphoview protocol
+ *    scene.move(id, ...)            // pose
+ *    scene.recolor(id, ...)         // recolor
+ *    scene.morph(id, item)          // morph item id
+ *    v.poll(timeoutms=0)
+ *    v.wait(sessiontimeout=1500)
+ *    v.close()
+ * ---------------------------------------------------------------- */
+
+import morphoviewclient
+import zeromq
+
+// Error messages
+var _mvpmold = Error("MvPmOld", "morphopm is too old (unrecognized path command); please upgrade morphopm.")
+var _mvold = Error("MvOld", "morphoview is too old; please rebuild or upgrade morphoview.")
+
+/* ----------------------------------------------------------------
+ * MorphoViewFinder
+ *
+ * Locate the morphoview executable.
+ * ---------------------------------------------------------------- */
+
+class MorphoViewFinder {
+  init() {
+    self.cached = nil
+    self.ver = nil
+    self.verQueried = false
+    self.exe = System.platform()=="windows" ? "morphoview.exe" : "morphoview"
+  }
+
+  find() { // Path to the morphoview executable
+    if (!isnil(self.cached)) return self.cached
+
+    var hit = self._findLocal()
+    if (isnil(hit)) hit = self._findPackages()
+    if (isnil(hit)) hit = self._findMorphoPM()
+    if (isnil(hit)) hit = self._findPath()
+    if (isnil(hit)) hit = self.exe
+
+    self.cached = hit
+    return hit
+  }
+
+  version() { // Extract version string from morphoview -v
+    if (self.verQueried) return self.ver
+    self.verQueried = true
+    var bin = self.find()
+    var r = System.subprocess("\"${bin}\" -v")
+    if (r["exitstatus"]!=0) return nil
+    self.ver = self._parseVersion(r["stdout"].split("\n")[0])
+    return self.ver
+  }
+
+  _parseVersion(line) { // morphoview X.Y.Z protocol N
+    if (isnil(line) || line.count()==0) return nil
+    var toks = []
+    for (p in line.split(" ")) {
+      if (p.count()>0) toks.append(p)
+    }
+    if (toks.count() < 4) return nil
+    if (toks[0] != "morphoview") return nil
+    var ver = toks[1]
+    if (ver.count()==0) return nil
+    if (toks[2] != "protocol") return nil
+    var proto = Int(Float(toks[3]))
+    return { "version": ver, "protocol": proto }
+  }
+
+  _haveExe(bindir) { // Does bindir contain the morphoview executable?
+    return Folder.isFolder(bindir) &&
+           Folder.contents(bindir).contains(self.exe)
+  }
+
+  _fromRoot(root) { // root/bin/morphoview, or nil
+    if (isnil(root) || root.count()==0) return nil
+    var bindir = Folder.normalizePath("${root}/bin")
+    if (!self._haveExe(bindir)) return nil
+    return Folder.normalizePath("${bindir}/${self.exe}")
+  }
+
+  _isPackageRoot(dir) { // Checkout / package with share/modules/morphoview.morpho
+    var mods = Folder.normalizePath("${dir}/share/modules")
+    return Folder.isFolder(mods) &&
+           Folder.contents(mods).contains("morphoview.morpho")
+  }
+
+  _findLocal() { // CWD and parents: a local checkout beats /usr/local and morphopm
+    var dir = System.workingfolder()
+    for (i in 1..8) {
+      if (self._isPackageRoot(dir)) {
+        var hit = self._fromRoot(dir)
+        if (!isnil(hit)) return hit
+      }
+      var parts = dir.split("/\\")
+      if (parts.count() < 2) break
+      var parent = String.join(parts[0...parts.count()-1], "/")
+      if (parent.count()==0 || parent == dir) break
+      dir = parent
+    }
+    return nil
+  }
+
+  _findPackages() { // Dev checkouts listed in ~/.morphopackages
+    if (!Folder.contents(System.homefolder()).contains(".morphopackages")) return nil
+    for (p in File(Folder.normalizePath("${System.homefolder()}/.morphopackages")).lines()) {
+      if (!p.split("/\\").contains("morpho-morphoview")) continue
+      var hit = self._fromRoot(p)
+      if (!isnil(hit)) return hit
+    }
+    return nil
+  }
+
+  _findMorphoPM() { // morphopm install (often a system prefix)
+    var cmd = System.platform()=="windows" ? "where morphopm" : "command -v morphopm"
+    if (System.subprocess(cmd)["exitstatus"]!=0) return nil
+    var line = System.subprocess("morphopm path morphoview")["stdout"].split("\n")[0]
+    var parts = line.split("'")
+    var code = (parts.count()>1) ? parts[1] : ""
+    if (code == "ErrMorphoPMUnrcgnzd") _mvpmold.throw()
+    return self._fromRoot(line)
+  }
+
+  _findPath() { // PATH, resolved to an absolute path if possible
+    var cmd = System.platform()=="windows" ? "where ${self.exe}" : "command -v ${self.exe}"
+    var which = System.subprocess(cmd)
+    if (which["exitstatus"]!=0) return nil
+    var resolved = which["stdout"].split("\n")[0]
+    if (resolved.count()==0) return nil
+    return resolved
+  }
+}
+
+var _mvfinder = MorphoViewFinder()
+
+fn findMorphoViewBin() { // Path to the morphoview executable
+  var bin = _mvfinder.find()
+  if (isnil(_mvfinder.version())) _mvold.throw()
+  return bin
+}
+
+/* ----------------------------------------------------------------
+ * ZMQPairTransportMixin
+ *
+ * ZeroMQ PAIR transport for a live View session.
+ * ---------------------------------------------------------------- */
+
+class ZMQPairTransportMixin {
+  _transportInit() { // Empty transport
+    self._zmqSocket = nil
+    self._zmqPoller = nil
+    self._zmqEndpoint = nil
+  }
+
+  _transportBind(address="tcp://127.0.0.1:!") { // Bind a local PAIR socket
+    self._zmqSocket = ZMQPair()
+    self._zmqSocket.bind(address)
+    self._zmqEndpoint = self._zmqSocket.endpoint()
+    self._zmqPoller = ZMQPoller(self._zmqSocket)
+  }
+
+  _transportReady() { return !isnil(self._zmqSocket) } // Is the transport bound?
+
+  _transportEndpoint() { return self._zmqEndpoint } // Connection endpoint
+
+  _transportSend(message) { self._zmqSocket.send(message) } // Send a message
+
+  _transportPoll(timeoutms) { // Wait for a message
+    if (isnil(self._zmqPoller)) return false
+    return self._zmqPoller.wait(timeoutms)
+  }
+
+  _transportReceive() { return self._zmqSocket.receive() } // Receive a message
+
+  _transportClose() { // Unbind and drop the socket
+    if (!isnil(self._zmqSocket)) self._zmqSocket.unbind()
+    self._zmqSocket = nil
+    self._zmqPoller = nil
+    self._zmqEndpoint = nil
+  }
+}
+
+/* ----------------------------------------------------------------
+ * Show
+ *
+ * Launch morphoview passing the serialized graphic to a temporary file.
+ * ---------------------------------------------------------------- */
+
+class Show is MorphoViewShow {
+  _launch(g) { // Write a temp file and open GLFW morphoview
+    var isWindows = System.platform()=="windows"
+    var tempFolder = isWindows ?
+      "${System.homefolder()}/AppData/Local/Temp" : "/tmp"
+    var fname = self._randomAlphanumString(10)
+    var path = Folder.normalizePath("${tempFolder}/morpho${fname}.draw")
+    var out = File(path, "w")
+    var bin = findMorphoViewBin()
+
+    self.write(g, out)
+    out.close()
+
+    if (isWindows) {
+      /* start "" : first quoted token is the window title; /b : no extra console. */
+      system("start \"\" /b \"${bin}\" -t \"${path}\"")
+    } else {
+      system("\"${bin}\" -t \"${path}\" > /dev/null 2>&1 &")
+    }
+  }
+
+  _randomAlphanumString(n) { // Random filename fragment
+    var alpha="abcdefghijklmnopqrstuvwxyz0123456789"
+    var name=[]
+    var nalpha = alpha.count()
+    for (i in 1..n) name.append(alpha[randomint(nalpha)])
+    return String.join(name)
+  }
+}
+
+/* ----------------------------------------------------------------
+ * View
+ *
+ * Launch morphoview in interactive mode.
+ * ---------------------------------------------------------------- */
+
+class View is MorphoViewView with ZMQPairTransportMixin {
+  _spawn() { // Start GLFW morphoview
+    var bin = findMorphoViewBin()
+    var ep = self._transportEndpoint()
+    if (System.platform()=="windows") {
+      system("start \"\" /b \"${bin}\" -c \"${ep}\"")
+    } else {
+      /* Keep stderr: apply errors (U V length, missing object) used to vanish. */
+      system("\"${bin}\" -c \"${ep}\" >/dev/null &")
+    }
+  }
+
+  _kill() { // Kill the morphoview process
+    var ep = self._transportEndpoint()
+    if (isnil(ep)) return
+    if (System.platform()=="windows") {
+      system("powershell -NoProfile -Command \"Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'morphoview' -and $_.CommandLine -like '*-c*${ep}*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }\"")
+    } else {
+      system("pkill -9 -f \"morphoview -c ${ep}\" > /dev/null 2>&1")
+    }
+  }
+}

@@ -24,15 +24,19 @@
 #include <GLFW/glfw3.h>
 #pragma clang diagnostic pop
 
-
+#ifdef _WIN32
+#define DISPLAY_DEFAULTWIDTH 800
+#define DISPLAY_DEFAULTHEIGHT 800
+#else
 #define DISPLAY_DEFAULTWIDTH 480
 #define DISPLAY_DEFAULTHEIGHT 480
+#endif
 
 #define DISPLAY_DEFAULTTITLE "Morpho"
 
 typedef GLFWwindow windowref;
 
-/** Display object corresponds to a discrete window */
+/** Display object corresponds to a window. */
 typedef struct sdisplay {
     struct sdisplay *next; /** Linked list */
     
@@ -51,12 +55,23 @@ typedef struct sdisplay {
     } state; /** Current action */
     
     mat4x4 view; /** Current view matrix for window */
+
+    bool view_fitted;
+    bool view_user_modified;
+    float ortho_near;
+    float ortho_far;
     
     renderer render;
 } display;
 
 display *display_open(scene *s);
+display *display_findforscene(scene *s);
 void display_setwindowtitle(display *d, char *title);
+void display_requestclose(display *d);
+void display_requestcloseall(void);
+bool display_anyopen(void);
+void display_fit(display *d);
+void display_prepareall(void); /**< Upload scenes marked changed since last prepare */
 
 void display_loop(void);
 
