@@ -171,6 +171,6 @@ void render_clear(renderer *r);
 void render_preparescene(renderer *r, scene *s);
 /** Upload same-length vertex data; false if no prepared buffer exists. */
 bool render_updateobjectvertices(renderer *r, scene *s, int objectid);
-void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s);
+void render_render(renderer *r, float aspectratio, mat4x4 view, float znear, float zfar, scene *s);
 
 #endif /* render_h */

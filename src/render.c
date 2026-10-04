@@ -1392,7 +1392,7 @@ static bool render_walk_geometry(renderer *r, scene *s, mat4x4 view, rendergeopa
 }
 
 /** Draw one frame: opaque pass, sorted transparent pass, then text. */
-void render_render(renderer *r, float aspectratio, mat4x4 view, float near, float far, scene *s) {
+void render_render(renderer *r, float aspectratio, mat4x4 view, float znear, float zfar, scene *s) {
     /* Clear the display */
     if (s) {
         glClearColor(s->background[0], s->background[1], s->background[2], 1.0f);
@@ -1405,7 +1405,7 @@ void render_render(renderer *r, float aspectratio, mat4x4 view, float near, floa
     mat3d_copy4x4(view, r->frameview);
 
     mat4x4 proj;
-    mat3d_ortho(NULL, proj, -1.0*aspectratio, 1.0*aspectratio, -1.0, 1.0, near, far);
+    mat3d_ortho(NULL, proj, -1.0*aspectratio, 1.0*aspectratio, -1.0, 1.0, znear, zfar);
     mat3d_copy4x4(proj, r->frameproj);
     render_uploadlights(r, s, view);
 

@@ -200,13 +200,13 @@ void mat3d_rotate(mat4x4 in, vec3 axis, float angle, mat4x4 out) {
 }
 
 /** Orthographic projection: out = P*in (or P if in is NULL). in and out may alias. */
-void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float near, float far) {
+void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float znear, float zfar) {
     mat4x4 pr = { 2.0f/(right-left), 0.0f, 0.0f, 0.0f, // Col major order!
                   0.0f, 2.0f/(top-bottom), 0.0f, 0.0f,
-                  0.0f, 0.0f, -2.0f/(far-near), 0.0f,
+                  0.0f, 0.0f, -2.0f/(zfar-znear), 0.0f,
                   -(right+left)/(right-left),
                   -(top+bottom)/(top-bottom),
-                  -(far+near)/(far-near), 1.0f };
+                  -(zfar+znear)/(zfar-znear), 1.0f };
     mat4x4 in2;
     if (in==out) mat3d_copy4x4(in, in2); /* Use a copy if in and out are the same matrix */
     
@@ -216,11 +216,11 @@ void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, f
 }
 
 /** Perspective (frustum) projection: out = P*in (or P if in is NULL). in and out may alias. */
-void mat3d_frustum(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float near, float far) {
-    mat4x4 pr = { 2*near/(right-left), 0.0f, 0.0f, 0.0f, // Col major order!
-                  0.0f, 2*near/(top-bottom), 0.0f, 0.0f,
-                  (right+left)/(right-left), (top+bottom)/(top-bottom), -(far+near)/(far-near), -1.0f,
-                  0.0f, 0.0f, -2*far*near/(far-near), 0.0f };
+void mat3d_frustum(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float znear, float zfar) {
+    mat4x4 pr = { 2*znear/(right-left), 0.0f, 0.0f, 0.0f, // Col major order!
+                  0.0f, 2*znear/(top-bottom), 0.0f, 0.0f,
+                  (right+left)/(right-left), (top+bottom)/(top-bottom), -(zfar+znear)/(zfar-znear), -1.0f,
+                  0.0f, 0.0f, -2*zfar*znear/(zfar-znear), 0.0f };
     mat4x4 in2;
     if (in==out) mat3d_copy4x4(in, in2); /* Use a copy if in and out are the same matrix */
     

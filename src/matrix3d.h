@@ -35,7 +35,7 @@ void mat3d_scale(mat4x4 in, float scale, mat4x4 out);
 void mat3d_scale3(mat4x4 in, vec3 scale, mat4x4 out);
 void mat3d_rotate(mat4x4 in, vec3 axis, float angle, mat4x4 out);
 
-void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float near, float far);
-void mat3d_frustum(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float near, float far);
+void mat3d_ortho(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float znear, float zfar);
+void mat3d_frustum(mat4x4 in, mat4x4 out, float left, float right, float bottom, float top, float znear, float zfar);
 
 #endif /* matrix3d_h */
