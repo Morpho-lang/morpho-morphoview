@@ -4,24 +4,19 @@ Interactive scientific visualization application for the [morpho](https://github
 
 ## Installation
 
-To install this, clone this repository onto your computer in any convenient place:
+The `specialfn` package can be installed with the [morphopm](https://github.com/Morpho-lang/morpho-morphopm) package manager. Type the following into a terminal:
 
-    git clone https://github.com/morpho-lang/morpho-morphoview.git
+    morphopm install morphoview
 
-then add the location of this repository to your .morphopackages file.
+Use morphopm to locate the package and try some of the examples: 
 
-    echo PACKAGEPATH >> ~/.morphopackages
-    where PACKAGEPATH is the location of the git repository.
-
-You need to compile the extension, which you can do by navigating to the repository and typing:
-
-    cmake -S . -B build
-    cmake --build build --config Release
-    cmake --install build --config Release
-
-The binary is installed locally within the package. Dependencies include [GLFW](https://www.glfw.org), [FreeType](https://freetype.org), and [czmq](https://github.com/zeromq/czmq) (`brew install czmq` / `apt install libczmq-dev`).
+    cd "$(morphopm path morphoview)"
+    cd examples
+    morpho6 plotripple.morpho
 
 ## Usage
+
+Morphoview is typically used together with morpho's `graphics` modules:
 
     import morphoview
     import graphics
@@ -50,3 +45,32 @@ Viewer terminal app command line switches:
 * `-b <endpoint>` binds morphoview to a ZeroMQ PAIR socket
 * `-c <endpoint>` connects to a ZeroMQ endpoint (used by `View`).
 * `-t` unlinks a temp draw file on exit (used by `Show`).
+
+## Manual Installation
+
+You can also build morphoview manually for development purposes. To do so, first install dependencies, including [GLFW](https://www.glfw.org), [FreeType](https://freetype.org), and [czmq](https://github.com/zeromq/czmq). 
+
+On homebrew: 
+
+    brew install glfw freetype czmq
+
+On apt: 
+
+    sudo apt install libglfw3-dev libfreetype-dev libczmq-dev
+
+Then clone this repository onto your computer in any convenient place:
+
+    git clone https://github.com/morpho-lang/morpho-morphoview.git
+
+and add the location of this repository to your .morphopackages file:
+
+    echo PACKAGEPATH >> ~/.morphopackages
+    where PACKAGEPATH is the location of the git repository.
+
+You then need to compile the extension, which you can do by navigating to the repository and typing:
+
+    cmake -S . -B build
+    cmake --build build --config Release
+    cmake --install build --config Release
+
+The binary is installed locally within the package. 
