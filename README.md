@@ -38,11 +38,11 @@ Interactive, live updatable display of a `Scene`:
     g.move(id, [0.1, 0, 0])
     v.wait()
 
-Online help: `help morphoview` (package file in `share/help/`).
+Online help is available by typing `help morphoview` from within morpho in interactive mode.
 
-Viewer command language: [`docs/commandapi.md`](docs/commandapi.md).
+Information about the morphoview command language: [`docs/commandapi.md`](docs/commandapi.md).
 
-Viewer terminal app command line switches:
+Additional morphoview app command line switches:
 * `-v` / `--version` displays a version string. 
 * `-b <endpoint>` binds morphoview to a ZeroMQ PAIR socket
 * `-c <endpoint>` connects to a ZeroMQ endpoint (used by `View`).
