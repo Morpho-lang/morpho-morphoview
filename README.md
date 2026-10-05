@@ -6,7 +6,7 @@ Interactive scientific visualization application for the [morpho](https://github
 
 ## Installation
 
-The `specialfn` package can be installed with the [morphopm](https://github.com/Morpho-lang/morpho-morphopm) package manager. Type the following into a terminal:
+Morphoview can be installed with the [morphopm](https://github.com/Morpho-lang/morpho-morphopm) package manager. Type the following into a terminal:
 
     morphopm install morphoview
 
