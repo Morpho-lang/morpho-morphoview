@@ -1,3 +1,5 @@
+![Morpho](https://github.com/Morpho-lang/morpho-manual/blob/main/src/Figures/morphologosmall-white.png#gh-light-mode-only)![Morpho](https://github.com/Morpho-lang/morpho-manual/blob/main/src/Figures/morphologosmall-white.png#gh-dark-mode-only)
+
 # Morphoview 
 
 Interactive scientific visualization application for the [morpho](https://github.com/Morpho-lang/morpho) language. 
